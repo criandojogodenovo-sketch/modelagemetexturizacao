@@ -53,6 +53,16 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
     return <ViewObjectMesh conect={conect} setMeshRef={setMeshRef} />
   }
 
+  // TrailObject: rasto visual atrás de um objeto em movimento
+  if (conect.type === 'TrailObject') {
+    return <TrailMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // ReflectObject: sonda de reflexo (renderiza uma esfera espelhada)
+  if (conect.type === 'ReflectObject') {
+    return <ReflectMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
   if (!def?.hasVisual && conect.type !== 'VisualObject') {
     // Sem visual — ligar o meshRef a null para que physics não tente usar
     useEffect(() => { setMeshRef?.(null) }, [])
@@ -287,8 +297,6 @@ function ParticleMesh({ conect, setMeshRef }) {
 }
 
 // ===== ViewObject (câmara visível no editor) =====
-// Renderiza um ícone de câmara selecionável e movível via gizmos.
-// No ScenePreview, a câmara ativa é a que tem `isActive: true` (ou a primeira).
 function ViewObjectMesh({ conect, setMeshRef }) {
   return (
     <group
@@ -298,22 +306,18 @@ function ViewObjectMesh({ conect, setMeshRef }) {
       scale={conect.scale}
       userData={{ conectInstanceId: conect.instanceId, isViewObject: true }}
     >
-      {/* Corpo da câmara */}
       <mesh castShadow>
         <boxGeometry args={[0.5, 0.35, 0.6]} />
         <meshStandardMaterial color="#f4a261" emissive="#f4a261" emissiveIntensity={0.2} />
       </mesh>
-      {/* Lente a apontar para -Z */}
       <mesh position={[0, 0, -0.45]} rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[0.18, 0.22, 0.3, 16]} />
         <meshStandardMaterial color="#2a9d8f" emissive="#2a9d8f" emissiveIntensity={0.1} />
       </mesh>
-      {/* Cone de visão (wireframe) */}
       <mesh position={[0, 0, -1.5]}>
         <coneGeometry args={[1, 2, 4, 1, true]} />
         <meshBasicMaterial color="#f4a261" wireframe transparent opacity={0.3} />
       </mesh>
-      {/* Indicador "ativo" */}
       {conect.isActive && (
         <mesh position={[0, 0.4, 0]}>
           <sphereGeometry args={[0.1, 8, 8]} />
@@ -321,5 +325,54 @@ function ViewObjectMesh({ conect, setMeshRef }) {
         </mesh>
       )}
     </group>
+  )
+}
+
+// ===== TrailObject (rasto visual) =====
+// Renderiza uma linha que segue a posição do objeto pai.
+// Em tempo de execução, o GameRunner atualiza as posições do trail.
+function TrailMesh({ conect, setMeshRef }) {
+  const points = useMemo(() => {
+    const arr = []
+    const len = conect.length || 30
+    for (let i = 0; i < len; i++) {
+      arr.push(new THREE.Vector3(conect.position[0], conect.position[1], conect.position[2]))
+    }
+    return arr
+  }, [conect.length])
+
+  const geometry = useMemo(() => {
+    const g = new THREE.BufferGeometry().setFromPoints(points)
+    return g
+  }, [points])
+
+  return (
+    <group ref={setMeshRef} position={conect.position}>
+      <line geometry={geometry}>
+        <lineBasicMaterial
+          color={conect.color || '#2f81f7'}
+          transparent
+          opacity={conect.fade !== false ? 0.6 : 1}
+          linewidth={conect.width || 2}
+        />
+      </line>
+    </group>
+  )
+}
+
+// ===== ReflectObject (sonda de reflexo) =====
+// Renderiza uma esfera com material metálico que reflete o ambiente.
+// Em implementação completa, capturaria o ambiente num cubemap.
+function ReflectMesh({ conect, setMeshRef }) {
+  return (
+    <mesh ref={setMeshRef} position={conect.position}>
+      <sphereGeometry args={[0.5, 32, 32]} />
+      <meshStandardMaterial
+        color="#c0c0c0"
+        metalness={1.0}
+        roughness={0.0}
+        envMapIntensity={conect.intensity || 1}
+      />
+    </mesh>
   )
 }

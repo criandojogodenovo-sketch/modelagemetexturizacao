@@ -285,6 +285,38 @@ export function createPhysicsSystem(options = {}) {
     }
   }
 
+  // ===== Joints (constraints) entre dois corpos =====
+  function addJoint(jointConect) {
+    const targetA = bodies.get(jointConect.targetA)
+    const targetB = bodies.get(jointConect.targetB)
+    if (!targetA || !targetB) return null
+    const bodyA = targetA.body
+    const bodyB = targetB.body
+    let constraint
+    switch (jointConect.jointType) {
+      case 'hinge':
+        constraint = new CANNON.HingeConstraint(bodyA, bodyB, {
+          pivotA: new CANNON.Vec3(0, 0, 0),
+          pivotB: new CANNON.Vec3(0, 0, 0),
+          axisA: new CANNON.Vec3(0, 1, 0),
+          axisB: new CANNON.Vec3(0, 1, 0),
+        })
+        break
+      case 'ball':
+        constraint = new CANNON.PointToPointConstraint(bodyA, new CANNON.Vec3(0,0,0), bodyB, new CANNON.Vec3(0,0,0))
+        break
+      case 'spring':
+        constraint = new CANNON.DistanceConstraint(bodyA, bodyB, 2, (jointConect.stiffness || 100) / 1000)
+        break
+      case 'fixed':
+      default:
+        constraint = new CANNON.LockConstraint(bodyA, bodyB)
+        break
+    }
+    world.addConstraint(constraint)
+    return constraint
+  }
+
   return {
     world,
     bodies,
@@ -294,6 +326,7 @@ export function createPhysicsSystem(options = {}) {
     applyForce,
     movePersonal,
     jumpPersonal,
+    addJoint,
     update,
     dispose,
     getStats,

@@ -12,7 +12,7 @@
  *  - Forward ref do mesh para o parent usar com TransformControls
  *  - Suportar skeleton (ossos) para animação
  */
-import { forwardRef, useEffect, useMemo, useRef } from 'react'
+import { forwardRef, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { PRIMITIVES } from '../../utils/primitives'
 import {
@@ -21,6 +21,7 @@ import {
   arrayGeometry,
   solidifyGeometry,
 } from '../../utils/meshOperations'
+import { compositeTextureLayers } from '../../utils/textureCompositor'
 
 // Cache de texturas carregadas a partir de dataURLs
 const textureCache = new Map()
@@ -149,6 +150,23 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     mat.needsUpdate = true
     return mat
   }, [obj.material, obj.type])
+
+  // ----- Compositing de camadas de textura (assíncrono) -----
+  // Quando há múltiplas camadas, compõe-as num único mapa e aplica ao material.
+  useEffect(() => {
+    const m = obj.material
+    if (!m || !m.layers || m.layers.length === 0) return
+    let cancelled = false
+    compositeTextureLayers(m.layers, 512).then((composedTex) => {
+      if (cancelled || !composedTex) return
+      composedTex.repeat.set(m.repeat?.[0] ?? 1, m.repeat?.[1] ?? 1)
+      composedTex.offset.set(m.offset?.[0] ?? 0, m.offset?.[1] ?? 0)
+      // Se já há um map simples, as camadas substituem-no
+      material.map = composedTex
+      material.needsUpdate = true
+    })
+    return () => { cancelled = true }
+  }, [obj.material?.layers, obj.material?.repeat, obj.material?.offset, material])
 
   // ----- Atualização de repeat/offset em tempo real -----
   useEffect(() => {
