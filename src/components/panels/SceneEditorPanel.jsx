@@ -35,6 +35,8 @@ export default function SceneEditorPanel({ onClose }) {
   const updateGameCamera = useStore((s) => s.updateGameCamera)
   const openScenePreview = useStore((s) => s.openScenePreview)
   const setFlirScriptTarget = useStore((s) => s.setFlirScriptTarget)
+  const toggleConectsWindow = useStore((s) => s.toggleConectsWindow)
+  const openGameExport = useStore((s) => s.openGameExport)
   const toast = useStore((s) => s.toast)
 
   const activeScene = scenes.find((s) => s.id === activeSceneId)
@@ -60,16 +62,32 @@ export default function SceneEditorPanel({ onClose }) {
         </div>
 
         <div className="panel-body">
-          {/* Botão de preview */}
+          {/* Botões de ação principais */}
           <div className="panel-section">
+            <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+              <button
+                onClick={openScenePreview}
+                className="primary"
+                style={{ flex: 1 }}
+                disabled={!activeScene}
+                title="Pré-visualizar cena em ecrã cheio"
+              >
+                ▶ Pré-visualizar
+              </button>
+              <button
+                onClick={openGameExport}
+                title="Exportar jogo (build standalone)"
+                disabled={!activeScene}
+              >
+                🎮 Exportar
+              </button>
+            </div>
             <button
-              onClick={openScenePreview}
-              className="primary"
+              onClick={toggleConectsWindow}
               style={{ width: '100%' }}
-              disabled={!activeScene || activeScene.objects.length === 0}
-              title="Pré-visualizar cena em ecrã cheio"
+              title="Abrir janela de Conects (física, visual, UI, etc.)"
             >
-              ▶ Pré-visualizar Cena
+              🧩 Conects
             </button>
           </div>
 
@@ -211,7 +229,12 @@ export default function SceneEditorPanel({ onClose }) {
             </div>
           )}
 
-          {/* 4. Configuração da câmara de jogo */}
+          {/* 4. Conects na cena ativa */}
+          {activeScene && (
+            <ConectsList scene={activeScene} />
+          )}
+
+          {/* 5. Configuração da câmara de jogo */}
           {activeScene && (
             <GameCameraEditor scene={activeScene} onUpdate={updateGameCamera} />
           )}
@@ -335,6 +358,73 @@ function GameCameraEditor({ scene, onUpdate }) {
         A câmara de jogo é mostrada como wireframe laranja no viewport.
         Em "Pré-visualizar Cena", a vista usa esta câmara.
       </div>
+    </div>
+  )
+}
+
+// Lista de Conects na cena ativa
+function ConectsList({ scene }) {
+  const selectedConectId = useStore((s) => s.selectedConectId)
+  const selectConect = useStore((s) => s.selectConect)
+  const removeConectFromScene = useStore((s) => s.removeConectFromScene)
+  const duplicateConect = useStore((s) => s.duplicateConect)
+  const setFlirScriptTarget = useStore((s) => s.setFlirScriptTarget)
+  const conects = scene.conects || []
+
+  return (
+    <div className="panel-section">
+      <h4>Conects na Cena ({conects.length})</h4>
+      {conects.length === 0 ? (
+        <div className="empty-state small">
+          Sem conects. Clica em "🧩 Conects" para adicionar.
+        </div>
+      ) : (
+        <div className="outliner">
+          {conects.map((conect) => {
+            const isSelected = conect.instanceId === selectedConectId
+            return (
+              <div
+                key={conect.instanceId}
+                className={`outliner-item ${isSelected ? 'selected' : ''}`}
+                onClick={() => selectConect(conect.instanceId)}
+              >
+                <span className="icon-dot" style={{ background: isSelected ? 'var(--accent)' : 'var(--text-muted)' }} />
+                <span
+                  style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  title={`${conect.type} — ${conect.name}`}
+                >
+                  {conect.name}
+                  {conect.flirScript && <span className="tag accent" style={{ marginLeft: 4 }}>script</span>}
+                </span>
+                <div className="actions">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setFlirScriptTarget(scene.id, conect.instanceId) }}
+                    title="FlirScript"
+                    style={{ padding: '2px 4px', fontSize: 10 }}
+                  >
+                    🧩
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); duplicateConect(conect.instanceId) }}
+                    title="Duplicar"
+                    style={{ padding: '2px 4px' }}
+                  >
+                    <IconDuplicate width={11} height={11} />
+                  </button>
+                  <button
+                    className="danger"
+                    onClick={(e) => { e.stopPropagation(); removeConectFromScene(conect.instanceId) }}
+                    title="Apagar"
+                    style={{ padding: '2px 4px' }}
+                  >
+                    <IconTrash width={11} height={11} />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

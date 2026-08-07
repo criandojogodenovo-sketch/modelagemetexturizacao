@@ -1,0 +1,695 @@
+/**
+ * taxonomy.js — definição central de todos os Conects disponíveis.
+ *
+ * Em FlirScript engine, um "Conect" é a unidade base de cena (similar a
+ * "node" na Godot ou "GameObject" na Unity). Cada Conect tem um tipo
+ * (RigidObject, VisualObject, etc.) com propriedades específicas.
+ *
+ * Esta taxonomy alimenta:
+ *  - A janela de Conects (lista + categorias + pesquisa)
+ *  - O painel de propriedades dinâmico (cada tipo tem campos diferentes)
+ *  - O runtime (cada tipo sabe como instanciar-se e atualizar-se)
+ *
+ * Estrutura de cada Conect:
+ *  {
+ *    type: 'RigidObject',         // identificador único
+ *    label: 'Rigid Object',       // nome visível
+ *    category: 'physics',         // categoria para agrupar
+ *    icon: '📦',                  // emoji ou ícone
+ *    description: '...',          // descrição curta
+ *    defaults: { ... },           // propriedades predefinidas
+ *    properties: [ ... ],         // esquema de propriedades para o painel
+ *    hasPhysics: true,            // participa no mundo de física?
+ *    hasVisual: true,             // tem malha visível?
+ *    flirScriptable: true,        // pode ter script FlirScript?
+ *  }
+ *
+ * Categorias: physics, visual, camera_audio, environment, ui, gameplay, organization
+ */
+
+export const CONECT_CATEGORIES = [
+  { id: 'physics', label: 'Física', icon: '⚙️', color: '#f4a261' },
+  { id: 'visual', label: 'Visual', icon: '🎨', color: '#2a9d8f' },
+  { id: 'camera_audio', label: 'Câmara e Áudio', icon: '📷', color: '#2f81f7' },
+  { id: 'environment', label: 'Ambiente', icon: '🌍', color: '#3fb950' },
+  { id: 'ui', label: 'Interface (UI)', icon: '📱', color: '#8957e5' },
+  { id: 'gameplay', label: 'Gameplay', icon: '🎯', color: '#d29922' },
+  { id: 'organization', label: 'Organização', icon: '📁', color: '#6e7681' },
+]
+
+// Helper para gerar esquema de propriedade
+const prop = (key, label, type, defaultValue, extra = {}) => ({
+  key, label, type, default: defaultValue, ...extra,
+})
+
+export const CONECT_TAXONOMY = [
+  // ============ FÍSICA ============
+  {
+    type: 'RigidObject',
+    label: 'Rigid Object',
+    category: 'physics',
+    icon: '📦',
+    description: 'Corpo com física real: gravidade, massa, atrito, ressalto',
+    hasPhysics: true,
+    hasVisual: true,
+    flirScriptable: true,
+    defaults: {
+      mass: 1,
+      friction: 0.3,
+      restitution: 0.4,
+      linearDamping: 0.01,
+      angularDamping: 0.01,
+      fixedRotation: false,
+    },
+    properties: [
+      prop('mass', 'Massa', 'number', 1, { min: 0, max: 100, step: 0.1 }),
+      prop('friction', 'Atrito', 'number', 0.3, { min: 0, max: 1, step: 0.05 }),
+      prop('restitution', 'Ressalto', 'number', 0.4, { min: 0, max: 1, step: 0.05 }),
+      prop('linearDamping', 'Amortecimento linear', 'number', 0.01, { min: 0, max: 1, step: 0.01 }),
+      prop('angularDamping', 'Amortecimento angular', 'number', 0.01, { min: 0, max: 1, step: 0.01 }),
+      prop('fixedRotation', 'Fixar rotação', 'boolean', false),
+    ],
+  },
+  {
+    type: 'StaticObject',
+    label: 'Static Object',
+    category: 'physics',
+    icon: '🧱',
+    description: 'Não se move, colisão fixa (chão, paredes, obstáculos)',
+    hasPhysics: true,
+    hasVisual: true,
+    flirScriptable: true,
+    defaults: {
+      mass: 0,
+      friction: 0.6,
+      restitution: 0.1,
+    },
+    properties: [
+      prop('friction', 'Atrito', 'number', 0.6, { min: 0, max: 1, step: 0.05 }),
+      prop('restitution', 'Ressalto', 'number', 0.1, { min: 0, max: 1, step: 0.05 }),
+    ],
+  },
+  {
+    type: 'StopObject',
+    label: 'Stop Object (Kinematic)',
+    category: 'physics',
+    icon: '🛑',
+    description: 'Não reage à física mas pode ser movido por FlirScript (plataformas, portas)',
+    hasPhysics: true,
+    hasVisual: true,
+    flirScriptable: true,
+    defaults: {
+      friction: 0.4,
+      restitution: 0.2,
+    },
+    properties: [
+      prop('friction', 'Atrito', 'number', 0.4, { min: 0, max: 1, step: 0.05 }),
+      prop('restitution', 'Ressalto', 'number', 0.2, { min: 0, max: 1, step: 0.05 }),
+    ],
+  },
+  {
+    type: 'PersonalObject',
+    label: 'Personal Object (Jogador)',
+    category: 'physics',
+    icon: '🚶',
+    description: 'Controlador de personagem/jogador com deteção de chão, andar e saltar',
+    hasPhysics: true,
+    hasVisual: true,
+    flirScriptable: true,
+    defaults: {
+      mass: 1,
+      moveSpeed: 5,
+      jumpForce: 8,
+      canJump: true,
+      grounded: false,
+      fixedRotation: true,
+    },
+    properties: [
+      prop('moveSpeed', 'Velocidade de movimento', 'number', 5, { min: 0.5, max: 20, step: 0.5 }),
+      prop('jumpForce', 'Força de salto', 'number', 8, { min: 1, max: 20, step: 0.5 }),
+      prop('canJump', 'Pode saltar', 'boolean', true),
+      prop('fixedRotation', 'Fixar rotação', 'boolean', true),
+    ],
+  },
+  {
+    type: 'TriggerObject',
+    label: 'Trigger Object',
+    category: 'physics',
+    icon: '🎯',
+    description: 'Zona que deteta entrada/saída sem colisão física (liga a eventos FlirScript)',
+    hasPhysics: true,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      size: [2, 2, 2],
+      isTrigger: true,
+    },
+    properties: [
+      prop('size', 'Tamanho (X,Y,Z)', 'vec3', [2, 2, 2]),
+    ],
+  },
+  {
+    type: 'JointObject',
+    label: 'Joint Object',
+    category: 'physics',
+    icon: '🔗',
+    description: 'Junta/articulação entre dois objetos (dobradiças, correntes, molas)',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      jointType: 'hinge', // hinge | ball | spring | fixed
+      targetA: null,
+      targetB: null,
+      stiffness: 100,
+      damping: 5,
+    },
+    properties: [
+      prop('jointType', 'Tipo de junta', 'select', 'hinge', { options: ['hinge', 'ball', 'spring', 'fixed'] }),
+      prop('targetA', 'Objeto A', 'objectRef', null),
+      prop('targetB', 'Objeto B', 'objectRef', null),
+      prop('stiffness', 'Rigidez', 'number', 100, { min: 1, max: 1000, step: 10 }),
+      prop('damping', 'Amortecimento', 'number', 5, { min: 0, max: 100, step: 1 }),
+    ],
+  },
+
+  // ============ VISUAL ============
+  {
+    type: 'VisualObject',
+    label: 'Visual Object',
+    category: 'visual',
+    icon: '🎨',
+    description: 'Malha 3D visível (usa modelos criados no Modo Modelagem)',
+    hasPhysics: false,
+    hasVisual: true,
+    flirScriptable: true,
+    defaults: {
+      sourceObjectId: null, // referência a um objeto do catálogo
+    },
+    properties: [
+      prop('sourceObjectId', 'Modelo do catálogo', 'objectRef', null),
+    ],
+  },
+  {
+    type: 'LuminousObject',
+    label: 'Luminous Object (Luz)',
+    category: 'visual',
+    icon: '💡',
+    description: 'Fonte de luz: pontual, direcional ou foco, com cor e intensidade',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      lightType: 'point', // point | directional | spot
+      color: '#ffffff',
+      intensity: 1.5,
+      distance: 10,
+      castShadow: true,
+    },
+    properties: [
+      prop('lightType', 'Tipo de luz', 'select', 'point', { options: ['point', 'directional', 'spot'] }),
+      prop('color', 'Cor', 'color', '#ffffff'),
+      prop('intensity', 'Intensidade', 'number', 1.5, { min: 0, max: 10, step: 0.1 }),
+      prop('distance', 'Distância', 'number', 10, { min: 0, max: 100, step: 1 }),
+      prop('castShadow', 'Projeta sombras', 'boolean', true),
+    ],
+  },
+  {
+    type: 'ReflectObject',
+    label: 'Reflect Object (Sonda)',
+    category: 'visual',
+    icon: '🪞',
+    description: 'Sonda de reflexo/ambiente para materiais realistas',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: false,
+    defaults: {
+      resolution: 256,
+      intensity: 1,
+    },
+    properties: [
+      prop('resolution', 'Resolução', 'number', 256, { min: 64, max: 1024, step: 64 }),
+      prop('intensity', 'Intensidade', 'number', 1, { min: 0, max: 5, step: 0.1 }),
+    ],
+  },
+  {
+    type: 'ParticleObject',
+    label: 'Particle Object',
+    category: 'visual',
+    icon: '✨',
+    description: 'Sistema de partículas (fumo, fogo, faíscas, chuva)',
+    hasPhysics: false,
+    hasVisual: true,
+    flirScriptable: true,
+    defaults: {
+      maxParticles: 100,
+      emissionRate: 10,
+      particleLife: 2,
+      particleSize: 0.1,
+      particleSpeed: 1,
+      color: '#ffaa44',
+      spread: 1,
+      gravity: 0,
+    },
+    properties: [
+      prop('maxParticles', 'Máx. partículas', 'number', 100, { min: 1, max: 1000, step: 10 }),
+      prop('emissionRate', 'Emissão/seg', 'number', 10, { min: 1, max: 100, step: 1 }),
+      prop('particleLife', 'Vida (s)', 'number', 2, { min: 0.1, max: 10, step: 0.1 }),
+      prop('particleSize', 'Tamanho', 'number', 0.1, { min: 0.01, max: 2, step: 0.01 }),
+      prop('particleSpeed', 'Velocidade', 'number', 1, { min: 0, max: 10, step: 0.1 }),
+      prop('color', 'Cor', 'color', '#ffaa44'),
+      prop('spread', 'Dispersão', 'number', 1, { min: 0, max: 5, step: 0.1 }),
+      prop('gravity', 'Gravidade', 'number', 0, { min: -5, max: 5, step: 0.1 }),
+    ],
+  },
+  {
+    type: 'TrailObject',
+    label: 'Trail Object (Rasto)',
+    category: 'visual',
+    icon: '💫',
+    description: 'Rasto visual atrás de um objeto em movimento',
+    hasPhysics: false,
+    hasVisual: true,
+    flirScriptable: true,
+    defaults: {
+      length: 30,
+      width: 0.2,
+      color: '#2f81f7',
+      fade: true,
+      followTarget: null,
+    },
+    properties: [
+      prop('length', 'Comprimento', 'number', 30, { min: 5, max: 100, step: 5 }),
+      prop('width', 'Largura', 'number', 0.2, { min: 0.01, max: 2, step: 0.01 }),
+      prop('color', 'Cor', 'color', '#2f81f7'),
+      prop('fade', 'Desvanecer', 'boolean', true),
+      prop('followTarget', 'Seguir objeto', 'objectRef', null),
+    ],
+  },
+
+  // ============ CÂMARA E ÁUDIO ============
+  {
+    type: 'ViewObject',
+    label: 'View Object (Câmara)',
+    category: 'camera_audio',
+    icon: '📷',
+    description: 'Câmara de jogo (perspetiva/ortográfica, pode seguir outro objeto)',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      cameraType: 'perspective', // perspective | orthographic
+      fov: 60,
+      orthoSize: 5,
+      near: 0.1,
+      far: 200,
+      followTarget: null, // instanceId para seguir
+      followMode: 'third', // third | top | side | none
+      followDistance: 6,
+      followHeight: 3,
+    },
+    properties: [
+      prop('cameraType', 'Tipo', 'select', 'perspective', { options: ['perspective', 'orthographic'] }),
+      prop('fov', 'FOV', 'number', 60, { min: 20, max: 120, step: 1 }),
+      prop('orthoSize', 'Tamanho ortográfico', 'number', 5, { min: 1, max: 30, step: 0.5 }),
+      prop('followTarget', 'Seguir objeto', 'objectRef', null),
+      prop('followMode', 'Modo de seguir', 'select', 'third', { options: ['none', 'third', 'top', 'side'] }),
+      prop('followDistance', 'Distância', 'number', 6, { min: 1, max: 30, step: 0.5 }),
+      prop('followHeight', 'Altura', 'number', 3, { min: 0, max: 20, step: 0.5 }),
+    ],
+  },
+  {
+    type: 'SoundObject',
+    label: 'Sound Object (Som)',
+    category: 'camera_audio',
+    icon: '🔊',
+    description: 'Fonte de som/música com volume, loop e autoplay',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      url: '',
+      volume: 1,
+      loop: false,
+      autoplay: false,
+      isMusic: false, // música de fundo (fade in/out ao mudar de cena)
+      spatial: false, // som 3D posicional
+      maxDistance: 20,
+    },
+    properties: [
+      prop('url', 'URL do som', 'text', ''),
+      prop('volume', 'Volume', 'number', 1, { min: 0, max: 1, step: 0.05 }),
+      prop('loop', 'Repetir', 'boolean', false),
+      prop('autoplay', 'Tocar automaticamente', 'boolean', false),
+      prop('isMusic', 'Música de fundo', 'boolean', false),
+      prop('spatial', 'Som 3D', 'boolean', false),
+      prop('maxDistance', 'Distância máx', 'number', 20, { min: 1, max: 100, step: 1 }),
+    ],
+  },
+
+  // ============ AMBIENTE ============
+  {
+    type: 'SkyObject',
+    label: 'Sky Object (Céu)',
+    category: 'environment',
+    icon: '🌤️',
+    description: 'Céu/ambiente (cor, gradiente ou HDRI)',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: false,
+    defaults: {
+      skyType: 'gradient', // solid | gradient | hdri
+      topColor: '#1a4d8f',
+      bottomColor: '#aac4e8',
+      hdriUrl: null,
+    },
+    properties: [
+      prop('skyType', 'Tipo', 'select', 'gradient', { options: ['solid', 'gradient', 'hdri'] }),
+      prop('topColor', 'Cor superior', 'color', '#1a4d8f'),
+      prop('bottomColor', 'Cor inferior', 'color', '#aac4e8'),
+      prop('hdriUrl', 'URL HDRI', 'text', ''),
+    ],
+  },
+  {
+    type: 'TerrainObject',
+    label: 'Terrain Object (Terreno)',
+    category: 'environment',
+    icon: '⛰️',
+    description: 'Terreno com altura editável (heightmap básico)',
+    hasPhysics: true,
+    hasVisual: true,
+    flirScriptable: false,
+    defaults: {
+      width: 50,
+      depth: 50,
+      segments: 64,
+      heightScale: 5,
+      heightmapSeed: 12345,
+    },
+    properties: [
+      prop('width', 'Largura', 'number', 50, { min: 5, max: 200, step: 5 }),
+      prop('depth', 'Profundidade', 'number', 50, { min: 5, max: 200, step: 5 }),
+      prop('segments', 'Segmentos', 'number', 64, { min: 8, max: 128, step: 8 }),
+      prop('heightScale', 'Escala de altura', 'number', 5, { min: 0, max: 20, step: 0.5 }),
+      prop('heightmapSeed', 'Seed', 'number', 12345, { min: 1, max: 99999, step: 1 }),
+    ],
+  },
+  {
+    type: 'WaterObject',
+    label: 'Water Object (Água)',
+    category: 'environment',
+    icon: '🌊',
+    description: 'Plano de água com efeito visual simples (reflexo/transparência)',
+    hasPhysics: false,
+    hasVisual: true,
+    flirScriptable: false,
+    defaults: {
+      size: [20, 20],
+      color: '#2f81f7',
+      opacity: 0.6,
+      waveHeight: 0.1,
+      waveSpeed: 0.5,
+    },
+    properties: [
+      prop('size', 'Tamanho (X,Z)', 'vec2', [20, 20]),
+      prop('color', 'Cor', 'color', '#2f81f7'),
+      prop('opacity', 'Opacidade', 'number', 0.6, { min: 0, max: 1, step: 0.05 }),
+      prop('waveHeight', 'Altura das ondas', 'number', 0.1, { min: 0, max: 1, step: 0.05 }),
+      prop('waveSpeed', 'Velocidade', 'number', 0.5, { min: 0, max: 5, step: 0.1 }),
+    ],
+  },
+  {
+    type: 'FogObject',
+    label: 'Fog Object (Névoa)',
+    category: 'environment',
+    icon: '🌫️',
+    description: 'Névoa com distância e cor ajustáveis',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: false,
+    defaults: {
+      fogType: 'linear', // linear | exponential
+      color: '#a0a0a0',
+      near: 5,
+      far: 50,
+      density: 0.02,
+    },
+    properties: [
+      prop('fogType', 'Tipo', 'select', 'linear', { options: ['linear', 'exponential'] }),
+      prop('color', 'Cor', 'color', '#a0a0a0'),
+      prop('near', 'Início', 'number', 5, { min: 0, max: 100, step: 1 }),
+      prop('far', 'Fim', 'number', 50, { min: 1, max: 200, step: 1 }),
+      prop('density', 'Densidade', 'number', 0.02, { min: 0, max: 0.5, step: 0.01 }),
+    ],
+  },
+
+  // ============ INTERFACE (UI) ============
+  {
+    type: 'ButtonObject',
+    label: 'Button Object',
+    category: 'ui',
+    icon: '🔘',
+    description: 'Botão na tela, liga-se a eventos do FlirScript',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      label: 'Botão',
+      position: [10, 10], // x, y em % do ecrã
+      size: [120, 50],
+      color: '#2f81f7',
+      textColor: '#ffffff',
+      fontSize: 14,
+    },
+    properties: [
+      prop('label', 'Texto', 'text', 'Botão'),
+      prop('position', 'Posição (X,Y %)', 'vec2', [10, 10]),
+      prop('size', 'Tamanho (W,H)', 'vec2', [120, 50]),
+      prop('color', 'Cor de fundo', 'color', '#2f81f7'),
+      prop('textColor', 'Cor do texto', 'color', '#ffffff'),
+      prop('fontSize', 'Tamanho do texto', 'number', 14, { min: 8, max: 32, step: 1 }),
+    ],
+  },
+  {
+    type: 'JoystickObject',
+    label: 'Joystick Object',
+    category: 'ui',
+    icon: '🕹️',
+    description: 'Joystick virtual para controlo de movimento no mobile',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      side: 'left', // left | right
+      size: 120,
+      color: '#2f81f7',
+      deadzone: 0.1,
+      targetPersonal: null, // instanceId do PersonalObject a controlar
+    },
+    properties: [
+      prop('side', 'Lado', 'select', 'left', { options: ['left', 'right'] }),
+      prop('size', 'Tamanho', 'number', 120, { min: 60, max: 240, step: 10 }),
+      prop('color', 'Cor', 'color', '#2f81f7'),
+      prop('deadzone', 'Zona morta', 'number', 0.1, { min: 0, max: 0.5, step: 0.05 }),
+      prop('targetPersonal', 'Controlar jogador', 'objectRef', null),
+    ],
+  },
+  {
+    type: 'TextObject',
+    label: 'Text Object',
+    category: 'ui',
+    icon: '📝',
+    description: 'Texto na tela (pontuação, vida, mensagens)',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      text: 'Texto',
+      position: [50, 5],
+      color: '#ffffff',
+      fontSize: 18,
+      align: 'center',
+    },
+    properties: [
+      prop('text', 'Conteúdo', 'text', 'Texto'),
+      prop('position', 'Posição (X,Y %)', 'vec2', [50, 5]),
+      prop('color', 'Cor', 'color', '#ffffff'),
+      prop('fontSize', 'Tamanho', 'number', 18, { min: 8, max: 64, step: 1 }),
+      prop('align', 'Alinhamento', 'select', 'center', { options: ['left', 'center', 'right'] }),
+    ],
+  },
+  {
+    type: 'ImageObject',
+    label: 'Image Object',
+    category: 'ui',
+    icon: '🖼️',
+    description: 'Imagem/ícone na tela',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      url: '',
+      position: [50, 50],
+      size: [100, 100],
+    },
+    properties: [
+      prop('url', 'URL da imagem', 'text', ''),
+      prop('position', 'Posição (X,Y %)', 'vec2', [50, 50]),
+      prop('size', 'Tamanho (W,H)', 'vec2', [100, 100]),
+    ],
+  },
+  {
+    type: 'PanelObject',
+    label: 'Panel Object',
+    category: 'ui',
+    icon: '▬',
+    description: 'Painel de fundo para agrupar elementos de UI',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: false,
+    defaults: {
+      position: [10, 10],
+      size: [200, 100],
+      color: '#1c2128',
+      opacity: 0.8,
+    },
+    properties: [
+      prop('position', 'Posição (X,Y %)', 'vec2', [10, 10]),
+      prop('size', 'Tamanho (W,H)', 'vec2', [200, 100]),
+      prop('color', 'Cor', 'color', '#1c2128'),
+      prop('opacity', 'Opacidade', 'number', 0.8, { min: 0, max: 1, step: 0.05 }),
+    ],
+  },
+
+  // ============ GAMEPLAY ============
+  {
+    type: 'SpawnObject',
+    label: 'Spawn Object',
+    category: 'gameplay',
+    icon: '📍',
+    description: 'Ponto de criação de objetos/inimigos em tempo de jogo',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      objectToSpawn: null, // sourceObjectId
+      interval: 2,
+      maxAlive: 5,
+      autoStart: false,
+    },
+    properties: [
+      prop('objectToSpawn', 'Objeto a criar', 'objectRef', null),
+      prop('interval', 'Intervalo (s)', 'number', 2, { min: 0.1, max: 60, step: 0.1 }),
+      prop('maxAlive', 'Máx. vivos', 'number', 5, { min: 1, max: 50, step: 1 }),
+      prop('autoStart', 'Iniciar automaticamente', 'boolean', false),
+    ],
+  },
+  {
+    type: 'CheckpointObject',
+    label: 'Checkpoint Object',
+    category: 'gameplay',
+    icon: '🚩',
+    description: 'Ponto de recomeço/progresso guardado',
+    hasPhysics: false,
+    hasVisual: true,
+    flirScriptable: true,
+    defaults: {
+      checkpointId: 0,
+      isStart: false,
+    },
+    properties: [
+      prop('checkpointId', 'ID do checkpoint', 'number', 0, { min: 0, max: 99, step: 1 }),
+      prop('isStart', 'É ponto inicial', 'boolean', false),
+    ],
+  },
+  {
+    type: 'TimerObject',
+    label: 'Timer Object',
+    category: 'gameplay',
+    icon: '⏱️',
+    description: 'Temporizador de jogo, liga-se a eventos do FlirScript',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      duration: 5,
+      autoStart: false,
+      loop: false,
+    },
+    properties: [
+      prop('duration', 'Duração (s)', 'number', 5, { min: 0.1, max: 600, step: 0.1 }),
+      prop('autoStart', 'Iniciar automaticamente', 'boolean', false),
+      prop('loop', 'Repetir', 'boolean', false),
+    ],
+  },
+  {
+    type: 'PathObject',
+    label: 'Path Object (Waypoints)',
+    category: 'gameplay',
+    icon: '🛤️',
+    description: 'Caminho/waypoints para movimento guiado ou IA simples',
+    hasPhysics: false,
+    hasVisual: true,
+    flirScriptable: true,
+    defaults: {
+      points: [[0, 0.5, 0], [5, 0.5, 0], [5, 0.5, 5], [0, 0.5, 5]],
+      loop: true,
+      speed: 2,
+      target: null, // instanceId a mover pelo path
+    },
+    properties: [
+      prop('loop', 'Cíclico', 'boolean', true),
+      prop('speed', 'Velocidade', 'number', 2, { min: 0.1, max: 20, step: 0.1 }),
+      prop('target', 'Objeto a mover', 'objectRef', null),
+    ],
+  },
+
+  // ============ ORGANIZAÇÃO ============
+  {
+    type: 'GroupObject',
+    label: 'Group Object',
+    category: 'organization',
+    icon: '📁',
+    description: 'Agrupa outros Conects sem corpo físico nem visual próprio (pasta/pai)',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: false,
+    defaults: {
+      children: [], // array de instanceIds
+    },
+    properties: [
+      prop('children', 'Filhos', 'text', ''),
+    ],
+  },
+]
+
+// Helpers
+export function findConectDefinition(type) {
+  return CONECT_TAXONOMY.find((c) => c.type === type)
+}
+
+export function conectsByCategory(category) {
+  return CONECT_TAXONOMY.filter((c) => c.category === category)
+}
+
+// Cria uma instância com valores predefinidos sensatos
+export function createConectInstance(type, position = [0, 0.5, 0]) {
+  const def = findConectDefinition(type)
+  if (!def) throw new Error(`Conect desconhecido: ${type}`)
+  const defaults = {}
+  for (const propDef of def.properties) {
+    defaults[propDef.key] = JSON.parse(JSON.stringify(propDef.default))
+  }
+  return {
+    instanceId: `conect_${Math.random().toString(36).slice(2, 10)}`,
+    type,
+    name: `${def.label}`,
+    position: [...position],
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+    visible: def.hasVisual !== false,
+    flirScript: null, // grafo FlirScript opcional
+    ...defaults,
+    ...def.defaults, // garantir que defaults da taxonomy também ficam
+  }
+}

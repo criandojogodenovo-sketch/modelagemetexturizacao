@@ -14,9 +14,15 @@ import { useStore, useSelectedObject } from '../../store/useStore'
 import { radToDeg, degToRad, round, fileToDataURL } from '../../utils/helpers'
 import { IconClose } from '../ui/Icons'
 import MaterialEditor from './MaterialEditor'
+import ConectPropertiesPanel from './conects/ConectPropertiesPanel'
 
 export default function RightPanel({ open, onClose }) {
   const selected = useSelectedObject()
+  const selectedConectId = useStore((s) => s.selectedConectId)
+  const appMode = useStore((s) => s.appMode)
+
+  // Em modo Cena, se houver um conect selecionado, mostrar suas propriedades
+  const showConectProps = appMode === 'scene' && selectedConectId
 
   return (
     <>
@@ -30,7 +36,9 @@ export default function RightPanel({ open, onClose }) {
         </div>
 
         <div className="panel-body">
-          {!selected ? (
+          {showConectProps ? (
+            <ConectPropertiesPanel conectId={selectedConectId} />
+          ) : !selected ? (
             <div className="empty-state">
               <div style={{ fontSize: 32, opacity: 0.4 }}>⬚</div>
               <div className="mt-2">Nenhum objeto selecionado.</div>

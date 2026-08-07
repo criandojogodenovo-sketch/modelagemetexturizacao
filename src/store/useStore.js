@@ -39,6 +39,7 @@ import * as THREE from 'three'
 import { createSceneObject, defaultMaterial, PRIMITIVES } from '../utils/primitives'
 import { findMaterial } from '../utils/materialLibrary'
 import * as meshOps from '../utils/meshOperations'
+import { createConectInstance, findConectDefinition } from '../utils/conects/taxonomy'
 
 const STORAGE_KEY = 'me3d.project.v1'
 
@@ -1056,6 +1057,131 @@ export const useStore = create(
 
       openScenePreview: () => set({ scenePreviewOpen: true }),
       closeScenePreview: () => set({ scenePreviewOpen: false }),
+
+      // ---------- Conects (Fase 3) ----------
+      // Cada cena tem uma lista de conects (instâncias de ConectObject).
+      // Um conect tem: instanceId, type, name, position, rotation, scale,
+      // visible, flirScript (opcional), + propriedades específicas do tipo.
+      selectedConectId: null,
+      conectsWindowOpen: false,
+
+      toggleConectsWindow: () =>
+        set((s) => ({ ui: { ...s.ui, conectsWindowOpen: !s.ui.conectsWindowOpen } })),
+
+      addConectToScene: (type, position = [0, 0.5, 0]) => {
+        const { activeSceneId } = get()
+        if (!activeSceneId) {
+          get().toast('Crie uma cena primeiro', 'error')
+          return null
+        }
+        const conect = createConectInstance(type, position)
+        get()._pushHistory()
+        set((s) => ({
+          scenes: s.scenes.map((sc) =>
+            sc.id === activeSceneId
+              ? { ...sc, conects: [...(sc.conects || []), conect] }
+              : sc
+          ),
+          selectedConectId: conect.instanceId,
+        }))
+        const def = findConectDefinition(type)
+        get().toast(`"${def?.label || type}" adicionado`, 'success', 1500)
+        return conect
+      },
+
+      removeConectFromScene: (instanceId) => {
+        const { activeSceneId } = get()
+        get()._pushHistory()
+        set((s) => ({
+          scenes: s.scenes.map((sc) =>
+            sc.id === activeSceneId
+              ? { ...sc, conects: (sc.conects || []).filter((c) => c.instanceId !== instanceId) }
+              : sc
+          ),
+          selectedConectId: s.selectedConectId === instanceId ? null : s.selectedConectId,
+        }))
+        get().toast('Conect removido', 'info')
+      },
+
+      selectConect: (instanceId) => set({ selectedConectId: instanceId }),
+
+      updateConect: (instanceId, patch) => {
+        const { activeSceneId } = get()
+        set((s) => ({
+          scenes: s.scenes.map((sc) =>
+            sc.id === activeSceneId
+              ? {
+                  ...sc,
+                  conects: (sc.conects || []).map((c) =>
+                    c.instanceId === instanceId ? { ...c, ...patch } : c
+                  ),
+                }
+              : sc
+          ),
+        }))
+      },
+
+      renameConect: (instanceId, name) => {
+        get()._pushHistory()
+        get().updateConect(instanceId, { name })
+      },
+
+      duplicateConect: (instanceId) => {
+        const { activeSceneId, scenes } = get()
+        const scene = scenes.find((s) => s.id === activeSceneId)
+        const conect = scene?.conects?.find((c) => c.instanceId === instanceId)
+        if (!conect) return
+        get()._pushHistory()
+        const copy = JSON.parse(JSON.stringify(conect))
+        copy.instanceId = `conect_${Math.random().toString(36).slice(2, 10)}`
+        copy.name = `${conect.name} (cópia)`
+        copy.position = [conect.position[0] + 0.5, conect.position[1], conect.position[2] + 0.5]
+        set((s) => ({
+          scenes: s.scenes.map((sc) =>
+            sc.id === activeSceneId
+              ? { ...sc, conects: [...(sc.conects || []), copy] }
+              : sc
+          ),
+          selectedConectId: copy.instanceId,
+        }))
+        get().toast('Conect duplicado', 'success')
+      },
+
+      setConectFlirScript: (instanceId, graphData) => {
+        const { activeSceneId } = get()
+        get()._pushHistory()
+        set((s) => ({
+          scenes: s.scenes.map((sc) =>
+            sc.id === activeSceneId
+              ? {
+                  ...sc,
+                  conects: (sc.conects || []).map((c) =>
+                    c.instanceId === instanceId
+                      ? { ...c, flirScript: graphData }
+                      : c
+                  ),
+                }
+              : sc
+          ),
+        }))
+      },
+
+      // Cena: gravidade e limites de otimização
+      setScenePhysics: (sceneId, patch) => {
+        get()._pushHistory()
+        set((s) => ({
+          scenes: s.scenes.map((sc) =>
+            sc.id === sceneId
+              ? { ...sc, physics: { ...sc.physics, ...patch } }
+              : sc
+          ),
+        }))
+      },
+
+      // Exportar jogo (build standalone)
+      gameExportOpen: false,
+      openGameExport: () => set({ gameExportOpen: true }),
+      closeGameExport: () => set({ gameExportOpen: false }),
 
       // ---------- Undo / Redo ----------
       undo: () => {

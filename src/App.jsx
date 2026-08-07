@@ -27,6 +27,8 @@ import SceneEditorPanel from './components/panels/SceneEditorPanel'
 import ScenePreview from './components/panels/ScenePreview'
 import SceneLevel3D from './components/3d/SceneLevel3D'
 import FlirScriptEditor from './components/panels/flirscript/FlirScriptEditor'
+import ConectsWindow from './components/panels/conects/ConectsWindow'
+import GameExportModal from './components/panels/GameExportModal'
 import Toasts from './components/ui/Toasts'
 import LoadingOverlay from './components/ui/LoadingOverlay'
 import BottomBar from './components/ui/BottomBar'
@@ -41,6 +43,10 @@ export default function App() {
   const toggleMoreTools = useStore((s) => s.toggleMoreTools)
   const appMode = useStore((s) => s.appMode)
   const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
+  const conectsWindowOpen = useStore((s) => s.ui.conectsWindowOpen)
+  const toggleConectsWindow = useStore((s) => s.toggleConectsWindow)
+  const gameExportOpen = useStore((s) => s.gameExportOpen)
+  const closeGameExport = useStore((s) => s.closeGameExport)
 
   const undo = useStore((s) => s.undo)
   const redo = useStore((s) => s.redo)
@@ -136,6 +142,10 @@ export default function App() {
 
       {ui.moreToolsOpen && <MoreToolsGrid onClose={toggleMoreTools} />}
       {scenePreviewOpen && <ScenePreview />}
+      {conectsWindowOpen && (
+        <ConectsWindow onClose={toggleConectsWindow} />
+      )}
+      {gameExportOpen && <GameExportModal onClose={closeGameExport} />}
 
       <Toasts />
       <LoadingOverlay />

@@ -1701,3 +1701,192 @@ label {
     font-size: 10px;
   }
 }
+
+/* ========================================================
+   FASE 3 — Conects, Física, Exportação de Jogo
+   ======================================================== */
+
+/* ===== ConectsWindow (janela de Conects) ===== */
+.conects-window {
+  position: fixed;
+  top: var(--topbar-h);
+  left: 0;
+  bottom: 0;
+  width: 320px;
+  max-width: 90vw;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(-100%);
+  transition: transform 0.22s ease;
+  box-shadow: var(--shadow-panel);
+}
+
+.conects-window.open {
+  transform: translateX(0);
+}
+
+.conects-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.conect-category {
+  margin-bottom: 8px;
+}
+
+.conect-category-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  text-align: left;
+}
+
+.conect-category-header:hover {
+  background: var(--bg-hover);
+}
+
+.conect-category-header .cat-icon {
+  font-size: 14px;
+}
+
+.conect-category-header .cat-label {
+  flex: 1;
+}
+
+.conect-category-header .cat-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-app);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.conect-category-header .cat-chevron {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.conect-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0 4px 12px;
+}
+
+.conect-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  background: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: grab;
+  transition: background 0.1s, border-color 0.1s;
+  user-select: none;
+}
+
+.conect-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.conect-item:active {
+  cursor: grabbing;
+  opacity: 0.7;
+}
+
+.conect-item .conect-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.conect-item .conect-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.conect-item .conect-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.conect-item .conect-desc {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+/* Em mobile, a janela ocupa largura total */
+@media (max-width: 600px) {
+  .conects-window {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+/* ===== ConectPropertiesPanel ===== */
+.conect-properties .panel-section {
+  margin-bottom: 14px;
+}
+
+/* ===== GameUIOverlay (overlay durante o jogo) ===== */
+.game-ui-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+}
+
+/* ===== GameExportModal ===== */
+.game-export-modal {
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-app);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+/* ===== Botão de Conects na BottomBar (mobile) ===== */
+.bb-btn .bb-label {
+  white-space: nowrap;
+}
+
+/* ===== Indicador de aviso (limite de física) ===== */
+.toast.warning {
+  background: var(--bg-elevated);
+  border-color: var(--warning);
+  color: var(--warning);
+}
