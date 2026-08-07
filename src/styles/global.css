@@ -3098,3 +3098,29 @@ label {
     pointer-events: none;
   }
 }
+
+/* ===== ProjectBrowser subpastas ===== */
+.pb-subfolder-btn {
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.pb-subfolder-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.pb-subfolder-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Posicionamento relativo para o botão de apagar no item */
+.pb-item {
+  position: relative;
+}

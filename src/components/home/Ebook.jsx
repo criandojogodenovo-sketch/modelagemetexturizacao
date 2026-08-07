@@ -20,7 +20,6 @@
  */
 import { useState } from 'react'
 import { IconClose, IconSave } from '../ui/Icons'
-import { downloadText } from '../../utils/helpers'
 
 const CHAPTERS = [
   {
@@ -513,29 +512,138 @@ function Illustration({ type }) {
   return illustrations[type] || null
 }
 
+// Converter conteúdo de capítulo (elementos React) para HTML string para download
+function renderChapterToHTML(content) {
+  if (!content || !content.props) return ''
+  const { children } = content.props
+  return reactElementToHTML(children)
+}
+
+function reactElementToHTML(el) {
+  if (el === null || el === undefined || el === false) return ''
+  if (typeof el === 'string') return el
+  if (typeof el === 'number') return String(el)
+  if (Array.isArray(el)) return el.map(reactElementToHTML).join('')
+  if (typeof el === 'object' && el.type) {
+    const tag = el.type
+    if (tag === 'svg') {
+      // Renderizar SVG para string
+      return svgToString(el)
+    }
+    const children = el.props?.children ? reactElementToHTML(el.props.children) : ''
+    const styleAttr = el.props?.style ? ` style="${styleToString(el.props.style)}"` : ''
+    return `<${tag}${styleAttr}>${children}</${tag}>`
+  }
+  return ''
+}
+
+function styleToString(style) {
+  if (!style) return ''
+  return Object.entries(style)
+    .map(([k, v]) => `${k.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase())}:${v}`)
+    .join(';')
+}
+
+function svgToString(svgElement) {
+  // Conversão simplificada de SVG para string
+  const props = svgElement.props || {}
+  const attrs = Object.entries(props)
+    .filter(([k]) => k !== 'children')
+    .map(([k, v]) => `${k}="${v}"`)
+    .join(' ')
+  const children = Array.isArray(props.children) ? props.children.map(svgChildToString).join('') : svgChildToString(props.children)
+  return `<svg ${attrs}>${children}</svg>`
+}
+
+function svgChildToString(child) {
+  if (!child || typeof child !== 'object') return ''
+  const tag = child.type
+  if (!tag || typeof tag !== 'string') return ''
+  const props = child.props || {}
+  const attrs = Object.entries(props)
+    .filter(([k]) => k !== 'children')
+    .map(([k, v]) => `${k}="${v}"`)
+    .join(' ')
+  return `<${tag} ${attrs}/>`
+}
+
 export default function Ebook({ onClose }) {
   const [activeChapter, setActiveChapter] = useState(0)
 
   const handleDownload = () => {
-    // Gerar HTML standalone do ebook
+    // Gerar HTML standalone completo do ebook com conteúdo e ilustrações
+    const chaptersHTML = CHAPTERS.map((c) => {
+      // Converter o conteúdo JSX para texto HTML simples
+      const contentText = renderChapterToHTML(c.content)
+      return `<section><h2>${c.icon} ${c.title}</h2>${contentText}</section>`
+    }).join('\n')
+
     const html = `<!DOCTYPE html>
 <html lang="pt">
 <head>
 <meta charset="UTF-8">
-<title>FlirScript Engine — Ebook</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flir Engine — Ebook Completo</title>
 <style>
-body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #0d1117; color: #e6edf3; }
-h1, h2, h3 { color: #2f81f7; }
-code { background: #1c2128; padding: 2px 6px; border-radius: 3px; color: #f4a261; }
-ul, ol { line-height: 1.6; }
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+  background: #0d1117;
+  color: #e6edf3;
+  line-height: 1.7;
+}
+h1 {
+  color: #2f81f7;
+  font-size: 28px;
+  border-bottom: 2px solid #2f81f7;
+  padding-bottom: 10px;
+}
+h2 {
+  color: #2f81f7;
+  margin-top: 32px;
+}
+h3 { color: #e6edf3; }
+h4 { color: #8957e5; }
+p { color: #8b949e; }
+ul, ol { color: #8b949e; }
+li { margin: 4px 0; }
+code {
+  background: #1c2128;
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: #f4a261;
+  font-family: "Monaco", "Menlo", monospace;
+}
+strong { color: #e6edf3; }
+section {
+  background: #161b22;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  border: 1px solid #30363d;
+}
 </style>
 </head>
 <body>
-<h1>FlirScript Engine — Guia Completo</h1>
-${CHAPTERS.map((c) => `<h2>${c.icon} ${c.title}</h2>`).join('')}
+<h1>🎮 Flir Engine — Guia Completo</h1>
+<p>Bem-vindo ao ebook completo da Flir Engine. Este guia cobre todos os sistemas da engine, desde modelagem até exportação de jogos.</p>
+${chaptersHTML}
 </body>
 </html>`
-    downloadText(html, 'flirscript-engine-ebook.html', 'text/html')
+
+    // Criar blob e forçar download
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'flir-engine-ebook.html'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   return (

@@ -48,6 +48,11 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
     return <ParticleMesh conect={conect} setMeshRef={setMeshRef} />
   }
 
+  // ViewObject: renderiza um gizmo de câmara visível no editor (selecionável)
+  if (conect.type === 'ViewObject') {
+    return <ViewObjectMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
   if (!def?.hasVisual && conect.type !== 'VisualObject') {
     // Sem visual — ligar o meshRef a null para que physics não tente usar
     useEffect(() => { setMeshRef?.(null) }, [])
@@ -277,6 +282,44 @@ function ParticleMesh({ conect, setMeshRef }) {
           <meshBasicMaterial color={conect.color} transparent opacity={0.7} />
         </mesh>
       ))}
+    </group>
+  )
+}
+
+// ===== ViewObject (câmara visível no editor) =====
+// Renderiza um ícone de câmara selecionável e movível via gizmos.
+// No ScenePreview, a câmara ativa é a que tem `isActive: true` (ou a primeira).
+function ViewObjectMesh({ conect, setMeshRef }) {
+  return (
+    <group
+      ref={setMeshRef}
+      position={conect.position}
+      rotation={conect.rotation}
+      scale={conect.scale}
+      userData={{ conectInstanceId: conect.instanceId, isViewObject: true }}
+    >
+      {/* Corpo da câmara */}
+      <mesh castShadow>
+        <boxGeometry args={[0.5, 0.35, 0.6]} />
+        <meshStandardMaterial color="#f4a261" emissive="#f4a261" emissiveIntensity={0.2} />
+      </mesh>
+      {/* Lente a apontar para -Z */}
+      <mesh position={[0, 0, -0.45]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.18, 0.22, 0.3, 16]} />
+        <meshStandardMaterial color="#2a9d8f" emissive="#2a9d8f" emissiveIntensity={0.1} />
+      </mesh>
+      {/* Cone de visão (wireframe) */}
+      <mesh position={[0, 0, -1.5]}>
+        <coneGeometry args={[1, 2, 4, 1, true]} />
+        <meshBasicMaterial color="#f4a261" wireframe transparent opacity={0.3} />
+      </mesh>
+      {/* Indicador "ativo" */}
+      {conect.isActive && (
+        <mesh position={[0, 0.4, 0]}>
+          <sphereGeometry args={[0.1, 8, 8]} />
+          <meshBasicMaterial color="#3fb950" />
+        </mesh>
+      )}
     </group>
   )
 }

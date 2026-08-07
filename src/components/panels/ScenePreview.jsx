@@ -20,6 +20,7 @@ import ConectRenderer from './ConectRenderer'
 import GameUIOverlay from './GameUIOverlay'
 import { useStore } from '../../store/useStore'
 import { IconClose, IconPlay } from '../ui/Icons'
+import GameSplash from '../ui/GameSplash'
 import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
 
@@ -272,7 +273,8 @@ export default function ScenePreview() {
   const background = useStore((s) => s.background)
   const lights = useStore((s) => s.lights)
   const closeScenePreview = useStore((s) => s.closeScenePreview)
-  const [useGameCam, setUseGameCam] = useState(false)
+  const [useGameCam, setUseGameCam] = useState(true) // default: usar ViewObject ativa
+  const [showSplash, setShowSplash] = useState(true)
   const orbitRef = useRef(null)
   const meshRefs = useRef(new Map())
   const conectMeshRefs = useRef(new Map())
@@ -289,32 +291,35 @@ export default function ScenePreview() {
 
   if (!activeScene) return null
 
-  // Se há ViewObject, usá-lo como câmara em vez da orbital
-  const viewConect = (activeScene.conects || []).find((c) => c.type === 'ViewObject')
-  const useOrbital = !viewConect || !useGameCam
+  // Procurar ViewObject ativa (isActive: true) ou a primeira ViewObject
+  const viewConects = (activeScene.conects || []).filter((c) => c.type === 'ViewObject')
+  const activeViewConect = viewConects.find((c) => c.isActive) || viewConects[0] || null
+  const useOrbital = !activeViewConect || !useGameCam
 
-  // Configuração de câmara: usar ViewObject se disponível, senão gameCamera da cena
-  const cam = viewConect || activeScene.gameCamera
+  // Configuração de câmara: usar ViewObject ativa se disponível
+  const cam = activeViewConect || activeScene.gameCamera
   const cameraProps = (cam.cameraType || cam.type) === 'orthographic'
     ? { type: 'orthographic', position: cam.position || [5, 4, 6], near: cam.near || 0.1, far: cam.far || 200, zoom: 5 / (cam.orthoSize || 5) }
     : { type: 'perspective', position: cam.position || [5, 4, 6], fov: cam.fov || 60, near: cam.near || 0.1, far: cam.far || 200 }
 
   return (
     <div className="scene-preview-fullscreen">
+      {showSplash && <GameSplash onDone={() => setShowSplash(false)} />}
+
       <button
         className="preview-exit-btn"
         onClick={closeScenePreview}
-        title="Sair da pré-visualização (Esc)"
+        title="Parar execução e voltar ao editor (Esc)"
       >
         <IconClose width={18} height={18} />
-        <span>Sair</span>
+        <span>⏹ Parar</span>
       </button>
 
-      {viewConect && (
+      {activeViewConect && (
         <button
           className="preview-cam-btn"
           onClick={() => setUseGameCam(!useGameCam)}
-          title={useGameCam ? 'Câmara orbital' : 'Câmara de jogo (ViewObject)'}
+          title={useGameCam ? 'Câmara orbital' : 'Câmara de jogo (ViewObject ativa)'}
         >
           <IconPlay width={14} height={14} />
           {useGameCam ? 'Orbital' : 'Game Cam'}

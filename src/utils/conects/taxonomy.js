@@ -323,27 +323,31 @@ export const CONECT_TAXONOMY = [
     label: 'View Object (Câmara)',
     category: 'camera_audio',
     icon: '📷',
-    description: 'Câmara de jogo (perspetiva/ortográfica, pode seguir outro objeto)',
+    description: 'Câmara de jogo — aparece como objeto na cena, selecionável e movível',
     hasPhysics: false,
-    hasVisual: false,
+    hasVisual: true, // agora aparece como gizmo no editor
     flirScriptable: true,
     defaults: {
-      cameraType: 'perspective', // perspective | orthographic
+      cameraType: 'perspective',
       fov: 60,
       orthoSize: 5,
       near: 0.1,
       far: 200,
-      followTarget: null, // instanceId para seguir
-      followMode: 'third', // third | top | side | none
+      followTarget: null,
+      followMode: 'none',
       followDistance: 6,
       followHeight: 3,
+      isActive: true, // a primeira ViewObject criada é ativa por defeito
     },
     properties: [
+      prop('isActive', 'Câmara ativa', 'boolean', true),
       prop('cameraType', 'Tipo', 'select', 'perspective', { options: ['perspective', 'orthographic'] }),
-      prop('fov', 'FOV', 'number', 60, { min: 20, max: 120, step: 1 }),
+      prop('fov', 'FOV (campo de visão)', 'number', 60, { min: 20, max: 120, step: 1 }),
       prop('orthoSize', 'Tamanho ortográfico', 'number', 5, { min: 1, max: 30, step: 0.5 }),
+      prop('near', 'Near (plano próximo)', 'number', 0.1, { min: 0.01, max: 5, step: 0.1 }),
+      prop('far', 'Far (plano longe)', 'number', 200, { min: 10, max: 1000, step: 10 }),
       prop('followTarget', 'Seguir objeto', 'objectRef', null),
-      prop('followMode', 'Modo de seguir', 'select', 'third', { options: ['none', 'third', 'top', 'side'] }),
+      prop('followMode', 'Modo de seguir', 'select', 'none', { options: ['none', 'third', 'top', 'side'] }),
       prop('followDistance', 'Distância', 'number', 6, { min: 1, max: 30, step: 0.5 }),
       prop('followHeight', 'Altura', 'number', 3, { min: 0, max: 20, step: 0.5 }),
     ],

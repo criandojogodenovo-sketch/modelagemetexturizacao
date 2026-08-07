@@ -71,9 +71,9 @@ export default function SceneEditorPanel({ onClose }) {
                 className="primary"
                 style={{ flex: 1 }}
                 disabled={!activeScene}
-                title="Pré-visualizar cena em ecrã cheio"
+                title="Executar jogo (física + FlirScript + UI)"
               >
-                ▶ Pré-visualizar
+                ▶ Executar Jogo
               </button>
               <button
                 onClick={openGameExport}
