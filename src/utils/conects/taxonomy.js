@@ -337,9 +337,11 @@ export const CONECT_TAXONOMY = [
       followMode: 'none',
       followDistance: 6,
       followHeight: 3,
-      isActive: true, // a primeira ViewObject criada é ativa por defeito
+      isActive: true,
+      cameraRole: 'primary', // primary | secondary | player
     },
     properties: [
+      prop('cameraRole', 'Papel da câmara', 'select', 'primary', { options: ['primary', 'secondary', 'player'] }),
       prop('isActive', 'Câmara ativa', 'boolean', true),
       prop('cameraType', 'Tipo', 'select', 'perspective', { options: ['perspective', 'orthographic'] }),
       prop('fov', 'FOV (campo de visão)', 'number', 60, { min: 20, max: 120, step: 1 }),

@@ -404,35 +404,46 @@ function GameRunner({ activeScene, meshRefs, conectMeshRefs, objects }) {
       }
     }
 
-    // ViewObject seguir jogador
-    const viewConect = (activeScene.conects || []).find((c) => c.type === 'ViewObject' && c.followTarget && c.followMode !== 'none')
-    if (viewConect) {
-      const targetMesh = meshRefs.current.get(viewConect.followTarget) || conectMeshRefs.current.get(viewConect.followTarget)
-      if (targetMesh) {
-        const mode = viewConect.followMode
-        const dist = viewConect.followDistance || 6
-        const height = viewConect.followHeight || 3
-        if (mode === 'third') {
-          camera.position.lerp(new THREE.Vector3(
-            targetMesh.position.x,
-            targetMesh.position.y + height,
-            targetMesh.position.z + dist,
-          ), 0.1)
-          camera.lookAt(targetMesh.position)
-        } else if (mode === 'top') {
-          camera.position.lerp(new THREE.Vector3(
-            targetMesh.position.x,
-            targetMesh.position.y + dist,
-            targetMesh.position.z,
-          ), 0.1)
-          camera.lookAt(targetMesh.position)
-        } else if (mode === 'side') {
-          camera.position.lerp(new THREE.Vector3(
-            targetMesh.position.x + dist,
-            targetMesh.position.y + height / 2,
-            targetMesh.position.z,
-          ), 0.1)
-          camera.lookAt(targetMesh.position)
+    // ===== Câmaras: ViewObject com follow ou cameraRole='player' =====
+    // Câmaras com cameraRole='player' seguem automaticamente o PersonalObject
+    const allViewConects = (activeScene.conects || []).filter((c) => c.type === 'ViewObject')
+    // Priorizar: câmara ativa (já escolhida acima) — usar a activeViewConect
+    const followCam = activeViewConect
+    if (followCam) {
+      // Se cameraRole='player' e não tem followTarget, seguir PersonalObject automaticamente
+      let targetId = followCam.followTarget
+      if (!targetId && followCam.cameraRole === 'player') {
+        const player = (activeScene.conects || []).find((c) => c.type === 'PersonalObject')
+        if (player) targetId = player.instanceId
+      }
+      if (targetId && followCam.followMode !== 'none') {
+        const targetMesh = meshRefs.current.get(targetId) || conectMeshRefs.current.get(targetId)
+        if (targetMesh) {
+          const mode = followCam.followMode
+          const dist = followCam.followDistance || 6
+          const height = followCam.followHeight || 3
+          if (mode === 'third') {
+            camera.position.lerp(new THREE.Vector3(
+              targetMesh.position.x,
+              targetMesh.position.y + height,
+              targetMesh.position.z + dist,
+            ), 0.1)
+            camera.lookAt(targetMesh.position)
+          } else if (mode === 'top') {
+            camera.position.lerp(new THREE.Vector3(
+              targetMesh.position.x,
+              targetMesh.position.y + dist,
+              targetMesh.position.z,
+            ), 0.1)
+            camera.lookAt(targetMesh.position)
+          } else if (mode === 'side') {
+            camera.position.lerp(new THREE.Vector3(
+              targetMesh.position.x + dist,
+              targetMesh.position.y + height / 2,
+              targetMesh.position.z,
+            ), 0.1)
+            camera.lookAt(targetMesh.position)
+          }
         }
       }
     }
@@ -466,9 +477,14 @@ export default function ScenePreview() {
 
   if (!activeScene) return null
 
-  // Procurar ViewObject ativa (isActive: true) ou a primeira ViewObject
+  // Procurar câmara ativa: prioridade player > primary > isActive > primeira
   const viewConects = (activeScene.conects || []).filter((c) => c.type === 'ViewObject')
-  const activeViewConect = viewConects.find((c) => c.isActive) || viewConects[0] || null
+  const activeViewConect =
+    viewConects.find((c) => c.cameraRole === 'player') ||
+    viewConects.find((c) => c.cameraRole === 'primary') ||
+    viewConects.find((c) => c.isActive) ||
+    viewConects[0] ||
+    null
   const useOrbital = !activeViewConect || !useGameCam
 
   // Configuração de câmara: usar ViewObject ativa se disponível

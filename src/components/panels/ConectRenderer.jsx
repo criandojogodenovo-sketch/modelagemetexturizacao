@@ -318,10 +318,26 @@ function ViewObjectMesh({ conect, setMeshRef }) {
         <coneGeometry args={[1, 2, 4, 1, true]} />
         <meshBasicMaterial color="#f4a261" wireframe transparent opacity={0.3} />
       </mesh>
-      {conect.isActive && (
+      {/* Indicador do papel da câmara */}
+      {conect.cameraRole && (
         <mesh position={[0, 0.4, 0]}>
           <sphereGeometry args={[0.1, 8, 8]} />
-          <meshBasicMaterial color="#3fb950" />
+          <meshBasicMaterial color={
+            conect.cameraRole === 'player' ? '#2f81f7'
+            : conect.cameraRole === 'primary' ? '#3fb950'
+            : '#d29922' // secondary
+          } />
+        </mesh>
+      )}
+      {/* Label do papel */}
+      {conect.cameraRole && (
+        <mesh position={[0, 0.6, 0]}>
+          <boxGeometry args={[0.02, 0.02, 0.02]} />
+          <meshBasicMaterial color={
+            conect.cameraRole === 'player' ? '#2f81f7'
+            : conect.cameraRole === 'primary' ? '#3fb950'
+            : '#d29922'
+          } />
         </mesh>
       )}
     </group>
