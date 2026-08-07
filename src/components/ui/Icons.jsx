@@ -227,3 +227,173 @@ export const PRIMITIVE_ICONS = {
   plane: IconPlane,
   torus: IconTorus,
 }
+
+// ===== Ícones para novas funcionalidades profissionais =====
+
+export const IconEdit = (p) => (
+  <svg {...base(p)}>
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+  </svg>
+)
+
+export const IconSculpt = (p) => (
+  <svg {...base(p)}>
+    <path d="M12 19l7-7 3 3-7 7-3-3z" />
+    <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+    <path d="M2 2l7.586 7.586" />
+    <circle cx="11" cy="11" r="2" />
+  </svg>
+)
+
+export const IconBrush = (p) => (
+  <svg {...base(p)}>
+    <path d="M9.06 11.9l8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08" />
+    <path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z" />
+  </svg>
+)
+
+export const IconUV = (p) => (
+  <svg {...base(p)}>
+    <rect x="3" y="3" width="18" height="18" rx="1" />
+    <path d="M3 9h18" />
+    <path d="M9 3v18" />
+    <path d="M3 15h18" />
+    <path d="M15 3v18" />
+  </svg>
+)
+
+export const IconBone = (p) => (
+  <svg {...base(p)}>
+    <path d="M17 10c.7-.7 1.69-1 2.5-1 .81 0 1.5.69 1.5 1.5 0 .81-.69 1.5-1.5 1.5-.81 0-1.5.69-1.5 1.5 0 .81.69 1.5 1.5 1.5h.5a2 2 0 0 1 2 2c0 1.1-.9 2-2 2-1.1 0-2-.9-2-2v-.5c0-.81-.69-1.5-1.5-1.5-.81 0-1.5.69-1.5 1.5 0 .81-.69 1.5-1.5 1.5-.81 0-1.5-.69-1.5-1.5 0-.81.69-1.5 1.5-1.5.81 0 1.5-.69 1.5-1.5 0-.81-.69-1.5-1.5-1.5H7a2 2 0 0 1-2-2c0-1.1.9-2 2-2 1.1 0 2 .9 2 2v.5c0 .81.69 1.5 1.5 1.5.81 0 1.5-.69 1.5-1.5 0-.81.69-1.5 1.5-1.5.81 0 1.5.69 1.5 1.5" />
+  </svg>
+)
+
+export const IconAnimation = (p) => (
+  <svg {...base(p)}>
+    <polygon points="5 3 19 12 5 21 5 3" />
+  </svg>
+)
+
+export const IconPlay = (p) => (
+  <svg {...base(p)}>
+    <polygon points="5 3 19 12 5 21 5 3" />
+  </svg>
+)
+
+export const IconPause = (p) => (
+  <svg {...base(p)}>
+    <rect x="6" y="4" width="4" height="16" />
+    <rect x="14" y="4" width="4" height="16" />
+  </svg>
+)
+
+export const IconKey = (p) => (
+  <svg {...base(p)}>
+    <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3" />
+  </svg>
+)
+
+export const IconSubdivide = (p) => (
+  <svg {...base(p)}>
+    <path d="M3 3h18v18H3z" />
+    <path d="M3 9h18M3 15h18M9 3v18M15 3v18" />
+  </svg>
+)
+
+export const IconMirror = (p) => (
+  <svg {...base(p)}>
+    <line x1="12" y1="3" x2="12" y2="21" strokeDasharray="2 2" />
+    <path d="M3 12h6l-3-3m0 6l3-3" />
+    <path d="M21 12h-6l3-3m0 6l-3-3" />
+  </svg>
+)
+
+export const IconArray = (p) => (
+  <svg {...base(p)}>
+    <rect x="2" y="8" width="6" height="8" rx="1" />
+    <rect x="9" y="8" width="6" height="8" rx="1" />
+    <rect x="16" y="8" width="6" height="8" rx="1" />
+  </svg>
+)
+
+export const IconSolidify = (p) => (
+  <svg {...base(p)}>
+    <path d="M3 8h18M3 16h18" />
+    <rect x="3" y="8" width="18" height="8" />
+    <path d="M7 12h10" strokeDasharray="2 2" />
+  </svg>
+)
+
+export const IconBoolean = (p) => (
+  <svg {...base(p)}>
+    <circle cx="9" cy="12" r="6" />
+    <circle cx="15" cy="12" r="6" />
+  </svg>
+)
+
+export const IconVertex = (p) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="3" fill="currentColor" />
+    <circle cx="4" cy="4" r="2" fill="currentColor" />
+    <circle cx="20" cy="4" r="2" fill="currentColor" />
+    <circle cx="4" cy="20" r="2" fill="currentColor" />
+    <circle cx="20" cy="20" r="2" fill="currentColor" />
+  </svg>
+)
+
+export const IconEdge = (p) => (
+  <svg {...base(p)}>
+    <line x1="4" y1="4" x2="20" y2="20" />
+    <circle cx="4" cy="4" r="2" fill="currentColor" />
+    <circle cx="20" cy="20" r="2" fill="currentColor" />
+  </svg>
+)
+
+export const IconFace = (p) => (
+  <svg {...base(p)}>
+    <polygon points="12 3 22 8.5 22 15.5 12 21 2 15.5 2 8.5 12 3" />
+    <polygon points="12 3 22 8.5 22 15.5 12 21 2 15.5 2 8.5 12 3" fill="currentColor" fillOpacity="0.2" />
+  </svg>
+)
+
+export const IconLibrary = (p) => (
+  <svg {...base(p)}>
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+  </svg>
+)
+
+export const IconMoreGrid = (p) => (
+  <svg {...base(p)}>
+    <rect x="3" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="3" width="7" height="7" rx="1" />
+    <rect x="3" y="14" width="7" height="7" rx="1" />
+    <rect x="14" y="14" width="7" height="7" rx="1" />
+  </svg>
+)
+
+export const IconBottomBar = (p) => (
+  <svg {...base(p)}>
+    <rect x="2" y="3" width="20" height="14" rx="2" />
+    <line x1="2" y1="14" x2="22" y2="14" />
+    <rect x="6" y="20" width="12" height="2" rx="1" />
+  </svg>
+)
+
+export const IconGroup = (p) => (
+  <svg {...base(p)}>
+    <rect x="2" y="2" width="8" height="8" rx="1" />
+    <rect x="14" y="2" width="8" height="8" rx="1" />
+    <rect x="2" y="14" width="8" height="8" rx="1" />
+    <rect x="14" y="14" width="8" height="8" rx="1" />
+  </svg>
+)
+
+export const IconUnwrap = (p) => (
+  <svg {...base(p)}>
+    <path d="M3 6l9-3 9 3-9 3-9-3z" />
+    <path d="M3 6v6l9 3 9-3V6" />
+  </svg>
+)
+

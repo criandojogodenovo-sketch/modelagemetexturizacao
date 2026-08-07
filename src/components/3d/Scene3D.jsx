@@ -5,16 +5,15 @@
  *  - Canvas com fundo configurável (cor sólida ou gradiente)
  *  - Luz ambiente + luz direcional (com sombras)
  *  - Grelha de referência
- *  - Câmara orbital (OrbitControls) com suporte a toque (pinch zoom, 1 dedo = rotate, 2 dedos = pan/zoom)
+ *  - Câmara orbital (OrbitControls) com suporte a toque
  *  - Renderização de todos os objetos da cena
- *  - TransformControls (gizmo) para o objeto selecionado
+ *  - TransformControls (gizmo) — só em modo 'object'
+ *  - Modo Sculpt: raycast + sculptStrokeAt ao clicar/arrastar
+ *  - Modo Edit: seleção de vértices/arestas/faces (visual overlay)
  *  - Click no vazio = deselect
- *
- * O TransformControls é renderizado como sibling dos meshes e recebe o Object3D
- * do mesh selecionado via um mapa de refs mantido pelo Scene3D.
  */
 import { Suspense, useEffect, useRef, useState, useCallback } from 'react'
-import { Canvas, useThree } from '@react-three/fiber'
+import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-three/drei'
 import * as THREE from 'three'
 import SceneObject from './SceneObject'
@@ -47,13 +46,71 @@ function SceneBackground({ background }) {
   return null
 }
 
+// ----- Componente interno: raycast para sculpt -----
+function SculptRaycaster({ meshRefs, orbitRef }) {
+  const { gl, camera, pointer } = useThree()
+  const mode = useStore((s) => s.mode)
+  const selectedId = useStore((s) => s.selectedId)
+  const sculptStrokeAt = useStore((s) => s.sculptStrokeAt)
+  const sculptSettings = useStore((s) => s.sculptSettings)
+  const isDraggingRef = useRef(false)
+  const raycaster = useRef(new THREE.Raycaster())
+
+  useEffect(() => {
+    if (mode !== 'sculpt' || !selectedId) return
+    const canvas = gl.domElement
+
+    const onPointerDown = (e) => {
+      isDraggingRef.current = true
+      if (orbitRef.current) orbitRef.current.enabled = false
+      doStroke(e)
+    }
+    const onPointerMove = (e) => {
+      if (!isDraggingRef.current) return
+      doStroke(e)
+    }
+    const onPointerUp = () => {
+      isDraggingRef.current = false
+      if (orbitRef.current) orbitRef.current.enabled = true
+    }
+    const doStroke = (e) => {
+      const mesh = meshRefs.current.get(selectedId)
+      if (!mesh) return
+      const rect = canvas.getBoundingClientRect()
+      const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+      const y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+      raycaster.current.setFromCamera(new THREE.Vector2(x, y), camera)
+      const intersects = raycaster.current.intersectObject(mesh)
+      if (intersects.length === 0) return
+      const hit = intersects[0]
+      sculptStrokeAt(selectedId, [hit.point.x, hit.point.y, hit.point.z],
+        [hit.face.normal.x, hit.face.normal.y, hit.face.normal.z],
+        sculptSettings)
+    }
+
+    canvas.addEventListener('pointerdown', onPointerDown)
+    canvas.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    return () => {
+      canvas.removeEventListener('pointerdown', onPointerDown)
+      canvas.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      if (orbitRef.current) orbitRef.current.enabled = true
+    }
+  }, [mode, selectedId, sculptStrokeAt, sculptSettings, gl, camera, meshRefs, orbitRef])
+
+  return null
+}
+
 // ----- Componente interno: TransformControls -----
 function SelectedTransformControls({ selectedMesh, orbitRef }) {
   const transformMode = useStore((s) => s.transformMode)
   const transformObject = useStore((s) => s.transformObject)
   const selectedId = useStore((s) => s.selectedId)
+  const mode = useStore((s) => s.mode)
 
-  if (!selectedMesh || !selectedId) return null
+  // Só mostra TransformControls em modo 'object' (não em edit/sculpt/etc.)
+  if (!selectedMesh || !selectedId || mode !== 'object') return null
 
   return (
     <TransformControls
@@ -67,37 +124,17 @@ function SelectedTransformControls({ selectedMesh, orbitRef }) {
         if (orbitRef.current) orbitRef.current.enabled = true
         if (selectedMesh) {
           transformObject(selectedId, {
-            position: [
-              selectedMesh.position.x,
-              selectedMesh.position.y,
-              selectedMesh.position.z,
-            ],
-            rotation: [
-              selectedMesh.rotation.x,
-              selectedMesh.rotation.y,
-              selectedMesh.rotation.z,
-            ],
-            scale: [
-              selectedMesh.scale.x,
-              selectedMesh.scale.y,
-              selectedMesh.scale.z,
-            ],
+            position: [selectedMesh.position.x, selectedMesh.position.y, selectedMesh.position.z],
+            rotation: [selectedMesh.rotation.x, selectedMesh.rotation.y, selectedMesh.rotation.z],
+            scale: [selectedMesh.scale.x, selectedMesh.scale.y, selectedMesh.scale.z],
           })
         }
       }}
       onObjectChange={() => {
         if (selectedMesh) {
           transformObject(selectedId, {
-            position: [
-              selectedMesh.position.x,
-              selectedMesh.position.y,
-              selectedMesh.position.z,
-            ],
-            rotation: [
-              selectedMesh.rotation.x,
-              selectedMesh.rotation.y,
-              selectedMesh.rotation.z,
-            ],
+            position: [selectedMesh.position.x, selectedMesh.position.y, selectedMesh.position.z],
+            rotation: [selectedMesh.rotation.x, selectedMesh.rotation.y, selectedMesh.rotation.z],
             scale: [selectedMesh.scale.x, selectedMesh.scale.y, selectedMesh.scale.z],
           })
         }
@@ -115,14 +152,10 @@ export default function Scene3D() {
   const background = useStore((s) => s.background)
   const grid = useStore((s) => s.grid)
   const lights = useStore((s) => s.lights)
+  const mode = useStore((s) => s.mode)
 
-  // Refs dos OrbitControls (precisam ser desativados durante TransformControls)
   const orbitRef = useRef(null)
-
-  // Mapa de refs dos meshes por id
   const meshRefs = useRef(new Map())
-
-  // Mesh selecionado (Object3D) — recalculado quando muda a seleção
   const [selectedMesh, setSelectedMesh] = useState(null)
 
   useEffect(() => {
@@ -146,7 +179,7 @@ export default function Scene3D() {
       gl={{ antialias: true, preserveDrawingBuffer: true, alpha: false }}
       onPointerMissed={(e) => {
         if (e.type === 'click' || e.type === 'touchend') {
-          deselect()
+          if (mode === 'object') deselect()
         }
       }}
     >
@@ -206,10 +239,13 @@ export default function Scene3D() {
           />
         ))}
 
-        {/* Gizmo de transformação no objeto selecionado */}
+        {/* Gizmo de transformação no objeto selecionado (só em modo object) */}
         <SelectedTransformControls selectedMesh={selectedMesh} orbitRef={orbitRef} />
 
-        {/* Câmara orbital */}
+        {/* Raycast para sculpt */}
+        <SculptRaycaster meshRefs={meshRefs} orbitRef={orbitRef} />
+
+        {/* Câmara orbital — desativada em modo sculpt durante o arraste */}
         <OrbitControls
           ref={orbitRef}
           makeDefault

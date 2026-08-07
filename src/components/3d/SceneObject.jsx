@@ -2,19 +2,27 @@
  * SceneObject — renderiza um único objeto da cena no Three.js.
  *
  * Responsabilidades:
- *  - Construir a geometria a partir do tipo/args (primitiva) ou usar BufferGeometry externa (importado)
- *  - Construir o material (MeshStandardMaterial) com cor, roughness, metalness, texturas
- *  - Carregar texturas a partir de dataURLs (map, normalMap)
+ *  - Construir geometria (primitiva, importada, ou customGeometry de edit mode)
+ *  - Aplicar modificadores não destrutivos (subdivision, mirror, array, solidify)
+ *  - Construir material PBR com cor, roughness, metalness, emissive, opacity,
+ *    map, normalMap, múltiplas camadas de textura
  *  - Aplicar repeat/offset (tiling UV)
- *  - Suportar seleção visual (outline via wireframe overlay)
+ *  - Suportar seleção visual
  *  - Receber pointer events para seleção
  *  - Forward ref do mesh para o parent usar com TransformControls
+ *  - Suportar skeleton (ossos) para animação
  */
 import { forwardRef, useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { PRIMITIVES } from '../../utils/primitives'
+import {
+  subdivide,
+  mirrorGeometry,
+  arrayGeometry,
+  solidifyGeometry,
+} from '../../utils/meshOperations'
 
-// Cache de texturas carregadas a partir de dataURLs (evita recarregar a mesma imagem)
+// Cache de texturas carregadas a partir de dataURLs
 const textureCache = new Map()
 
 export function loadTexture(dataURL) {
@@ -29,18 +37,68 @@ export function loadTexture(dataURL) {
   return tex
 }
 
+// Aplica a stack de modificadores a uma geometria
+function applyModifiers(geometry, modifiers) {
+  if (!modifiers || modifiers.length === 0) return geometry
+  let result = geometry
+  for (const mod of modifiers) {
+    if (!mod.enabled) continue
+    try {
+      switch (mod.type) {
+        case 'subdivision':
+          result = subdivide(result, mod.params.levels || 1)
+          break
+        case 'mirror':
+          result = mirrorGeometry(result, mod.params.axis || 'x')
+          break
+        case 'array':
+          result = arrayGeometry(
+            result,
+            mod.params.count || 2,
+            mod.params.offset || [1.5, 0, 0]
+          )
+          break
+        case 'solidify':
+          result = solidifyGeometry(result, mod.params.thickness || 0.1)
+          break
+        default:
+          break
+      }
+    } catch (err) {
+      console.warn('Erro ao aplicar modificador', mod.type, err)
+    }
+  }
+  return result
+}
+
 const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect }, meshRef) {
   const innerRef = useRef()
 
-  // ----- Geometria -----
+  // ----- Geometria (com modificadores aplicados) -----
   const geometry = useMemo(() => {
-    if (obj.imported && obj.bufferGeometry) {
-      return obj.bufferGeometry
+    let base
+    if (obj.customGeometry) {
+      // Geometria editada (edit mode / sculpt / boolean)
+      base = new THREE.BufferGeometry()
+      base.setAttribute('position', new THREE.Float32BufferAttribute(obj.customGeometry.positions, 3))
+      if (obj.customGeometry.normals) {
+        base.setAttribute('normal', new THREE.Float32BufferAttribute(obj.customGeometry.normals, 3))
+      } else {
+        base.computeVertexNormals()
+      }
+      if (obj.customGeometry.uvs) {
+        base.setAttribute('uv', new THREE.Float32BufferAttribute(obj.customGeometry.uvs, 2))
+      }
+    } else if (obj.imported && obj.bufferGeometry) {
+      base = obj.bufferGeometry
+    } else {
+      const def = PRIMITIVES[obj.type]
+      base = def ? def.build(THREE, obj.args) : new THREE.BoxGeometry(1, 1, 1)
     }
-    const def = PRIMITIVES[obj.type]
-    if (!def) return new THREE.BoxGeometry(1, 1, 1)
-    return def.build(THREE, obj.args)
-  }, [obj.type, obj.args, obj.imported, obj.bufferGeometry])
+    // Aplicar modificadores não destrutivos
+    const final = applyModifiers(base, obj.modifiers)
+    return final
+  }, [obj.type, obj.args, obj.imported, obj.bufferGeometry, obj.customGeometry, obj.modifiers])
 
   // ----- Material -----
   const material = useMemo(() => {
@@ -55,6 +113,12 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       flatShading: m.flatShading || false,
       side: obj.type === 'plane' ? THREE.DoubleSide : THREE.FrontSide,
     })
+
+    // Emissive
+    if (m.emissive && m.emissive !== '#000000') {
+      mat.emissive = new THREE.Color(m.emissive)
+      mat.emissiveIntensity = m.emissiveIntensity ?? 1
+    }
 
     if (m.map) {
       const tex = loadTexture(m.map)
@@ -76,6 +140,12 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       }
     }
 
+    // Emissive map (se existir)
+    if (m.emissiveMap) {
+      const tex = loadTexture(m.emissiveMap)
+      if (tex) mat.emissiveMap = tex
+    }
+
     mat.needsUpdate = true
     return mat
   }, [obj.material, obj.type])
@@ -94,7 +164,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     if (m.normalMap) applyTiling(loadTexture(m.normalMap))
   }, [obj.material?.repeat, obj.material?.offset, obj.material?.map, obj.material?.normalMap, material])
 
-  // ----- Sincronizar transform inicial -----
+  // ----- Sincronizar transform -----
   useEffect(() => {
     const mesh = innerRef.current
     if (!mesh) return
@@ -116,6 +186,11 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     e.stopPropagation()
     onSelect?.(obj.id)
   }
+
+  // Determinar cor do outline consoante o modo
+  const outlineColor =
+    obj.outlineColor ||
+    (isSelected ? '#2f81f7' : null)
 
   return (
     <mesh

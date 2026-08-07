@@ -171,6 +171,31 @@ export default function MaterialEditor({ obj }) {
         </div>
       </div>
 
+      {/* Emissive */}
+      <div className="prop-row">
+        <label>Emissive (cor de emissão)</label>
+        <input
+          type="color"
+          value={m.emissive || '#000000'}
+          onChange={(e) => set({ emissive: e.target.value })}
+          onBlur={(e) => commit({ emissive: e.target.value })}
+        />
+      </div>
+      {m.emissive && m.emissive !== '#000000' && (
+        <div className="prop-row">
+          <label>Intensidade Emissive: {(m.emissiveIntensity ?? 0).toFixed(2)}</label>
+          <input
+            type="range"
+            min="0"
+            max="5"
+            step="0.1"
+            value={m.emissiveIntensity ?? 0}
+            onChange={(e) => set({ emissiveIntensity: Number(e.target.value) })}
+            onMouseUp={(e) => commit({ emissiveIntensity: Number(e.target.value) })}
+          />
+        </div>
+      )}
+
       <div className="divider" />
 
       {/* Textura difusa */}

@@ -9,22 +9,36 @@
  *  │  Panel   │      Viewport       │   Panel     │
  *  │  (260px) │   (Scene3D canvas)  │   (300px)   │
  *  └──────────┴─────────────────────┴─────────────┘
+ *  │              Timeline (se rig ativo)        │
+ *  │              BottomBar (mobile)             │
  *
- * Em ecrãs < 1024px, os painéis laterais viram drawers (gavetas)
- * acionados pelos botões de menu na topbar.
+ * Em desktop (>= 1024px):
+ *  - Painéis laterais sempre visíveis
+ *  - BottomBar escondida
+ *  - Mais ferramentas via tabs no painel esquerdo
+ *
+ * Em mobile (< 1024px):
+ *  - Painéis laterais viram drawers
+ *  - BottomBar fixa em baixo com 6 ícones principais
+ *  - "Mais ferramentas" abre grelha em ecrã cheia
+ *  - Nenhum scroll horizontal necessário
  */
 import { useEffect } from 'react'
 import TopBar from './components/panels/TopBar'
 import LeftPanel from './components/panels/LeftPanel'
 import RightPanel from './components/panels/RightPanel'
 import Viewport from './components/panels/Viewport'
+import Timeline from './components/panels/Timeline'
 import Toasts from './components/ui/Toasts'
 import LoadingOverlay from './components/ui/LoadingOverlay'
+import BottomBar from './components/ui/BottomBar'
+import MoreToolsGrid from './components/ui/MoreToolsGrid'
 import { useStore } from './store/useStore'
 
 export default function App() {
   const ui = useStore((s) => s.ui)
   const closeDrawers = useStore((s) => s.closeDrawers)
+  const toggleMoreTools = useStore((s) => s.toggleMoreTools)
 
   const undo = useStore((s) => s.undo)
   const redo = useStore((s) => s.redo)
@@ -34,26 +48,51 @@ export default function App() {
   const selectedId = useStore((s) => s.selectedId)
   const deselect = useStore((s) => s.deselect)
 
-  // Atalhos de teclado globais
+  // Estado para o loop de animação
+  const animation = useStore((s) => s.animation)
+  const setAnimation = useStore((s) => s.setAnimation)
+
+  // ===== Loop de animação (requestAnimationFrame) =====
+  useEffect(() => {
+    if (!animation.playing) return
+    let raf
+    let last = performance.now()
+    const tick = (now) => {
+      const delta = (now - last) / 1000
+      last = now
+      const fps = animation.fps || 30
+      const newTime = animation.currentTime + delta * fps
+      if (newTime >= animation.duration) {
+        if (animation.loop) {
+          setAnimation({ currentTime: newTime % animation.duration })
+        } else {
+          setAnimation({ currentTime: animation.duration, playing: false })
+        }
+      } else {
+        setAnimation({ currentTime: newTime })
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [animation.playing, animation.currentTime, animation.duration, animation.fps, animation.loop, setAnimation])
+
+  // ===== Atalhos de teclado globais =====
   useEffect(() => {
     const handler = (e) => {
-      // Ignora se estiver a escrever num input
       const tag = e.target.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
 
       const key = e.key.toLowerCase()
       if (e.ctrlKey || e.metaKey) {
-        // Ctrl/Cmd+Z = undo
         if (key === 'z' && !e.shiftKey) {
           e.preventDefault()
           undo()
         }
-        // Ctrl/Cmd+Shift+Z = redo (ou Ctrl+Y)
         if ((key === 'z' && e.shiftKey) || key === 'y') {
           e.preventDefault()
           redo()
         }
-        // Ctrl/Cmd+D = duplicate
         if (key === 'd' && selectedId) {
           e.preventDefault()
           duplicateObject(selectedId)
@@ -88,6 +127,13 @@ export default function App() {
         <Viewport />
         <RightPanel open={ui.rightDrawerOpen} onClose={closeDrawers} />
       </div>
+
+      <Timeline />
+      <BottomBar />
+
+      {ui.moreToolsOpen && (
+        <MoreToolsGrid onClose={toggleMoreTools} />
+      )}
 
       <Toasts />
       <LoadingOverlay />

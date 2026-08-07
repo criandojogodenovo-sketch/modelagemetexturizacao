@@ -65,6 +65,11 @@ export function defaultMaterial() {
     transparent: false,
     wireframe: false,
     flatShading: false,
+    // Campos novos (texturização pro):
+    emissive: '#000000',
+    emissiveIntensity: 0,
+    // Múltiplas camadas de textura (camadas adicionais sobre o map principal)
+    layers: [], // [{ map, blendMode, opacity, repeat, offset }]
   }
 }
 
@@ -84,5 +89,16 @@ export function createSceneObject(type, position = [0, 0.5, 0]) {
     visible: true,
     // Indica se o objeto foi importado (não é uma primitiva paramétrica)
     imported: false,
+    // NOVO: modificadores não destrutivos (lista ordenada)
+    modifiers: [],
+    // NOVO: hierarquia (parent/child)
+    parentId: null,
+    // NOVO: bufferGeometry serializada (para edit mode / sculpt / boolean)
+    // Quando presente, substitui a geometria paramétrica.
+    customGeometry: null, // { positions: [...], normals: [...], uvs: [...] }
+    // NOVO: skeleton (ossos) para animação
+    skeleton: null, // { bones: [{ id, name, position, rotation, scale, parentId }], skinWeights: [] }
+    // NOVO: animação keyframes
+    animations: {}, // { clipName: [{ time, boneId, position, rotation, scale, interpolation }] }
   }
 }

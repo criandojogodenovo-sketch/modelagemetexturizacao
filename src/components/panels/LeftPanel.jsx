@@ -1,13 +1,19 @@
 /**
  * LeftPanel — painel lateral esquerdo.
  *
- * Contém:
- *  - Ferramentas de primitivas (adicionar cubo, esfera, etc.)
- *  - Modo de transformação (translate / rotate / scale)
- *  - Operações (duplicar, apagar, extrude, visibilidade)
- *  - Outliner (lista de objetos da cena com nomes editáveis)
- *  - Configurações de cena (fundo, grelha, luzes)
+ * Tabs (cada uma com sub-painel próprio):
+ *  - Ferramentas: primitivas + transformação + operações básicas + outliner
+ *  - Editar: edit mode (vertex/edge/face + operações de malha)
+ *  - Modificadores: stack de modificadores não destrutivos
+ *  - Booleanas: operações entre objetos
+ *  - Esculpir: pincel de esculpir
+ *  - Materiais: biblioteca de materiais predefinidos
+ *  - Animação: skeleton, keyframes, clips
+ *  - Cena: fundo, grelha, luzes
+ *
+ * Em mobile, o painel é um drawer lateral.
  */
+import { useState } from 'react'
 import { useStore } from '../../store/useStore'
 import { PRIMITIVE_LIST } from '../../utils/primitives'
 import {
@@ -23,9 +29,33 @@ import {
   IconLayers,
   IconSettings,
   IconClose,
+  IconEdit,
+  IconSubdivide,
+  IconBoolean,
+  IconSculpt,
+  IconLibrary,
+  IconAnimation,
+  IconGroup,
 } from '../ui/Icons'
 import Outliner from './Outliner'
 import SceneSettings from './SceneSettings'
+import EditModePanel from './EditModePanel'
+import ModifiersPanel from './ModifiersPanel'
+import BooleansPanel from './BooleansPanel'
+import SculptPanel from './SculptPanel'
+import MaterialLibraryPanel from './MaterialLibraryPanel'
+import AnimationPanel from './AnimationPanel'
+
+const TABS = [
+  { id: 'tools', label: 'Ferramentas', icon: IconLayers },
+  { id: 'edit', label: 'Editar', icon: IconEdit },
+  { id: 'modifiers', label: 'Modificadores', icon: IconSubdivide },
+  { id: 'boolean', label: 'Booleanas', icon: IconBoolean },
+  { id: 'sculpt', label: 'Escanpir', icon: IconSculpt },
+  { id: 'materials', label: 'Materiais', icon: IconLibrary },
+  { id: 'animation', label: 'Animação', icon: IconAnimation },
+  { id: 'scene', label: 'Cena', icon: IconSettings },
+]
 
 export default function LeftPanel({ open, onClose }) {
   const addObject = useStore((s) => s.addObject)
@@ -37,9 +67,13 @@ export default function LeftPanel({ open, onClose }) {
   const toggleVisibility = useStore((s) => s.toggleVisibility)
   const extrudeObject = useStore((s) => s.extrudeObject)
   const objects = useStore((s) => s.objects)
-  const [activeTab, setTab] = useTabState()
+  const setParent = useStore((s) => s.setParent)
+  const [activeTab, setTab] = useState('tools')
 
   const selectedObj = objects.find((o) => o.id === selectedId)
+
+  // Lista de candidatos a parent (todos exceto o próprio selecionado)
+  const parentCandidates = objects.filter((o) => o.id !== selectedId)
 
   return (
     <>
@@ -52,16 +86,27 @@ export default function LeftPanel({ open, onClose }) {
           </button>
         </div>
 
-        {/* Tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid var(--border-soft)' }}>
-          <TabButton active={activeTab === 'add'} onClick={() => setTab('add')} icon={<IconLayers width={14} height={14} />} label="Adicionar" />
-          <TabButton active={activeTab === 'scene'} onClick={() => setTab('scene')} icon={<IconSettings width={14} height={14} />} label="Cena" />
+        {/* Tabs — scroll horizontal NUNCA; em vez disso, grelha 4 colunas que ajusta */}
+        <div className="tabs-grid">
+          {TABS.map((tab) => {
+            const Icon = tab.icon
+            return (
+              <button
+                key={tab.id}
+                className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`}
+                onClick={() => setTab(tab.id)}
+                title={tab.label}
+              >
+                <Icon width={14} height={14} />
+                <span>{tab.label}</span>
+              </button>
+            )
+          })}
         </div>
 
         <div className="panel-body">
-          {activeTab === 'add' && (
+          {activeTab === 'tools' && (
             <>
-              {/* Primitivas */}
               <div className="panel-section">
                 <h4>Formas</h4>
                 <div className="tool-grid">
@@ -81,7 +126,6 @@ export default function LeftPanel({ open, onClose }) {
                 </div>
               </div>
 
-              {/* Modo de transformação */}
               <div className="panel-section">
                 <h4>Transformação</h4>
                 <div className="mode-row">
@@ -112,7 +156,6 @@ export default function LeftPanel({ open, onClose }) {
                 </div>
               </div>
 
-              {/* Operações */}
               {selectedObj && (
                 <div className="panel-section">
                   <h4>Operações</h4>
@@ -154,7 +197,27 @@ export default function LeftPanel({ open, onClose }) {
                 </div>
               )}
 
-              {/* Outliner */}
+              {/* Agrupar (parent) */}
+              {selectedObj && parentCandidates.length > 0 && (
+                <div className="panel-section">
+                  <h4>Agrupar (Parent)</h4>
+                  <div className="prop-row">
+                    <label>Parent de "{selectedObj.name}"</label>
+                    <select
+                      value={selectedObj.parentId || ''}
+                      onChange={(e) => setParent(selectedObj.id, e.target.value || null)}
+                    >
+                      <option value="">— Nenhum (topo) —</option>
+                      {parentCandidates.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
               <div className="panel-section">
                 <h4>Objetos na Cena ({objects.length})</h4>
                 <Outliner />
@@ -162,41 +225,15 @@ export default function LeftPanel({ open, onClose }) {
             </>
           )}
 
+          {activeTab === 'edit' && <EditModePanel />}
+          {activeTab === 'modifiers' && <ModifiersPanel />}
+          {activeTab === 'boolean' && <BooleansPanel />}
+          {activeTab === 'sculpt' && <SculptPanel />}
+          {activeTab === 'materials' && <MaterialLibraryPanel />}
+          {activeTab === 'animation' && <AnimationPanel />}
           {activeTab === 'scene' && <SceneSettings />}
         </div>
       </aside>
     </>
   )
-}
-
-function TabButton({ active, onClick, icon, label }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        flex: 1,
-        borderRadius: 0,
-        border: 'none',
-        borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
-        background: active ? 'var(--bg-active)' : 'transparent',
-        color: active ? 'var(--accent)' : 'var(--text-secondary)',
-        padding: '8px 4px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 4,
-        fontSize: 11,
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  )
-}
-
-// Hook simples para tabs (estado local ao painel — não persistido)
-import { useState } from 'react'
-function useTabState() {
-  const [tab, setTab] = useState('add')
-  return [tab, setTab]
 }
