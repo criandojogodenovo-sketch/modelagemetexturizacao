@@ -3256,3 +3256,75 @@ label {
   font-size: 10px;
   color: var(--warning);
 }
+
+/* ===== UI Editor (Fase 6) ===== */
+.ui-editor-full {
+  display: grid;
+  grid-template-columns: var(--toolbar-w) 1fr var(--props-w);
+  height: calc(100vh - var(--topbar-h));
+  min-height: 0;
+}
+
+.ui-editor-left {
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.ui-editor-center {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-app);
+  overflow: hidden;
+}
+
+.ui-editor-right {
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.ui-editor-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-soft);
+  align-items: center;
+}
+
+.ui-editor-toolbar select {
+  width: auto;
+}
+
+.ui-canvas-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 20px;
+  background: var(--bg-app);
+}
+
+.ui-canvas {
+  position: relative;
+  background: #1a1a2e;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: var(--shadow-panel);
+}
+
+.ui-el-selected {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px;
+}
+
+@media (max-width: 1024px) {
+  .ui-editor-full {
+    grid-template-columns: 1fr;
+  }
+  .ui-editor-left,
+  .ui-editor-right {
+    display: none;
+  }
+}

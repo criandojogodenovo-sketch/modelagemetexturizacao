@@ -1,8 +1,5 @@
 /**
- * AppModeSwitch — seletor no topo para alternar entre Modo Modelagem e Modo Cena.
- *
- * Modo Modelagem: editar objetos individuais (primitivas, edit, sculpt, etc.)
- * Modo Cena: montar o nível com os objetos criados (level editor)
+ * AppModeSwitch — seletor no topo: Modelagem | Cena | UI
  */
 import { useStore } from '../../store/useStore'
 
@@ -29,6 +26,15 @@ export default function AppModeSwitch() {
         title="Montar o nível com os objetos"
       >
         Cena
+      </button>
+      <button
+        role="tab"
+        aria-selected={appMode === 'ui'}
+        className={appMode === 'ui' ? 'active' : ''}
+        onClick={() => setAppMode('ui')}
+        title="Editor de Interface (UI)"
+      >
+        UI
       </button>
     </div>
   )

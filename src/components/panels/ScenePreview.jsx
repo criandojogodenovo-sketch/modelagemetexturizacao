@@ -148,7 +148,44 @@ function GameRunner({ activeScene, meshRefs, conectMeshRefs, objects }) {
       // Acesso ao physics para nós de física
       applyForce: (instanceId, force) => physicsRef.current?.applyForce(instanceId, force),
       jumpPlayer: (instanceId) => physicsRef.current?.jumpPersonal(instanceId),
+      // ===== Funções de UI =====
+      showUIScreen: (screenName) => {
+        const screens = useStore.getState().uiScreens
+        const screen = screens.find((s) => s.name === screenName)
+        if (screen) useStore.getState().setUIScreenVisible(screen.id, true)
+      },
+      hideUIScreen: (screenName) => {
+        const screens = useStore.getState().uiScreens
+        const screen = screens.find((s) => s.name === screenName)
+        if (screen) useStore.getState().setUIScreenVisible(screen.id, false)
+      },
+      getUIValue: (elementName) => {
+        const screens = useStore.getState().uiScreens
+        for (const sc of screens) {
+          const el = sc.elements.find((e) => e.name === elementName)
+          if (el) return el.value ?? el.checked ?? el.text ?? ''
+        }
+        return ''
+      },
+      setUIValue: (elementName, value) => {
+        const screens = useStore.getState().uiScreens
+        for (const sc of screens) {
+          const el = sc.elements.find((e) => e.name === elementName)
+          if (el) {
+            useStore.getState().updateUIElement(el.id, { value, text: value, label: value })
+            return
+          }
+        }
+      },
+      triggerUIEvent: (eventName, payload) => {
+        // Disparar evento de UI em todos os runtimes ativos
+        for (const rt of runtimesRef.current.values()) {
+          rt.triggerEvent(eventName, payload)
+        }
+      },
     }
+    // Expor globalmente para o GameUIOverlay
+    window._flirGameContext = gameContext
 
     // Registar conects com física
     setTimeout(() => {
@@ -688,8 +725,8 @@ export default function ScenePreview() {
         </Suspense>
       </Canvas>
 
-      {/* UI Overlay: botões, joystick, texto, imagens */}
-      <GameUIOverlay conects={activeScene.conects || []} />
+      {/* UI Overlay: usa o mesmo UIElementRenderer do editor */}
+      <GameUIOverlay />
     </div>
   )
 }

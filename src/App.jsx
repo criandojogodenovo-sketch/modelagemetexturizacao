@@ -27,9 +27,9 @@ import SceneEditorPanel from './components/panels/SceneEditorPanel'
 import ScenePreview from './components/panels/ScenePreview'
 import SceneLevel3D from './components/3d/SceneLevel3D'
 import FlirCodeEditor from './components/panels/flirscript/FlirCodeEditor'
+import UIEditor from './components/panels/ui-editor/UIEditor'
 import ConectsWindow from './components/panels/conects/ConectsWindow'
 import GameExportModal from './components/panels/GameExportModal'
-import UIEditor from './components/panels/ui-editor/UIEditor'
 import ShaderEditor from './components/panels/shader-editor/ShaderEditor'
 import ProjectBrowser from './components/panels/project-browser/ProjectBrowser'
 import DebugConsole from './components/panels/debug/DebugConsole'
@@ -147,6 +147,9 @@ export default function App() {
       {appMode === 'flirscript' ? (
         // Modo FlirCode: editor de texto ocupa todo o ecrã (abaixo da topbar)
         <FlirCodeEditor />
+      ) : appMode === 'ui' ? (
+        // Modo UI: editor de interface ocupa todo o ecrã (abaixo da topbar)
+        <UIEditor />
       ) : (
         <div className="app-body">
           {appMode === 'scene' ? (

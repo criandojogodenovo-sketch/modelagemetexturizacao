@@ -372,9 +372,22 @@ export function createFlirCodeRuntime(source, gameContext) {
         return gameContext.globalVars?.[evaluatedArgs[0]]
       case 'showUI':
         debugLog(`showUI: ${evaluatedArgs[0]}`, 'log', 'FlirCode')
+        gameContext.showUIScreen?.(evaluatedArgs[0])
         break
       case 'hideUI':
         debugLog(`hideUI: ${evaluatedArgs[0]}`, 'log', 'FlirCode')
+        gameContext.hideUIScreen?.(evaluatedArgs[0])
+        break
+      case 'showUIScreen':
+        gameContext.showUIScreen?.(evaluatedArgs[0])
+        break
+      case 'hideUIScreen':
+        gameContext.hideUIScreen?.(evaluatedArgs[0])
+        break
+      case 'getUIValue':
+        return gameContext.getUIValue?.(evaluatedArgs[0]) ?? ''
+      case 'setUIValue':
+        gameContext.setUIValue?.(evaluatedArgs[0], evaluatedArgs[1])
         break
       case 'print':
         debugLog(evaluatedArgs[0], 'log', 'FlirCode')

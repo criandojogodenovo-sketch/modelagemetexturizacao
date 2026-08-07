@@ -827,10 +827,106 @@ export const useStore = create(
         }))
       },
 
+      // ---------- UI Editor (Fase 6) ----------
+      // Múltiplas telas de UI: Main Menu, HUD, Game Over, etc.
+      // Cada tela tem elementos (Button, Label, Input, Checkbox, Slider, etc.)
+      uiScreens: [],
+      activeUIScreenId: null,
+      selectedUIElementId: null,
+
+      createUIScreen: (name = 'Nova Tela') => {
+        get()._pushHistory()
+        const screen = {
+          id: `uiscreen_${Math.random().toString(36).slice(2, 10)}`,
+          name,
+          elements: [],
+          visible: true,
+        }
+        set((s) => ({
+          uiScreens: [...s.uiScreens, screen],
+          activeUIScreenId: screen.id,
+        }))
+        return screen
+      },
+
+      deleteUIScreen: (screenId) => {
+        get()._pushHistory()
+        set((s) => ({
+          uiScreens: s.uiScreens.filter((sc) => sc.id !== screenId),
+          activeUIScreenId: s.activeUIScreenId === screenId
+            ? (s.uiScreens.find((sc) => sc.id !== screenId)?.id || null)
+            : s.activeUIScreenId,
+        }))
+      },
+
+      renameUIScreen: (screenId, name) => {
+        get()._pushHistory()
+        set((s) => ({
+          uiScreens: s.uiScreens.map((sc) => (sc.id === screenId ? { ...sc, name } : sc)),
+        }))
+      },
+
+      setActiveUIScreen: (screenId) => set({ activeUIScreenId: screenId }),
+
+      addUIElement: (elementType, screenId) => {
+        const sid = screenId || get().activeUIScreenId
+        if (!sid) {
+          get().createUIScreen('HUD')
+          return get().addUIElement(elementType)
+        }
+        get()._pushHistory()
+        const defaults = getUIDefaults(elementType)
+        const element = {
+          id: `uiel_${Math.random().toString(36).slice(2, 10)}`,
+          type: elementType,
+          name: `${elementType}`,
+          ...defaults,
+        }
+        set((s) => ({
+          uiScreens: s.uiScreens.map((sc) =>
+            sc.id === sid
+              ? { ...sc, elements: [...sc.elements, element] }
+              : sc
+          ),
+          selectedUIElementId: element.id,
+        }))
+        return element
+      },
+
+      updateUIElement: (elementId, patch) => {
+        set((s) => ({
+          uiScreens: s.uiScreens.map((sc) => ({
+            ...sc,
+            elements: sc.elements.map((el) =>
+              el.id === elementId ? { ...el, ...patch } : el
+            ),
+          })),
+        }))
+      },
+
+      removeUIElement: (elementId) => {
+        get()._pushHistory()
+        set((s) => ({
+          uiScreens: s.uiScreens.map((sc) => ({
+            ...sc,
+            elements: sc.elements.filter((el) => el.id !== elementId),
+          })),
+          selectedUIElementId: s.selectedUIElementId === elementId ? null : s.selectedUIElementId,
+        }))
+      },
+
+      selectUIElement: (elementId) => set({ selectedUIElementId: elementId }),
+
+      setUIScreenVisible: (screenId, visible) => {
+        set((s) => ({
+          uiScreens: s.uiScreens.map((sc) =>
+            sc.id === screenId ? { ...sc, visible } : sc
+          ),
+        }))
+      },
+
       // ---------- App Mode (Modelagem vs Cena vs FlirScript) ----------
-      // Distingue entre o editor de objetos individuais (modelagem),
-      // o editor de cenas/níveis (montar o nível) e o editor de nós FlirScript.
-      appMode: 'modeling', // 'modeling' | 'scene' | 'flirscript'
+      appMode: 'modeling', // 'modeling' | 'scene' | 'flirscript' | 'ui'
       flirScriptTarget: null, // { sceneId, instanceId } — objeto cujo script estamos a editar
       setAppMode: (mode) => {
         set({ appMode: mode })
@@ -1342,11 +1438,69 @@ export const useStore = create(
         scenes: state.scenes,
         activeSceneId: state.activeSceneId,
         appMode: state.appMode,
+        uiScreens: state.uiScreens,
+        activeUIScreenId: state.activeUIScreenId,
       }),
       version: 3,
     }
   )
 )
+
+// ===== Defaults para elementos de UI =====
+function getUIDefaults(type) {
+  const base = {
+    position: [50, 50], // x, y em %
+    size: [120, 40],
+    color: '#1c2128',
+    textColor: '#e6edf3',
+    fontSize: 14,
+    borderColor: '#30363d',
+    borderWidth: 1,
+    borderRadius: 6,
+    padding: 8,
+  }
+  switch (type) {
+    case 'Button':
+      return { ...base, label: 'Botão', color: '#2f81f7', eventName: 'onClick' }
+    case 'Label':
+      return { ...base, text: 'Texto', size: [100, 24], color: 'transparent', borderWidth: 0 }
+    case 'Input':
+      return { ...base, placeholder: 'Escreve...', value: '', color: '#0d1117', eventName: 'onChange' }
+    case 'Checkbox':
+      return { ...base, label: 'Opção', checked: false, size: [20, 20], eventName: 'onChange' }
+    case 'Slider':
+      return { ...base, min: 0, max: 100, value: 50, size: [150, 20], color: '#30363d', eventName: 'onChange' }
+    case 'Form':
+      return { ...base, fields: [], submitLabel: 'Enviar', eventName: 'onSubmit', size: [200, 150] }
+    case 'Text':
+      return { ...base, text: 'Texto', size: [100, 24] }
+    case 'Image':
+      return { ...base, url: '', size: [100, 100] }
+    case 'Panel':
+      return { ...base, size: [200, 100], color: '#1c2128', opacity: 0.8 }
+    default:
+      return base
+  }
+}
+
+// ===== UI Screen helpers exportados =====
+export function useActiveUIScreen() {
+  return useStore((s) => {
+    if (!s.activeUIScreenId) return null
+    return s.uiScreens.find((sc) => sc.id === s.activeUIScreenId) || null
+  })
+}
+
+export function useSelectedUIElement() {
+  return useStore((s) => {
+    if (!s.selectedUIElementId) return null
+    for (const sc of s.uiScreens) {
+      const el = sc.elements.find((e) => e.id === s.selectedUIElementId)
+      if (el) return el
+    }
+    return null
+  })
+}
 
 export function useSelectedObject() {
   return useStore((s) => {
