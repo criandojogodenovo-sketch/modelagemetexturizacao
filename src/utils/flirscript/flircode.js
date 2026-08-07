@@ -237,6 +237,9 @@ export function createFlirCodeRuntime(source, gameContext) {
     onTimer: 'onTimer',
     onEnterZone: 'onEnterZone',
     onExitZone: 'onExitZone',
+    onClick: 'onClick',
+    onChange: 'onChange',
+    onSubmit: 'onSubmit',
   }
 
   // Avaliar um valor (número, string, variável, etc.)
@@ -340,7 +343,8 @@ export function createFlirCodeRuntime(source, gameContext) {
         gameContext.playAnimation?.(gameContext._instanceId, evaluatedArgs[0])
         break
       case 'playSound':
-        gameContext.playSound?.(evaluatedArgs[0])
+        // Procurar SoundObject pelo nome na cena ativa; se não encontrar, usar como URL
+        gameContext.playSoundByName?.(evaluatedArgs[0]) ?? gameContext.playSound?.(evaluatedArgs[0])
         break
       case 'move':
         gameContext.moveObject?.(gameContext._instanceId, evaluatedArgs, 1)

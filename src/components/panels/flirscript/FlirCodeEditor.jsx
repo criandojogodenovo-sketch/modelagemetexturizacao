@@ -54,9 +54,14 @@ export default function FlirCodeEditor() {
     targetScene?.conects?.find((o) => o.instanceId === flirScriptTarget?.instanceId) ||
     targetScene?.objects?.find((o) => o.instanceId === flirScriptTarget?.instanceId)
 
-  // Carregar script existente
+  // Carregar script existente — SÓ quando muda o instanceId (não a cada render)
+  // Usar um ref para garantir que só carrega uma vez por objeto
+  const loadedInstanceId = useRef(null)
   useEffect(() => {
     if (!targetInstance) return
+    // Só carregar se for um objeto DIFERENTE do já carregado
+    if (loadedInstanceId.current === targetInstance.instanceId) return
+    loadedInstanceId.current = targetInstance.instanceId
     const existing = targetInstance.flirScript
     if (typeof existing === 'string' && existing.startsWith('FLIRCODE:')) {
       setCode(existing.slice('FLIRCODE:'.length))
@@ -67,15 +72,15 @@ export default function FlirCodeEditor() {
     }
   }, [targetInstance?.instanceId])
 
-  // Auto-save (debounced)
+  // Auto-save (debounced) — guarda 500ms depois de parar de escrever
   useEffect(() => {
     if (!targetInstance || !code) return
     clearTimeout(saveTimeout)
     saveTimeout = setTimeout(() => {
       setInstanceFlirScript(targetInstance.instanceId, 'FLIRCODE:' + code)
-    }, 800)
+    }, 500)
     return () => clearTimeout(saveTimeout)
-  }, [code, targetInstance?.instanceId])
+  }, [code])
 
   // Atualizar números de linha
   useEffect(() => {

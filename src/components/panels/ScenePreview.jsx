@@ -125,6 +125,21 @@ function GameRunner({ activeScene, meshRefs, conectMeshRefs, objects }) {
           audio.play().catch(() => {})
         } catch {}
       },
+      playSoundByName: (name) => {
+        // Procurar SoundObject pelo nome na cena ativa
+        const soundConect = (activeScene.conects || []).find((c) => c.type === 'SoundObject' && c.name === name)
+        if (soundConect && soundConect.url) {
+          try {
+            const audio = new Audio(soundConect.url)
+            audio.volume = soundConect.volume ?? 1
+            audio.loop = soundConect.loop || false
+            audio.play().catch(() => {})
+            debugLog(`A tocar som "${name}"`, 'log', 'Audio')
+          } catch {}
+          return true
+        }
+        return false // não encontrado — fallback para playSound com URL
+      },
       destroyObject: (instanceId) => {
         const mesh = meshRefs.current.get(instanceId) || conectMeshRefs.current.get(instanceId)
         if (mesh) mesh.visible = false
