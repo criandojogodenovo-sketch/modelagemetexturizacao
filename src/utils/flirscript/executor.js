@@ -111,6 +111,9 @@ export function createFlirScriptRuntime(graphData, gameContext) {
         onTouch: 'event/onTouch',
         onEnterZone: 'event/onEnterZone',
         onExitZone: 'event/onExitZone',
+        onSeePlayer: 'event/onSeePlayer',
+        onLoseSight: 'event/onLoseSight',
+        onTimer: 'event/onTimer',
         onTouchScreen: 'input/onTouchScreen',
         onSwipe: 'input/onSwipe',
       }

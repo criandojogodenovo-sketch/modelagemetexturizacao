@@ -96,6 +96,33 @@ export const NODE_DEFINITIONS = [
     ],
     isEvent: true,
   },
+  {
+    type: 'event/onSeePlayer',
+    label: 'Ao ver Jogador (NPC)',
+    category: 'events',
+    description: 'Dispara quando um NpcObject deteta o PersonalObject no raio de deteção',
+    inputs: [],
+    outputs: [{ name: 'exec', type: 'exec' }],
+    isEvent: true,
+  },
+  {
+    type: 'event/onLoseSight',
+    label: 'Ao perder Jogador (NPC)',
+    category: 'events',
+    description: 'Dispara quando o NpcObject perde de vista o PersonalObject',
+    inputs: [],
+    outputs: [{ name: 'exec', type: 'exec' }],
+    isEvent: true,
+  },
+  {
+    type: 'event/onTimer',
+    label: 'Ao Timer acabar',
+    category: 'events',
+    description: 'Dispara quando um TimerObject chega a zero',
+    inputs: [],
+    outputs: [{ name: 'exec', type: 'exec' }],
+    isEvent: true,
+  },
 
   // ===== Ações =====
   {

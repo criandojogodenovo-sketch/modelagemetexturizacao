@@ -22,10 +22,10 @@ import { useStore } from '../../store/useStore'
 import { IconClose, IconPlay } from '../ui/Icons'
 import GameSplash from '../ui/GameSplash'
 import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
+import { createFlirCodeRuntime } from '../../utils/flirscript/flircode'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
 import { createAnimationPlayer } from '../../utils/animationPlayer'
 import { createNPCAI } from '../../utils/conects/npcAI'
-import { createFlirScriptRuntime as createFS } from '../../utils/flirscript/executor'
 import { debugLog } from '../../utils/debug/debugStore'
 
 function PreviewBackground({ background }) {
@@ -50,6 +50,20 @@ function PreviewBackground({ background }) {
     }
   }, [background, scene])
   return null
+}
+
+// Avalia condições do AnimationController (speed>X, grounded==true, etc.)
+function evaluateCondition(condition, ctx) {
+  if (!condition) return false
+  let m = condition.match(/^speed\s*>\s*(\d+(\.\d+)?)/)
+  if (m) return (ctx.speed || 0) > parseFloat(m[1])
+  m = condition.match(/^speed\s*<\s*(\d+(\.\d+)?)/)
+  if (m) return (ctx.speed || 0) < parseFloat(m[1])
+  m = condition.match(/^grounded\s*==\s*(true|false)/)
+  if (m) return ctx.grounded === (m[1] === 'true')
+  m = condition.match(/^attacking\s*==\s*(true|false)/)
+  if (m) return !!ctx.attacking === (m[1] === 'true')
+  return false
 }
 
 // Runner que integra física + FlirScript + Animação + IA NPC
@@ -145,6 +159,12 @@ function GameRunner({ activeScene, meshRefs, conectMeshRefs, objects }) {
           physicsRef.current.addConect(conect, mesh)
         }
       }
+      // ===== Setup JointObjects (juntas físicas entre corpos) =====
+      for (const conect of activeScene.conects || []) {
+        if (conect.type === 'JointObject' && conect.targetA && conect.targetB) {
+          physicsRef.current.addJoint(conect)
+        }
+      }
       // Avisar se exceder limite
       const stats = physicsRef.current.getStats()
       if (stats.atLimit) {
@@ -166,35 +186,39 @@ function GameRunner({ activeScene, meshRefs, conectMeshRefs, objects }) {
       if (rt) rt.triggerEvent('onExitZone', { other: otherInstanceId })
     })
 
-    // Criar runtimes FlirScript para objetos com script
-    for (const instance of activeScene.objects || []) {
-      if (instance.flirScript) {
-        const errors = validateGraph(instance.flirScript)
-        if (errors.length > 0) continue
-        try {
-          const rt = createFlirScriptRuntime(instance.flirScript, gameContext)
+    // Criar runtimes FlirScript/FlirCode para objetos com script
+    const setupRuntime = (instance, scriptData) => {
+      if (!scriptData) return
+      try {
+        // Detectar se é FlirCode (texto) ou grafo visual (objeto)
+        if (typeof scriptData === 'string' && scriptData.startsWith('FLIRCODE:')) {
+          // FlirCode (texto)
+          const source = scriptData.slice('FLIRCODE:'.length)
+          const rt = createFlirCodeRuntime(source, { ...gameContext, _instanceId: instance.instanceId })
+          if (!rt.hasErrors) {
+            runtimesRef.current.set(instance.instanceId, rt)
+            rt.triggerEvent('beginPlay')
+          } else {
+            debugLog(`FlirCode tem erros — não executado para ${instance.name}`, 'error', 'FlirCode')
+          }
+        } else if (typeof scriptData === 'object') {
+          // Grafo visual (litegraph serializado)
+          const errors = validateGraph(scriptData)
+          if (errors.length > 0) return
+          const rt = createFlirScriptRuntime(scriptData, gameContext)
           rt.graph.nodes.forEach((n) => { n._instanceId = instance.instanceId })
           runtimesRef.current.set(instance.instanceId, rt)
           rt.triggerEvent('beginPlay')
-        } catch (err) {
-          console.error('[FlirScript] Erro:', err)
         }
+      } catch (err) {
+        debugLog(`Erro ao inicializar script: ${err.message}`, 'error', 'Script')
       }
     }
-    // E para conects com script
+    for (const instance of activeScene.objects || []) {
+      setupRuntime(instance, instance.flirScript)
+    }
     for (const conect of activeScene.conects || []) {
-      if (conect.flirScript) {
-        const errors = validateGraph(conect.flirScript)
-        if (errors.length > 0) continue
-        try {
-          const rt = createFlirScriptRuntime(conect.flirScript, gameContext)
-          rt.graph.nodes.forEach((n) => { n._instanceId = conect.instanceId })
-          runtimesRef.current.set(conect.instanceId, rt)
-          rt.triggerEvent('beginPlay')
-        } catch (err) {
-          console.error('[FlirScript] Erro:', err)
-        }
-      }
+      setupRuntime(conect, conect.flirScript)
     }
 
     // Auto-start timers e spawns
@@ -259,8 +283,9 @@ function GameRunner({ activeScene, meshRefs, conectMeshRefs, objects }) {
           emitEvent: (eventName, payload) => {
             const rt = runtimesRef.current.get(conect.instanceId)
             if (rt) {
-              // Mapear eventos NPC para eventos FlirScript
-              if (eventName === 'OnSeePlayer') rt.triggerEvent('onTouch', payload)
+              // Eventos NPC dedicados (não mapear para onTouch)
+              if (eventName === 'OnSeePlayer') rt.triggerEvent('onSeePlayer', payload)
+              else if (eventName === 'OnLoseSight') rt.triggerEvent('onLoseSight', payload)
               debugLog(`NPC ${conect.name}: ${eventName}`, 'log', 'NPC AI')
             }
           },
@@ -363,7 +388,7 @@ function GameRunner({ activeScene, meshRefs, conectMeshRefs, objects }) {
       state.remaining -= delta
       if (state.remaining <= 0) {
         const rt = runtimesRef.current.get(id)
-        if (rt) rt.triggerEvent('beginPlay') // dispara evento no FlirScript
+        if (rt) rt.triggerEvent('onTimer') // evento dedicado onTimer
         if (state.loop) {
           state.remaining = state.duration
         } else {
@@ -373,7 +398,6 @@ function GameRunner({ activeScene, meshRefs, conectMeshRefs, objects }) {
     }
 
     // ===== Controlador de Animação para PersonalObject/NpcObject =====
-    // Avaliar condições de transição e mudar de animação
     for (const conect of activeScene.conects || []) {
       if (conect.type !== 'PersonalObject' && conect.type !== 'NpcObject') continue
       if (!conect.animationController) continue
@@ -381,15 +405,63 @@ function GameRunner({ activeScene, meshRefs, conectMeshRefs, objects }) {
       if (!player) continue
       const mesh = conectMeshRefs.current.get(conect.instanceId)
       // Calcular contexto (velocidade, grounded)
+      const physicsEntry = physicsRef.current?.bodies?.get(conect.instanceId)
       const ctx = {
-        speed: mesh ? Math.sqrt(mesh.position.x * mesh.position.x + mesh.position.z * mesh.position.z) : 0,
-        grounded: true, // simplificado
+        speed: mesh ? Math.sqrt(
+          (mesh.position.x - (player._lastX || mesh.position.x)) ** 2 +
+          (mesh.position.z - (player._lastZ || mesh.position.z)) ** 2
+        ) / Math.max(delta, 0.001) : 0,
+        grounded: physicsEntry?.grounded ?? true,
         attacking: false,
       }
-      // O animationController já avalia transições internamente
-      // Mas precisamos de chamar update nele — o player faz isso
-      // O controlador está embutido no player? Não, é separado.
-      // Para já, o player toca o clip default; o controlador seria ligado aqui.
+      if (mesh) {
+        player._lastX = mesh.position.x
+        player._lastZ = mesh.position.z
+      }
+      // Avaliar transições do controlador
+      const controller = conect.animationController
+      const currentState = player.getCurrentClip()
+      for (const t of controller.transitions || []) {
+        if (t.from !== currentState) continue
+        if (evaluateCondition(t.condition, ctx)) {
+          const targetState = controller.states?.find((s) => s.id === t.to)
+          if (targetState) {
+            player.play(targetState.clip || targetState.name, { loop: true })
+          }
+          break
+        }
+      }
+    }
+
+    // ===== Atualizar TrailObjects =====
+    for (const conect of activeScene.conects || []) {
+      if (conect.type !== 'TrailObject') continue
+      const trailMesh = conectMeshRefs.current.get(conect.instanceId)
+      if (!trailMesh) continue
+      // Seguir o objeto pai (followTarget)
+      const targetId = conect.followTarget
+      if (targetId) {
+        const targetMesh = meshRefs.current.get(targetId) || conectMeshRefs.current.get(targetId)
+        if (targetMesh) {
+          // Atualizar posição do trail para seguir o alvo
+          trailMesh.position.lerp(targetMesh.position, 0.3)
+          // Atualizar geometria da linha com histórico de posições
+          if (!trailMesh.userData.trailPoints) {
+            trailMesh.userData.trailPoints = []
+          }
+          const points = trailMesh.userData.trailPoints
+          points.push(targetMesh.position.clone())
+          const maxLen = conect.length || 30
+          while (points.length > maxLen) points.shift()
+          // Atualizar geometria da linha
+          const lineObj = trailMesh.children?.find((c) => c.isLine)
+          if (lineObj && points.length > 1) {
+            const newGeo = new THREE.BufferGeometry().setFromPoints(points)
+            lineObj.geometry.dispose()
+            lineObj.geometry = newGeo
+          }
+        }
+      }
     }
 
     // Joystick → mover PersonalObject

@@ -23,23 +23,89 @@ async function parseFBX(arrayBuffer) {
   const { FBXLoader } = await import('three/examples/jsm/loaders/FBXLoader.js')
   const loader = new FBXLoader()
   const object = loader.parse(arrayBuffer, '')
-  // Extrair animações
+  // Extrair animações e converter para formato do animationPlayer
   const animations = {}
   if (object.animations && object.animations.length > 0) {
     for (const clip of object.animations) {
-      animations[clip.name || 'anim'] = {
-        duration: clip.duration,
-        tracks: clip.tracks.map((t) => ({
-          name: t.name,
-          type: t.ValueTypeName || 'number',
-          times: Array.from(t.times),
-          values: Array.from(t.values),
-        })),
-        fps: 30,
-      }
+      const keyframes = convertFBXToKeyframes(clip)
+      animations[clip.name || 'anim'] = keyframes
     }
   }
   return { object, animations }
+}
+
+/**
+ * Converte tracks de animação FBX (THREE.AnimationClip) para o formato
+ * de keyframes aceite pelo animationPlayer.js.
+ *
+ * Formato do animationPlayer:
+ *   [{ id, time, boneId, position, rotation, scale, interpolation }]
+ *
+ * Tracks do FBX têm:
+ *   name: "bone.position" / "bone.quaternion" / "bone.scale"
+ *   times: [0, 0.5, 1.0, ...]
+ *   values: [x,y,z, x,y,z, ...] (para position/scale) ou [x,y,z,w, ...] (para quaternion)
+ */
+function convertFBXToKeyframes(clip) {
+  const keyframesByBone = new Map() // boneId → Map(time → {position, rotation, scale})
+
+  for (const track of clip.tracks) {
+    // Parsear o nome da track: "boneName.position" ou "boneName.quaternion" ou "boneName.scale"
+    const parts = track.name.split('.')
+    if (parts.length < 2) continue
+    const boneName = parts[0]
+    const property = parts[1] // position, quaternion, scale
+
+    if (!keyframesByBone.has(boneName)) {
+      keyframesByBone.set(boneName, new Map())
+    }
+    const boneMap = keyframesByBone.get(boneName)
+
+    const times = track.times
+    const values = track.values
+    const stride = property === 'quaternion' ? 4 : 3
+
+    for (let i = 0; i < times.length; i++) {
+      const t = times[i]
+      if (!boneMap.has(t)) {
+        boneMap.set(t, {
+          time: t,
+          boneId: boneName,
+          position: [0, 0, 0],
+          rotation: [0, 0, 0],
+          scale: [1, 1, 1],
+          interpolation: 'ease',
+        })
+      }
+      const kf = boneMap.get(t)
+      const offset = i * stride
+      if (property === 'position') {
+        kf.position = [values[offset], values[offset + 1], values[offset + 2]]
+      } else if (property === 'quaternion') {
+        // Converter quaternion para Euler
+        const qx = values[offset], qy = values[offset + 1], qz = values[offset + 2], qw = values[offset + 3]
+        const euler = new THREE.Euler().setFromQuaternion(new THREE.Quaternion(qx, qy, qz, qw))
+        kf.rotation = [euler.x, euler.y, euler.z]
+      } else if (property === 'scale') {
+        kf.scale = [values[offset], values[offset + 1], values[offset + 2]]
+      }
+    }
+  }
+
+  // Flatten para array de keyframes
+  const keyframes = []
+  for (const boneMap of keyframesByBone.values()) {
+    for (const kf of boneMap.values()) {
+      keyframes.push({
+        id: `kf_${Math.random().toString(36).slice(2, 10)}`,
+        ...kf,
+      })
+    }
+  }
+  // Ordenar por tempo
+  keyframes.sort((a, b) => a.time - b.time)
+
+  return keyframes
 }
 
 export default function AnimationStudio({ onClose }) {

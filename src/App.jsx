@@ -26,7 +26,7 @@ import Timeline from './components/panels/Timeline'
 import SceneEditorPanel from './components/panels/SceneEditorPanel'
 import ScenePreview from './components/panels/ScenePreview'
 import SceneLevel3D from './components/3d/SceneLevel3D'
-import FlirScriptEditor from './components/panels/flirscript/FlirScriptEditor'
+import FlirCodeEditor from './components/panels/flirscript/FlirCodeEditor'
 import ConectsWindow from './components/panels/conects/ConectsWindow'
 import GameExportModal from './components/panels/GameExportModal'
 import UIEditor from './components/panels/ui-editor/UIEditor'
@@ -145,8 +145,8 @@ export default function App() {
       <OfflineIndicator />
 
       {appMode === 'flirscript' ? (
-        // Modo FlirScript: editor de nós ocupa todo o ecrã (abaixo da topbar)
-        <FlirScriptEditor />
+        // Modo FlirCode: editor de texto ocupa todo o ecrã (abaixo da topbar)
+        <FlirCodeEditor />
       ) : (
         <div className="app-body">
           {appMode === 'scene' ? (

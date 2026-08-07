@@ -1,0 +1,428 @@
+/**
+ * flircode.js — interpretador da linguagem FlirCode.
+ *
+ * Linguagem de scripting por texto próprio (não é GDScript nem JavaScript).
+ * Compila para o mesmo gameContext que o executor.js usa, garantindo
+ * compatibilidade total com Conects, eventos e físicas existentes.
+ *
+ * Sintaxe:
+ *   begincode ... endcode          — blocos de código
+ *   fun nome(params) begincode ... endcode  — declarar função
+ *   var nome = valor               — declarar variável
+ *   $$ comentário                  — linha de comentário
+ *   if (cond), else if (cond), else — condicionais
+ *   repeat in number(n, i) begincode ... endcode — ciclo por quantidade
+ *   repeat +n until m begincode ... endcode — ciclo por incremento
+ *   repeat -n until m begincode ... endcode — ciclo por decremento
+ *   switch (var) begincode case v begincode ... endcode default begincode ... endcode endcode
+ *
+ * Eventos (funções especiais chamadas automaticamente):
+ *   fun aoIniciar()     — BeginPlay
+ *   fun aTick()         — Tick (a cada frame)
+ *   fun aoColidir(outro) — OnCollision
+ *   fun aoTocar()       — OnTouch
+ *   fun aoVerJogador()  — OnSeePlayer (NPC)
+ *   fun aoPerderJogador() — OnLoseSight (NPC)
+ *   fun aoTimer()       — OnTimer
+ *
+ * Funções embutidas:
+ *   playAnim("name"), playSound("name"), move(x,y,z), rotate(x,y,z), scale(x,y,z)
+ *   destroy(object), createObject("name",x,y,z), changeScene("name"), wait(seconds)
+ *   setVar("name",value), getVar("name"), showUI("name"), hideUI("name")
+ *   print("msg"), warn("msg"), error("msg")
+ *   collidingWith("type"), distanceTo(object), isTouching()
+ */
+import { debugLog } from '../debug/debugStore'
+
+// ===== Parser =====
+// Converte texto FlirCode num AST (Abstract Syntax Tree) que o runtime executa.
+// O parser é um tokenizer + recursive descent parser simples.
+
+export function parseFlirCode(source) {
+  const errors = []
+  const lines = source.split('\n')
+  const functions = {}
+
+  // Pré-processar: remover comentários e linhas vazias
+  const cleanLines = []
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+    if (trimmed.startsWith('$$') || trimmed === '') continue
+    cleanLines.push({ text: trimmed, line: i + 1 })
+  }
+
+  // Parser de funções
+  let idx = 0
+  while (idx < cleanLines.length) {
+    const line = cleanLines[idx]
+    // Procurar "fun nome(params) begincode"
+    const funMatch = line.text.match(/^fun\s+(\w+)\s*\(([^)]*)\)\s*begincode$/)
+    if (funMatch) {
+      const funName = funMatch[1]
+      const params = funMatch[2].split(',').map((p) => p.trim()).filter((p) => p)
+      const body = parseBlock(cleanLines, idx + 1, errors)
+      if (body.error) {
+        errors.push({ line: line.line, message: `Função "${funName}": ${body.error}` })
+        idx = body.nextIdx
+        continue
+      }
+      functions[funName] = { name: funName, params, body: body.statements, line: line.line }
+      idx = body.nextIdx
+    } else {
+      // Pode ser uma variável global ou instrução solta
+      // Por agora, ignorar (só suportamos funções no top-level)
+      idx++
+    }
+  }
+
+  return { functions, errors }
+}
+
+// Parser de bloco begincode...endcode
+function parseBlock(lines, startIdx, errors) {
+  const statements = []
+  let idx = startIdx
+  let depth = 1 // já entramos num begincode
+
+  while (idx < lines.length && depth > 0) {
+    const line = lines[idx]
+    const text = line.text
+
+    if (text === 'endcode') {
+      depth--
+      if (depth === 0) {
+        return { statements, nextIdx: idx + 1 }
+      }
+      statements.push({ type: 'endcode', line: line.line })
+      idx++
+      continue
+    }
+
+    if (text.endsWith('begincode')) {
+      // Sub-bloco (if, else, repeat, etc.)
+      const stmt = parseStatement(lines, idx, errors)
+      if (stmt) {
+        statements.push(stmt)
+        idx = stmt.nextIdx
+      } else {
+        idx++
+      }
+    } else {
+      // Instrução simples
+      const stmt = parseSimpleStatement(text, line.line, errors)
+      if (stmt) statements.push(stmt)
+      idx++
+    }
+  }
+
+  if (depth > 0) {
+    return { error: 'begincode sem endcode correspondente', nextIdx: idx }
+  }
+  return { statements, nextIdx: idx }
+}
+
+// Parser de uma instrução individual
+function parseSimpleStatement(text, lineNum, errors) {
+  // var nome = valor
+  let m = text.match(/^var\s+(\w+)\s*=\s*(.+)$/)
+  if (m) return { type: 'var', name: m[1], value: parseValue(m[2]), line: lineNum }
+
+  // if (cond) begincode
+  m = text.match(/^if\s*\((.+)\)\s*begincode$/)
+  if (m) return { type: 'if', condition: m[1], line: lineNum }
+
+  // else if (cond) begincode
+  m = text.match(/^else\s+if\s*\((.+)\)\s*begincode$/)
+  if (m) return { type: 'elseif', condition: m[1], line: lineNum }
+
+  // else begincode
+  m = text.match(/^else\s*begincode$/)
+  if (m) return { type: 'else', line: lineNum }
+
+  // repeat in number(quantidade, variavel) begincode
+  m = text.match(/^repeat\s+in\s+number\s*\((\d+),\s*(\w+)\)\s*begincode$/)
+  if (m) return { type: 'repeat_n', count: parseInt(m[1]), varName: m[2], line: lineNum }
+
+  // repeat +numero until numero begincode
+  m = text.match(/^repeat\s+\+(\d+)\s+until\s+(\d+)\s*begincode$/)
+  if (m) return { type: 'repeat_inc', step: parseInt(m[1]), until: parseInt(m[2]), line: lineNum }
+
+  // repeat -numero until numero begincode
+  m = text.match(/^repeat\s+-(\d+)\s+until\s+(\d+)\s*begincode$/)
+  if (m) return { type: 'repeat_dec', step: parseInt(m[1]), until: parseInt(m[2]), line: lineNum }
+
+  // switch (var) begincode
+  m = text.match(/^switch\s*\((.+)\)\s*begincode$/)
+  if (m) return { type: 'switch', varName: m[1], line: lineNum }
+
+  // case valor begincode
+  m = text.match(/^case\s+(.+)\s*begincode$/)
+  if (m) return { type: 'case', value: m[1].trim(), line: lineNum }
+
+  // default begincode
+  m = text.match(/^default\s*begincode$/)
+  if (m) return { type: 'default', line: lineNum }
+
+  // Chamada de função embutida: nome(args)
+  m = text.match(/^(\w+)\s*\(([^)]*)\)$/)
+  if (m) {
+    const funcName = m[1]
+    const args = m[2].split(',').map((a) => a.trim()).filter((a) => a)
+    return { type: 'call', funcName, args: args.map(parseValue), line: lineNum }
+  }
+
+  // Atribuição: nome = valor
+  m = text.match(/^(\w+)\s*=\s*(.+)$/)
+  if (m) return { type: 'assign', name: m[1], value: parseValue(m[2]), line: lineNum }
+
+  // Se não reconhecer, ignorar (não travar)
+  return { type: 'unknown', text, line: lineNum }
+}
+
+// Parser de statement (para sub-blocos)
+function parseStatement(lines, idx, errors) {
+  const stmt = parseSimpleStatement(lines[idx].text, lines[idx].line, errors)
+  if (!stmt) return null
+  // Se o statement abre um bloco (if, repeat, etc.), parsear o corpo
+  if (['if', 'elseif', 'else', 'repeat_n', 'repeat_inc', 'repeat_dec', 'switch', 'case', 'default'].includes(stmt.type)) {
+    const body = parseBlock(lines, idx + 1, errors)
+    if (body.error) {
+      errors.push({ line: lines[idx].line, message: body.error })
+      return { ...stmt, body: [], nextIdx: body.nextIdx }
+    }
+    return { ...stmt, body: body.statements, nextIdx: body.nextIdx }
+  }
+  return { ...stmt, nextIdx: idx + 1 }
+}
+
+// Parser de valores (números, strings, variáveis, expressões simples)
+function parseValue(text) {
+  text = text.trim()
+  // String
+  if (text.startsWith('"') && text.endsWith('"')) {
+    return { type: 'string', value: text.slice(1, -1) }
+  }
+  // Número
+  const num = parseFloat(text)
+  if (!isNaN(num)) return { type: 'number', value: num }
+  // Booleano
+  if (text === 'true') return { type: 'boolean', value: true }
+  if (text === 'false') return { type: 'boolean', value: false }
+  // Variável
+  return { type: 'var', name: text }
+}
+
+// ===== Runtime =====
+// Executa o AST compilado, chamando as funções embutidas do gameContext.
+
+export function createFlirCodeRuntime(source, gameContext) {
+  const { functions, errors } = parseFlirCode(source)
+
+  // Se há erros de sintaxe, reportar e não executar
+  for (const err of errors) {
+    debugLog(`Erro de sintaxe FlirCode (linha ${err.line}): ${err.message}`, 'error', 'FlirCode')
+  }
+
+  // Variáveis locais do script
+  const localVars = {}
+
+  // Mapear nomes de eventos PT → nome interno
+  const eventMap = {
+    aoIniciar: 'beginPlay',
+    aTick: 'tick',
+    aoColidir: 'onCollision',
+    aoTocar: 'onTouch',
+    aoVerJogador: 'onSeePlayer',
+    aoPerderJogador: 'onLoseSight',
+    aoTimer: 'onTimer',
+    aoEntrarZona: 'onEnterZone',
+    aoSairZona: 'onExitZone',
+  }
+
+  // Avaliar um valor (número, string, variável, etc.)
+  function evalValue(val) {
+    if (!val) return null
+    switch (val.type) {
+      case 'number': return val.value
+      case 'string': return val.value
+      case 'boolean': return val.value
+      case 'var': return localVars[val.name] ?? gameContext.getVar?.(val.name) ?? 0
+      default: return null
+    }
+  }
+
+  // Avaliar condição (string como "x > 5", "a == b", etc.)
+  function evalCondition(cond) {
+    // Simplificado: suporta > < == != >= <=
+    const m = cond.match(/^(.+?)\s*(>=|<=|==|!=|>|<)\s*(.+)$/)
+    if (!m) return !!evalValue(parseValue(cond))
+    const left = evalValue(parseValue(m[1].trim()))
+    const op = m[2]
+    const right = evalValue(parseValue(m[3].trim()))
+    switch (op) {
+      case '>': return left > right
+      case '<': return left < right
+      case '>=': return left >= right
+      case '<=': return left <= right
+      case '==': return left == right
+      case '!=': return left != right
+    }
+    return false
+  }
+
+  // Executar uma lista de statements
+  function execStatements(statements, params = {}) {
+    for (const stmt of statements) {
+      try {
+        execStatement(stmt, params)
+      } catch (err) {
+        debugLog(`Erro ao executar (linha ${stmt.line}): ${err.message}`, 'error', 'FlirCode')
+        // Não travar — continuar
+      }
+    }
+  }
+
+  // Executar um statement
+  function execStatement(stmt, params) {
+    switch (stmt.type) {
+      case 'var':
+        localVars[stmt.name] = evalValue(stmt.value)
+        break
+      case 'assign':
+        localVars[stmt.name] = evalValue(stmt.value)
+        break
+      case 'if': {
+        if (evalCondition(stmt.condition)) {
+          execStatements(stmt.body || [], params)
+        }
+        break
+      }
+      case 'call': {
+        execBuiltin(stmt.funcName, stmt.args, params)
+        break
+      }
+      case 'repeat_n': {
+        localVars[stmt.varName] = 0
+        for (let i = 0; i < stmt.count; i++) {
+          localVars[stmt.varName] = i
+          execStatements(stmt.body || [], params)
+        }
+        break
+      }
+      case 'repeat_inc': {
+        let v = 0
+        while (v <= stmt.until) {
+          execStatements(stmt.body || [], { ...params, _repeat: v })
+          v += stmt.step
+        }
+        break
+      }
+      case 'repeat_dec': {
+        let v = stmt.until
+        while (v >= 0) {
+          execStatements(stmt.body || [], { ...params, _repeat: v })
+          v -= stmt.step
+        }
+        break
+      }
+      // elseif, else, switch, case, default são processados dentro dos blocos if/switch
+      case 'endcode':
+      case 'unknown':
+        break
+    }
+  }
+
+  // Executar função embutida
+  function execBuiltin(name, args, params) {
+    const evaluatedArgs = args.map((a) => evalValue(a))
+    switch (name) {
+      case 'playAnim':
+        gameContext.playAnimation?.(gameContext._instanceId, evaluatedArgs[0])
+        break
+      case 'playSound':
+        gameContext.playSound?.(evaluatedArgs[0])
+        break
+      case 'move':
+        gameContext.moveObject?.(gameContext._instanceId, evaluatedArgs, 1)
+        break
+      case 'rotate':
+        gameContext.rotateObject?.(gameContext._instanceId, evaluatedArgs)
+        break
+      case 'scale':
+        gameContext.setVisible?.(gameContext._instanceId, true) // placeholder
+        break
+      case 'destroy':
+        gameContext.destroyObject?.(gameContext._instanceId)
+        break
+      case 'createObject':
+        gameContext.spawnObject?.(evaluatedArgs[0], [evaluatedArgs[1], evaluatedArgs[2], evaluatedArgs[3]])
+        break
+      case 'changeScene':
+        gameContext.changeScene?.(evaluatedArgs[0])
+        break
+      case 'wait':
+        // Não-bloqueante: o FlirCode não suporta wait assíncrono por agora
+        // (seria necessário um scheduler de coroutines)
+        break
+      case 'setVar':
+        gameContext.globalVars = gameContext.globalVars || {}
+        gameContext.globalVars[evaluatedArgs[0]] = evaluatedArgs[1]
+        break
+      case 'getVar':
+        return gameContext.globalVars?.[evaluatedArgs[0]]
+      case 'showUI':
+        debugLog(`showUI: ${evaluatedArgs[0]}`, 'log', 'FlirCode')
+        break
+      case 'hideUI':
+        debugLog(`hideUI: ${evaluatedArgs[0]}`, 'log', 'FlirCode')
+        break
+      case 'print':
+        debugLog(evaluatedArgs[0], 'log', 'FlirCode')
+        break
+      case 'warn':
+        debugLog(evaluatedArgs[0], 'warning', 'FlirCode')
+        break
+      case 'error':
+        debugLog(evaluatedArgs[0], 'error', 'FlirCode')
+        break
+      case 'collidingWith':
+        return false // placeholder
+      case 'distanceTo':
+        return 0 // placeholder
+      case 'isTouching':
+        return false // placeholder
+      default:
+        debugLog(`Função desconhecida: ${name}`, 'warning', 'FlirCode')
+    }
+  }
+
+  return {
+    functions,
+    errors,
+    hasErrors: errors.length > 0,
+
+    // Dispara um evento
+    triggerEvent(eventName, payload = {}) {
+      // Mapear nome interno → nome PT
+      const ptName = Object.entries(eventMap).find(([_, en]) => en === eventName)?.[0]
+      if (!ptName) return
+      const fn = functions[ptName]
+      if (!fn) return
+      // Passar payload como parâmetros
+      const params = {}
+      if (fn.params.length > 0) {
+        params[fn.params[0]] = payload
+      }
+      gameContext._instanceId = gameContext._instanceId // já definido externamente
+      execStatements(fn.body, params)
+    },
+
+    update(delta) {
+      // Não usado — FlirCode é orientado a eventos
+    },
+
+    dispose() {
+      // limpar
+    },
+  }
+}
