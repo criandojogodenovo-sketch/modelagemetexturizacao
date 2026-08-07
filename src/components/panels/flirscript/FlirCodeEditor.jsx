@@ -17,20 +17,20 @@ import { debugLog } from '../../../utils/debug/debugStore'
 import { IconClose, IconCheck } from '../../ui/Icons'
 
 // Template default para um novo script
-const DEFAULT_SCRIPT = `$$ Script FlirCode — ${''}
-$$ Escreve a lógica do objeto aqui.
+const DEFAULT_SCRIPT = `$$ Script FlirCode
+$$ Write the object logic here.
 
-fun aoIniciar() begincode
-    $$ Código a executar quando o jogo começa
-    print("Ola mundo!")
+fun onStart() begincode
+    $$ Code to run when the game starts
+    print("Hello world!")
 endcode
 
-fun aTick() begincode
-    $$ Código a executar a cada frame
+fun onTick() begincode
+    $$ Code to run every frame
 endcode
 
-fun aoColidir(outro) begincode
-    $$ Código a executar ao colidir
+fun onCollide(other) begincode
+    $$ Code to run on collision
 endcode
 `
 
@@ -166,9 +166,9 @@ export default function FlirCodeEditor() {
 
       {/* Snippets rápidos */}
       <div className="flircode-snippets">
-        <button onClick={() => insertSnippet('fun aoIniciar() begincode\n    \nendcode\n')} title="Evento Iniciar">▶ Iniciar</button>
-        <button onClick={() => insertSnippet('fun aTick() begincode\n    \nendcode\n')} title="Evento Tick">⏱ Tick</button>
-        <button onClick={() => insertSnippet('fun aoColidir(outro) begincode\n    \nendcode\n')} title="Evento Colisão">💥 Colidir</button>
+        <button onClick={() => insertSnippet('fun onStart() begincode\n    \nendcode\n')} title="Event Start">▶ Start</button>
+        <button onClick={() => insertSnippet('fun onTick() begincode\n    \nendcode\n')} title="Event Tick">⏱ Tick</button>
+        <button onClick={() => insertSnippet('fun onCollide(other) begincode\n    \nendcode\n')} title="Event Collide">💥 Collide</button>
         <button onClick={() => insertSnippet('if (true) begincode\n    \nendcode\n')} title="Condicional">? If</button>
         <button onClick={() => insertSnippet('repeat in number(3, i) begincode\n    \nendcode\n')} title="Ciclo">🔁 Repeat</button>
         <button onClick={() => insertSnippet('print("mensagem")\n')} title="Print">📋 Print</button>
@@ -205,14 +205,14 @@ export default function FlirCodeEditor() {
         <details>
           <summary>📖 Referência rápida</summary>
           <div className="flircode-ref-content">
-            <h5>Eventos:</h5>
-            <code>fun aoIniciar()</code> — BeginPlay<br/>
-            <code>fun aTick()</code> — a cada frame<br/>
-            <code>fun aoColidir(outro)</code> — colisão<br/>
-            <code>fun aoTocar()</code> — toque/click<br/>
-            <code>fun aoVerJogador()</code> — NPC vê jogador<br/>
-            <code>fun aoPerderJogador()</code> — NPC perde jogador<br/>
-            <code>fun aoTimer()</code> — timer acaba<br/>
+            <h5>Events:</h5>
+            <code>fun onStart()</code> — BeginPlay<br/>
+            <code>fun onTick()</code> — every frame<br/>
+            <code>fun onCollide(other)</code> — collision<br/>
+            <code>fun onTouch()</code> — touch/click<br/>
+            <code>fun onSeePlayer()</code> — NPC sees player<br/>
+            <code>fun onLoseSight()</code> — NPC loses player<br/>
+            <code>fun onTimer()</code> — timer ends<br/>
             <h5>Funções:</h5>
             <code>playAnim("name")</code> · <code>playSound("name")</code><br/>
             <code>move(x,y,z)</code> · <code>rotate(x,y,z)</code> · <code>scale(x,y,z)</code><br/>

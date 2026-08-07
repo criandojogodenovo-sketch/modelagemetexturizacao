@@ -17,13 +17,13 @@
  *   switch (var) begincode case v begincode ... endcode default begincode ... endcode endcode
  *
  * Eventos (funções especiais chamadas automaticamente):
- *   fun aoIniciar()     — BeginPlay
- *   fun aTick()         — Tick (a cada frame)
- *   fun aoColidir(outro) — OnCollision
- *   fun aoTocar()       — OnTouch
- *   fun aoVerJogador()  — OnSeePlayer (NPC)
- *   fun aoPerderJogador() — OnLoseSight (NPC)
- *   fun aoTimer()       — OnTimer
+ *   fun onStart()        — BeginPlay
+ *   fun onTick()         — Tick (a cada frame)
+ *   fun onCollide(outro) — OnCollision
+ *   fun onTouch()        — OnTouch
+ *   fun onSeePlayer()    — OnSeePlayer (NPC)
+ *   fun onLoseSight()    — OnLoseSight (NPC)
+ *   fun onTimer()        — OnTimer
  *
  * Funções embutidas:
  *   playAnim("name"), playSound("name"), move(x,y,z), rotate(x,y,z), scale(x,y,z)
@@ -228,15 +228,15 @@ export function createFlirCodeRuntime(source, gameContext) {
 
   // Mapear nomes de eventos PT → nome interno
   const eventMap = {
-    aoIniciar: 'beginPlay',
-    aTick: 'tick',
-    aoColidir: 'onCollision',
-    aoTocar: 'onTouch',
-    aoVerJogador: 'onSeePlayer',
-    aoPerderJogador: 'onLoseSight',
-    aoTimer: 'onTimer',
-    aoEntrarZona: 'onEnterZone',
-    aoSairZona: 'onExitZone',
+    onStart: 'beginPlay',
+    onTick: 'tick',
+    onCollide: 'onCollision',
+    onTouch: 'onTouch',
+    onSeePlayer: 'onSeePlayer',
+    onLoseSight: 'onLoseSight',
+    onTimer: 'onTimer',
+    onEnterZone: 'onEnterZone',
+    onExitZone: 'onExitZone',
   }
 
   // Avaliar um valor (número, string, variável, etc.)
@@ -403,10 +403,10 @@ export function createFlirCodeRuntime(source, gameContext) {
 
     // Dispara um evento
     triggerEvent(eventName, payload = {}) {
-      // Mapear nome interno → nome PT
-      const ptName = Object.entries(eventMap).find(([_, en]) => en === eventName)?.[0]
-      if (!ptName) return
-      const fn = functions[ptName]
+      // Mapear nome interno → nome da função FlirCode
+      const funcName = Object.entries(eventMap).find(([_, en]) => en === eventName)?.[0]
+      if (!funcName) return
+      const fn = functions[funcName]
       if (!fn) return
       // Passar payload como parâmetros
       const params = {}
