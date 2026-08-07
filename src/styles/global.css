@@ -1235,3 +1235,217 @@ label {
     height: calc(100vh - var(--topbar-h) - 64px - 56px);
   }
 }
+
+/* ========================================================
+   FASE 1 — PWA, Editor de Cenas, etc.
+   ======================================================== */
+
+/* ===== Offline Indicator ===== */
+.offline-indicator {
+  position: fixed;
+  top: var(--topbar-h);
+  left: 0;
+  right: 0;
+  background: var(--warning);
+  color: #000;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 35;
+  text-align: center;
+  justify-content: center;
+}
+
+.offline-indicator .oi-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #000;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* Quando o offline indicator está visível, empurra o app-body para baixo */
+.app-shell:has(.offline-indicator) .app-body {
+  margin-top: 24px;
+  height: calc(100vh - var(--topbar-h) - 24px);
+}
+
+/* ===== AppModeSwitch (seletor Modelagem/Cena no topo) ===== */
+.app-mode-switch {
+  display: inline-flex;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  gap: 2px;
+  margin: 0 8px;
+}
+
+.app-mode-switch button {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.app-mode-switch button:hover {
+  color: var(--text-primary);
+}
+
+.app-mode-switch button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Em mobile, o switch fica compacto */
+@media (max-width: 768px) {
+  .app-mode-switch {
+    margin: 0 4px;
+  }
+  .app-mode-switch button {
+    padding: 4px 8px;
+    font-size: 10px;
+  }
+}
+
+/* ===== Catálogo de objetos (no SceneEditorPanel) ===== */
+.scene-object-catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.catalog-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: grab;
+  font-size: 12px;
+  color: var(--text-primary);
+  user-select: none;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.catalog-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.catalog-item:active {
+  cursor: grabbing;
+  opacity: 0.7;
+}
+
+/* ===== Scene Preview (ecrã cheio) ===== */
+.scene-preview-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg-app);
+}
+
+.scene-preview-fullscreen canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.preview-exit-btn {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(22, 27, 34, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.preview-exit-btn:hover {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.preview-cam-btn {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(22, 27, 34, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.preview-cam-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.preview-info {
+  position: fixed;
+  bottom: 12px;
+  left: 12px;
+  z-index: 110;
+  background: rgba(22, 27, 34, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+}
+
+/* ===== Scene Editor Panel (painel esquerdo em modo Cena) ===== */
+/* Em modo cena, o painel esquerdo está sempre visível (não é drawer) */
+.app-body:has(.scene-editor-panel) .panel.left {
+  position: relative;
+  transform: translateX(0);
+}
+
+/* No mobile, o painel do editor de cenas continua a ser drawer */
+@media (max-width: 1024px) {
+  .app-body .panel.left.scene-editor-panel {
+    position: absolute;
+    transform: translateX(-100%);
+    z-index: 25;
+    box-shadow: var(--shadow-panel);
+  }
+  .app-body .panel.left.scene-editor-panel.open {
+    transform: translateX(0);
+  }
+}

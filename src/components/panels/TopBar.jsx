@@ -24,6 +24,7 @@ import {
   IconSave,
   IconSettings,
 } from '../ui/Icons'
+import AppModeSwitch from '../ui/AppModeSwitch'
 
 export default function TopBar() {
   const fileInputRef = useRef()
@@ -158,6 +159,9 @@ export default function TopBar() {
         <span className="drawer-toggle" style={{ display: 'none' }}> </span>
         <span className="brand-text">Modelagem 3D</span>
       </div>
+
+      {/* Seletor de modo: Modelagem vs Cena */}
+      <AppModeSwitch />
 
       <div className="group">
         <button onClick={newProject} title="Novo projeto" className="icon">

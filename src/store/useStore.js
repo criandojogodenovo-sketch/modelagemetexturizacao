@@ -826,6 +826,197 @@ export const useStore = create(
         }))
       },
 
+      // ---------- App Mode (Modelagem vs Cena) ----------
+      // Distingue entre o editor de objetos individuais (modelagem)
+      // e o editor de cenas/níveis (montar o nível com os objetos).
+      appMode: 'modeling', // 'modeling' | 'scene'
+      setAppMode: (mode) => {
+        set({ appMode: mode })
+        if (mode === 'scene') {
+          // Ao entrar em modo cena, garantir que há pelo menos uma cena
+          const { scenes, activeSceneId } = get()
+          if (scenes.length === 0) {
+            get().createScene('Nível 1')
+          } else if (!activeSceneId) {
+            set({ activeSceneId: scenes[0].id })
+          }
+        }
+      },
+
+      // ---------- Cenas / Níveis ----------
+      // Uma cena contém:
+      //  - id, name
+      //  - objects: array de referências a objetos do projeto (com position/rotation/scale
+      //    específicos da cena — o objeto em si vive no "catálogo" de objetos do projeto)
+      //  - playerObjectId: id do objeto marcado como "Jogador" (sem lógica, apenas marcação)
+      //  - gameCamera: { type: 'perspective'|'orthographic', position, rotation, fov, near, far }
+      //  - background, grid, lights específicos da cena (override opcional)
+      scenes: [],
+      activeSceneId: null,
+      scenePreviewOpen: false,
+
+      createScene: (name = 'Nova Cena') => {
+        get()._pushHistory()
+        const scene = {
+          id: `scene_${Math.random().toString(36).slice(2, 10)}`,
+          name,
+          objects: [], // [{ objectId, instanceId, position, rotation, scale }]
+          playerObjectId: null,
+          gameCamera: {
+            type: 'perspective',
+            position: [5, 4, 6],
+            rotation: [0, 0, 0],
+            fov: 50,
+            near: 0.1,
+            far: 200,
+            orthoSize: 5,
+          },
+          background: null, // null = usar global; otherwise override
+          grid: null,
+          lights: null,
+        }
+        set((s) => ({
+          scenes: [...s.scenes, scene],
+          activeSceneId: scene.id,
+        }))
+        get().toast(`Cena "${name}" criada`, 'success')
+        return scene
+      },
+
+      duplicateScene: (sceneId) => {
+        const scene = get().scenes.find((s) => s.id === sceneId)
+        if (!scene) return
+        get()._pushHistory()
+        const copy = JSON.parse(JSON.stringify(scene))
+        copy.id = `scene_${Math.random().toString(36).slice(2, 10)}`
+        copy.name = `${scene.name} (cópia)`
+        set((s) => ({
+          scenes: [...s.scenes, copy],
+          activeSceneId: copy.id,
+        }))
+        get().toast('Cena duplicada', 'success')
+      },
+
+      deleteScene: (sceneId) => {
+        const scenes = get().scenes
+        if (scenes.length <= 1) {
+          get().toast('Não é possível apagar a última cena', 'error')
+          return
+        }
+        get()._pushHistory()
+        const idx = scenes.findIndex((s) => s.id === sceneId)
+        const newScenes = scenes.filter((s) => s.id !== sceneId)
+        const newActive = get().activeSceneId === sceneId
+          ? newScenes[Math.min(idx, newScenes.length - 1)].id
+          : get().activeSceneId
+        set({ scenes: newScenes, activeSceneId: newActive })
+        get().toast('Cena eliminada', 'info')
+      },
+
+      renameScene: (sceneId, name) => {
+        get()._pushHistory()
+        set((s) => ({
+          scenes: s.scenes.map((sc) => (sc.id === sceneId ? { ...sc, name } : sc)),
+        }))
+      },
+
+      setActiveScene: (sceneId) => set({ activeSceneId: sceneId }),
+
+      reorderScenes: (fromIndex, toIndex) => {
+        get()._pushHistory()
+        set((s) => {
+          const scenes = [...s.scenes]
+          const [moved] = scenes.splice(fromIndex, 1)
+          scenes.splice(toIndex, 0, moved)
+          return { scenes }
+        })
+      },
+
+      // Adiciona uma instância de um objeto do catálogo à cena ativa
+      addObjectToScene: (objectId, position = [0, 0.5, 0]) => {
+        const { activeSceneId, scenes } = get()
+        if (!activeSceneId) {
+          get().toast('Crie uma cena primeiro', 'error')
+          return
+        }
+        const obj = get().objects.find((o) => o.id === objectId)
+        if (!obj) {
+          get().toast('Objeto não encontrado', 'error')
+          return
+        }
+        get()._pushHistory()
+        const instance = {
+          instanceId: `inst_${Math.random().toString(36).slice(2, 10)}`,
+          objectId,
+          position: [...position],
+          rotation: [0, 0, 0],
+          scale: [1, 1, 1],
+        }
+        set((s) => ({
+          scenes: s.scenes.map((sc) =>
+            sc.id === activeSceneId
+              ? { ...sc, objects: [...sc.objects, instance] }
+              : sc
+          ),
+        }))
+        get().toast(`"${obj.name}" adicionado à cena`, 'success')
+      },
+
+      removeObjectFromScene: (instanceId) => {
+        const { activeSceneId } = get()
+        get()._pushHistory()
+        set((s) => ({
+          scenes: s.scenes.map((sc) =>
+            sc.id === activeSceneId
+              ? { ...sc, objects: sc.objects.filter((o) => o.instanceId !== instanceId) }
+              : sc
+          ),
+        }))
+        get().toast('Objeto removido da cena', 'info')
+      },
+
+      updateSceneInstance: (instanceId, patch) => {
+        const { activeSceneId } = get()
+        set((s) => ({
+          scenes: s.scenes.map((sc) =>
+            sc.id === activeSceneId
+              ? {
+                  ...sc,
+                  objects: sc.objects.map((o) =>
+                    o.instanceId === instanceId ? { ...o, ...patch } : o
+                  ),
+                }
+              : sc
+          ),
+        }))
+      },
+
+      markAsPlayer: (instanceId) => {
+        const { activeSceneId } = get()
+        get()._pushHistory()
+        set((s) => ({
+          scenes: s.scenes.map((sc) =>
+            sc.id === activeSceneId ? { ...sc, playerObjectId: instanceId } : sc
+          ),
+        }))
+        get().toast('Objeto marcado como Jogador', 'success')
+      },
+
+      updateGameCamera: (patch) => {
+        const { activeSceneId } = get()
+        get()._pushHistory()
+        set((s) => ({
+          scenes: s.scenes.map((sc) =>
+            sc.id === activeSceneId
+              ? { ...sc, gameCamera: { ...sc.gameCamera, ...patch } }
+              : sc
+          ),
+        }))
+      },
+
+      openScenePreview: () => set({ scenePreviewOpen: true }),
+      closeScenePreview: () => set({ scenePreviewOpen: false }),
+
       // ---------- Undo / Redo ----------
       undo: () => {
         const { past, future, objects } = get()
@@ -858,12 +1049,15 @@ export const useStore = create(
 
       // ---------- Projeto: guardar/carregar ----------
       exportProjectJSON: () => {
-        const { objects, background, grid, lights } = get()
+        const { objects, background, grid, lights, scenes, activeSceneId, appMode } = get()
         return JSON.stringify(
           {
-            version: 2,
+            version: 3,
             createdAt: new Date().toISOString(),
             scene: { objects, background, grid, lights },
+            scenes,
+            activeSceneId,
+            appMode,
           },
           null,
           2
@@ -881,6 +1075,9 @@ export const useStore = create(
             background: { ...initialScene.background, ...(scene.background || {}) },
             grid: { ...initialScene.grid, ...(scene.grid || {}) },
             lights: { ...initialScene.lights, ...(scene.lights || {}) },
+            scenes: data.scenes || [],
+            activeSceneId: data.activeSceneId || (data.scenes && data.scenes[0]?.id) || null,
+            appMode: data.appMode || 'modeling',
           })
           get().toast('Projeto carregado', 'success')
           return true
@@ -912,8 +1109,11 @@ export const useStore = create(
         lights: state.lights,
         transformMode: state.transformMode,
         mode: state.mode,
+        scenes: state.scenes,
+        activeSceneId: state.activeSceneId,
+        appMode: state.appMode,
       }),
-      version: 2,
+      version: 3,
     }
   )
 )

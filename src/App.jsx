@@ -3,25 +3,19 @@
  *
  * Layout:
  *  ┌─────────────────────────────────────────────┐
- *  │              TopBar (48px)                  │
+ *  │   TopBar (com seletor Modelagem/Cena)       │
  *  ├──────────┬─────────────────────┬─────────────┤
  *  │  Left    │                     │   Right     │
  *  │  Panel   │      Viewport       │   Panel     │
- *  │  (260px) │   (Scene3D canvas)  │   (300px)   │
+ *  │          │  (modelagem OU cena)│             │
  *  └──────────┴─────────────────────┴─────────────┘
  *  │              Timeline (se rig ativo)        │
  *  │              BottomBar (mobile)             │
  *
- * Em desktop (>= 1024px):
- *  - Painéis laterais sempre visíveis
- *  - BottomBar escondida
- *  - Mais ferramentas via tabs no painel esquerdo
+ * Em modo Modelagem: usa Scene3D + LeftPanel (tabs de ferramentas)
+ * Em modo Cena: usa SceneLevel3D + SceneEditorPanel (lista de cenas + catálogo)
  *
- * Em mobile (< 1024px):
- *  - Painéis laterais viram drawers
- *  - BottomBar fixa em baixo com 6 ícones principais
- *  - "Mais ferramentas" abre grelha em ecrã cheia
- *  - Nenhum scroll horizontal necessário
+ * ScenePreview aparece como overlay fullscreen quando scenePreviewOpen=true.
  */
 import { useEffect } from 'react'
 import TopBar from './components/panels/TopBar'
@@ -29,16 +23,23 @@ import LeftPanel from './components/panels/LeftPanel'
 import RightPanel from './components/panels/RightPanel'
 import Viewport from './components/panels/Viewport'
 import Timeline from './components/panels/Timeline'
+import SceneEditorPanel from './components/panels/SceneEditorPanel'
+import ScenePreview from './components/panels/ScenePreview'
+import SceneLevel3D from './components/3d/SceneLevel3D'
 import Toasts from './components/ui/Toasts'
 import LoadingOverlay from './components/ui/LoadingOverlay'
 import BottomBar from './components/ui/BottomBar'
 import MoreToolsGrid from './components/ui/MoreToolsGrid'
+import OfflineIndicator from './components/ui/OfflineIndicator'
 import { useStore } from './store/useStore'
+import { useIndexedDBSync } from './hooks/useIndexedDBSync'
 
 export default function App() {
   const ui = useStore((s) => s.ui)
   const closeDrawers = useStore((s) => s.closeDrawers)
   const toggleMoreTools = useStore((s) => s.toggleMoreTools)
+  const appMode = useStore((s) => s.appMode)
+  const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
 
   const undo = useStore((s) => s.undo)
   const redo = useStore((s) => s.redo)
@@ -48,11 +49,13 @@ export default function App() {
   const selectedId = useStore((s) => s.selectedId)
   const deselect = useStore((s) => s.deselect)
 
-  // Estado para o loop de animação
   const animation = useStore((s) => s.animation)
   const setAnimation = useStore((s) => s.setAnimation)
 
-  // ===== Loop de animação (requestAnimationFrame) =====
+  // Sincronização com IndexedDB (auto-save + restore)
+  useIndexedDBSync()
+
+  // Loop de animação
   useEffect(() => {
     if (!animation.playing) return
     let raf
@@ -77,42 +80,25 @@ export default function App() {
     return () => cancelAnimationFrame(raf)
   }, [animation.playing, animation.currentTime, animation.duration, animation.fps, animation.loop, setAnimation])
 
-  // ===== Atalhos de teclado globais =====
+  // Atalhos de teclado
   useEffect(() => {
     const handler = (e) => {
       const tag = e.target.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-
       const key = e.key.toLowerCase()
       if (e.ctrlKey || e.metaKey) {
-        if (key === 'z' && !e.shiftKey) {
-          e.preventDefault()
-          undo()
-        }
-        if ((key === 'z' && e.shiftKey) || key === 'y') {
-          e.preventDefault()
-          redo()
-        }
-        if (key === 'd' && selectedId) {
-          e.preventDefault()
-          duplicateObject(selectedId)
-        }
+        if (key === 'z' && !e.shiftKey) { e.preventDefault(); undo() }
+        if ((key === 'z' && e.shiftKey) || key === 'y') { e.preventDefault(); redo() }
+        if (key === 'd' && selectedId) { e.preventDefault(); duplicateObject(selectedId) }
         return
       }
-
       if (key === 'g') setTransformMode('translate')
       if (key === 'r') setTransformMode('rotate')
       if (key === 's') setTransformMode('scale')
       if (key === 'delete' || key === 'backspace') {
-        if (selectedId) {
-          e.preventDefault()
-          deleteObject(selectedId)
-        }
+        if (selectedId) { e.preventDefault(); deleteObject(selectedId) }
       }
-      if (key === 'escape') {
-        deselect()
-        closeDrawers()
-      }
+      if (key === 'escape') { deselect(); closeDrawers() }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
@@ -121,19 +107,29 @@ export default function App() {
   return (
     <div className="app-shell">
       <TopBar />
+      <OfflineIndicator />
 
       <div className="app-body">
-        <LeftPanel open={ui.leftDrawerOpen} onClose={closeDrawers} />
-        <Viewport />
+        {appMode === 'scene' ? (
+          <SceneEditorPanel onClose={ui.leftDrawerOpen ? closeDrawers : null} />
+        ) : (
+          <LeftPanel open={ui.leftDrawerOpen} onClose={closeDrawers} />
+        )}
+
+        {appMode === 'scene' ? (
+          <SceneLevel3D />
+        ) : (
+          <Viewport />
+        )}
+
         <RightPanel open={ui.rightDrawerOpen} onClose={closeDrawers} />
       </div>
 
       <Timeline />
       <BottomBar />
 
-      {ui.moreToolsOpen && (
-        <MoreToolsGrid onClose={toggleMoreTools} />
-      )}
+      {ui.moreToolsOpen && <MoreToolsGrid onClose={toggleMoreTools} />}
+      {scenePreviewOpen && <ScenePreview />}
 
       <Toasts />
       <LoadingOverlay />

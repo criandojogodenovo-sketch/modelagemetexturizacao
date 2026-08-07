@@ -1,10 +1,34 @@
 # Modelagem & Texturização 3D
 
-Aplicação web completa de modelagem e texturização 3D no navegador, construída com **React + Vite + Three.js**. Inspirada em ferramentas como Blender e Spline, com interface escura e responsiva (desktop + telemóvel/tablet).
+Engine web de modelagem, texturização, animação e edição de cenas 3D — funciona offline como PWA instalável. Construída com **React + Vite + Three.js**, inspirada em Blender e Spline, com interface escura e responsiva (desktop + telemóvel/tablet).
 
-> Todo o código corre 100% no browser (client-side). Não há backend obrigatório.
+> Todo o código corre 100% no browser (client-side). Não há backend obrigatório. Instalável como app no telemóvel/desktop.
 
-## ✨ Funcionalidades
+## 🆕 Fase 1 — PWA + Editor de Cenas
+
+### PWA instalável e offline
+- **manifest.webmanifest** completo: nome, ícones (16/32/180/192/512 + maskable), cor de tema, `display: standalone`
+- **Service Worker** (via `vite-plugin-pwa` + Workbox) faz cache de todos os ficheiros estáticos (JS, CSS, ícones, fontes) — a app abre e funciona sem internet após a primeira visita
+- **IndexedDB** para projetos/cenas grandes (texturas em base64, geometrias editadas, múltiplas cenas) — substitui o localStorage para dados volumosos
+- **Auto-save** para IndexedDB a cada 30s + ao fechar a página
+- **Indicador offline** (banner amarelo) aparece automaticamente quando o browser perde ligação
+- Critérios de instalabilidade PWA verificados: ícones corretos, manifest válido, SW ativo
+
+### Editor de Cenas/Níveis (level editor)
+- **Conceito de Cena/Nível**: uma cena contém instâncias de objetos posicionados (cada uma com position/rotation/scale próprios)
+- **Lista de cenas** do projeto: criar, duplicar, apagar, reordenar (↑/↓), renomear (duplo-click)
+- **Catálogo de objetos**: arrastar-e-largar (HTML5 DnD) objetos do catálogo para o viewport da cena, ou duplo-click para adicionar
+- **Marcar objeto como "Jogador"** ⭐ — marcação visual (cone verde + anel no chão); sem lógica de jogo ainda (Fase 2)
+- **Câmara de jogo configurável**: perspetiva ou ortográfica, posição, FOV/tamanho — visualizada como wireframe laranja no viewport
+- **Guardar/carregar cenas** completas no projeto JSON + IndexedDB
+- **Pré-visualizar cena** ▶: ecrã cheio com câmara orbital ou gameCamera; primeira aproximação ao "modo de jogo"
+
+### Seletor de modo no topo
+- **Modo Modelagem**: editar objetos individuais (primitivas, edit, sculpt, materiais, animação)
+- **Modo Cena**: montar o nível com os objetos criados (level editor)
+- Alternância instantânea via seletor no topo da barra
+
+## ✨ Funcionalidades (Fase 0)
 
 ### Modelagem (nível profissional, tipo Blender)
 - Formas primitivas: cubo, esfera, cilindro, cone, plano, torus
