@@ -34,6 +34,7 @@ import ShaderEditor from './components/panels/shader-editor/ShaderEditor'
 import ProjectBrowser from './components/panels/project-browser/ProjectBrowser'
 import DebugConsole from './components/panels/debug/DebugConsole'
 import TerrainEditor from './components/panels/terrain/TerrainEditor'
+import AnimationStudio from './components/panels/AnimationStudio'
 import AnimationControllerEditor from './components/panels/AnimationControllerEditor'
 import MainMenu from './components/ui/MainMenu'
 import HomePage from './components/home/HomePage'
@@ -69,6 +70,8 @@ export default function App() {
   const closeMainMenu = useStore((s) => s.closeMainMenu)
   const terrainEditorOpen = useStore((s) => s.terrainEditorOpen)
   const closeTerrainEditor = useStore((s) => s.closeTerrainEditor)
+  const animStudioOpen = useStore((s) => s.animStudioOpen)
+  const closeAnimStudio = useStore((s) => s.closeAnimStudio)
   const homeVisible = useStore((s) => s.homeVisible)
   const hideHome = useStore((s) => s.hideHome)
 
@@ -176,6 +179,7 @@ export default function App() {
       {projectBrowserOpen && <ProjectBrowser onClose={closeProjectBrowser} />}
       {debugConsoleOpen && <DebugConsole onClose={closeDebugConsole} />}
       {terrainEditorOpen && <TerrainEditor onClose={closeTerrainEditor} />}
+      {animStudioOpen && <AnimationStudio onClose={closeAnimStudio} />}
       {animControllerTarget && (
         <div className="modal-backdrop" onClick={closeAnimController}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600, width: '90%', maxHeight: '90vh', overflowY: 'auto' }}>

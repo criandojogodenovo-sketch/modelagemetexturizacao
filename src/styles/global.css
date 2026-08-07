@@ -3124,3 +3124,32 @@ label {
 .pb-item {
   position: relative;
 }
+
+/* ===== AnimationStudio ===== */
+.anim-studio {
+  position: fixed;
+  top: var(--topbar-h);
+  right: 0;
+  bottom: 0;
+  width: 340px;
+  max-width: 90vw;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+  box-shadow: var(--shadow-panel);
+}
+
+.anim-studio.open {
+  transform: translateX(0);
+}
+
+@media (max-width: 600px) {
+  .anim-studio {
+    width: 100%;
+    max-width: 100%;
+  }
+}

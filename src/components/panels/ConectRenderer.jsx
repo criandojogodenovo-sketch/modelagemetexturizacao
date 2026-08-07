@@ -25,7 +25,7 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
 
   // Se não tem visual, não renderiza mesh — mas pode adicionar luzes, etc.
   if (conect.type === 'LuminousObject') {
-    return <LuminousMesh conect={conect} />
+    return <LuminousMesh conect={conect} setMeshRef={setMeshRef} />
   }
 
   if (conect.type === 'TerrainObject') {
@@ -132,20 +132,41 @@ const PlaceholderMesh = forwardRef(function PlaceholderMesh({ conect }, ref) {
 })
 
 // ===== LuminousObject =====
-function LuminousMesh({ conect }) {
-  const props = {
-    position: conect.position,
+// Luz real + gizmo visual (esfera amarela) para seleção no editor
+function LuminousMesh({ conect, setMeshRef }) {
+  const lightProps = {
     intensity: conect.intensity,
     color: conect.color,
     castShadow: conect.castShadow,
   }
+  let lightElement
   if (conect.lightType === 'directional') {
-    return <directionalLight {...props} />
+    lightElement = <directionalLight {...lightProps} position={[0, 0, 0]} />
+  } else if (conect.lightType === 'spot') {
+    lightElement = <spotLight {...lightProps} distance={conect.distance} angle={Math.PI / 4} penumbra={0.3} position={[0, 0, 0]} />
+  } else {
+    lightElement = <pointLight {...lightProps} distance={conect.distance} position={[0, 0, 0]} />
   }
-  if (conect.lightType === 'spot') {
-    return <spotLight {...props} distance={conect.distance} angle={Math.PI / 4} penumbra={0.3} />
-  }
-  return <pointLight {...props} distance={conect.distance} />
+  return (
+    <group
+      ref={setMeshRef}
+      position={conect.position}
+      rotation={conect.rotation}
+      userData={{ conectInstanceId: conect.instanceId }}
+    >
+      {lightElement}
+      {/* Gizmo visual: esfera amarela para seleção */}
+      <mesh>
+        <sphereGeometry args={[0.2, 12, 12]} />
+        <meshBasicMaterial color="#ffd700" />
+      </mesh>
+      {/* Halo ao redor */}
+      <mesh>
+        <sphereGeometry args={[0.35, 12, 12]} />
+        <meshBasicMaterial color="#ffd700" transparent opacity={0.2} />
+      </mesh>
+    </group>
+  )
 }
 
 // ===== TerrainObject =====

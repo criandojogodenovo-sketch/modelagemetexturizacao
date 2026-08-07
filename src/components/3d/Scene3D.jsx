@@ -162,14 +162,30 @@ export default function Scene3D() {
     if (selectedId && meshRefs.current.has(selectedId)) {
       setSelectedMesh(meshRefs.current.get(selectedId))
     } else {
+      // O mesh pode ainda não estar montado — tentar novamente no próximo tick
       setSelectedMesh(null)
+      if (selectedId) {
+        const timer = setTimeout(() => {
+          if (meshRefs.current.has(selectedId)) {
+            setSelectedMesh(meshRefs.current.get(selectedId))
+          }
+        }, 50)
+        return () => clearTimeout(timer)
+      }
     }
   }, [selectedId, objects])
 
   const setMeshRef = useCallback((id, node) => {
-    if (node) meshRefs.current.set(id, node)
-    else meshRefs.current.delete(id)
-  }, [])
+    if (node) {
+      meshRefs.current.set(id, node)
+      // Se este mesh é o atualmente selecionado, atualizar o selectedMesh imediatamente
+      if (id === selectedId) {
+        setSelectedMesh(node)
+      }
+    } else {
+      meshRefs.current.delete(id)
+    }
+  }, [selectedId])
 
   return (
     <Canvas

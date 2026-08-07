@@ -1224,7 +1224,11 @@ export const useStore = create(
       openTerrainEditor: () => set({ terrainEditorOpen: true }),
       closeTerrainEditor: () => set({ terrainEditorOpen: false }),
 
-      homeVisible: false,
+      animStudioOpen: false,
+      openAnimStudio: () => set({ animStudioOpen: true }),
+      closeAnimStudio: () => set({ animStudioOpen: false }),
+
+      homeVisible: true,
       showHome: () => set({ homeVisible: true }),
       hideHome: () => set({ homeVisible: false }),
 

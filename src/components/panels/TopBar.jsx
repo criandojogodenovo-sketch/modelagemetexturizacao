@@ -35,6 +35,7 @@ export default function TopBar() {
   const toggleMainMenu = useStore((s) => s.toggleMainMenu)
   const showHome = useStore((s) => s.showHome)
   const openTerrainEditor = useStore((s) => s.openTerrainEditor)
+  const openAnimStudio = useStore((s) => s.openAnimStudio)
 
   const newProject = useStore((s) => s.newProject)
   const undo = useStore((s) => s.undo)
@@ -176,6 +177,13 @@ export default function TopBar() {
         className="icon"
       >
         ⛰️
+      </button>
+      <button
+        onClick={openAnimStudio}
+        title="Estúdio de Animação (keyframes, FBX, controlador)"
+        className="icon"
+      >
+        🏃
       </button>
 
       {/* Seletor de modo: Modelagem vs Cena */}
