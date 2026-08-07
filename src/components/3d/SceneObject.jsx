@@ -165,6 +165,10 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
   }, [obj.material?.repeat, obj.material?.offset, obj.material?.map, obj.material?.normalMap, material])
 
   // ----- Sincronizar transform -----
+  // Aplicamos diretamente como props do mesh para garantir que estão sempre
+  // sincronizados (o useEffect anterior falhava na 1ª renderização porque
+  // innerRef.current ainda era null quando o effect disparava).
+  // Mantemos o useEffect como fallback para mudanças dinâmicas via gizmo.
   useEffect(() => {
     const mesh = innerRef.current
     if (!mesh) return
@@ -201,6 +205,9 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       }}
       geometry={geometry}
       material={material}
+      position={obj.position}
+      rotation={obj.rotation}
+      scale={obj.scale}
       visible={obj.visible !== false}
       onPointerDown={handlePointerDown}
       castShadow

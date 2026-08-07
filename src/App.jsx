@@ -29,6 +29,12 @@ import SceneLevel3D from './components/3d/SceneLevel3D'
 import FlirScriptEditor from './components/panels/flirscript/FlirScriptEditor'
 import ConectsWindow from './components/panels/conects/ConectsWindow'
 import GameExportModal from './components/panels/GameExportModal'
+import UIEditor from './components/panels/ui-editor/UIEditor'
+import ShaderEditor from './components/panels/shader-editor/ShaderEditor'
+import ProjectBrowser from './components/panels/project-browser/ProjectBrowser'
+import DebugConsole from './components/panels/debug/DebugConsole'
+import AnimationControllerEditor from './components/panels/AnimationControllerEditor'
+import MainMenu from './components/ui/MainMenu'
 import Toasts from './components/ui/Toasts'
 import LoadingOverlay from './components/ui/LoadingOverlay'
 import BottomBar from './components/ui/BottomBar'
@@ -47,6 +53,18 @@ export default function App() {
   const toggleConectsWindow = useStore((s) => s.toggleConectsWindow)
   const gameExportOpen = useStore((s) => s.gameExportOpen)
   const closeGameExport = useStore((s) => s.closeGameExport)
+  const uiEditorOpen = useStore((s) => s.uiEditorOpen)
+  const closeUIEditor = useStore((s) => s.closeUIEditor)
+  const shaderEditorOpen = useStore((s) => s.shaderEditorOpen)
+  const closeShaderEditor = useStore((s) => s.closeShaderEditor)
+  const projectBrowserOpen = useStore((s) => s.projectBrowserOpen)
+  const closeProjectBrowser = useStore((s) => s.closeProjectBrowser)
+  const debugConsoleOpen = useStore((s) => s.debugConsoleOpen)
+  const closeDebugConsole = useStore((s) => s.closeDebugConsole)
+  const animControllerTarget = useStore((s) => s.animControllerTarget)
+  const closeAnimController = useStore((s) => s.closeAnimController)
+  const mainMenuOpen = useStore((s) => s.mainMenuOpen)
+  const closeMainMenu = useStore((s) => s.closeMainMenu)
 
   const undo = useStore((s) => s.undo)
   const redo = useStore((s) => s.redo)
@@ -146,6 +164,21 @@ export default function App() {
         <ConectsWindow onClose={toggleConectsWindow} />
       )}
       {gameExportOpen && <GameExportModal onClose={closeGameExport} />}
+      {uiEditorOpen && <UIEditor onClose={closeUIEditor} />}
+      {shaderEditorOpen && <ShaderEditor onClose={closeShaderEditor} />}
+      {projectBrowserOpen && <ProjectBrowser onClose={closeProjectBrowser} />}
+      {debugConsoleOpen && <DebugConsole onClose={closeDebugConsole} />}
+      {animControllerTarget && (
+        <div className="modal-backdrop" onClick={closeAnimController}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600, width: '90%', maxHeight: '90vh', overflowY: 'auto' }}>
+            <AnimationControllerEditor
+              onClose={closeAnimController}
+              targetConectId={animControllerTarget}
+            />
+          </div>
+        </div>
+      )}
+      {mainMenuOpen && <MainMenu onClose={closeMainMenu} />}
 
       <Toasts />
       <LoadingOverlay />

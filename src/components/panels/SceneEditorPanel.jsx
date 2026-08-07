@@ -19,6 +19,7 @@ import {
   IconCube,
   IconClose,
 } from '../ui/Icons'
+import ConectContextMenu from '../ui/ConectContextMenu'
 
 export default function SceneEditorPanel({ onClose }) {
   const scenes = useStore((s) => s.scenes)
@@ -397,6 +398,7 @@ function ConectsList({ scene }) {
                   {conect.flirScript && <span className="tag accent" style={{ marginLeft: 4 }}>script</span>}
                 </span>
                 <div className="actions">
+                  <ConectContextMenu conect={conect} sceneId={scene.id} />
                   <button
                     onClick={(e) => { e.stopPropagation(); setFlirScriptTarget(scene.id, conect.instanceId) }}
                     title="FlirScript"

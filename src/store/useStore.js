@@ -1183,6 +1183,38 @@ export const useStore = create(
       openGameExport: () => set({ gameExportOpen: true }),
       closeGameExport: () => set({ gameExportOpen: false }),
 
+      // ---------- Fase 4: Novas janelas ----------
+      uiEditorOpen: false,
+      openUIEditor: () => set({ uiEditorOpen: true }),
+      closeUIEditor: () => set({ uiEditorOpen: false }),
+
+      shaderEditorOpen: false,
+      openShaderEditor: () => set({ shaderEditorOpen: true }),
+      closeShaderEditor: () => set({ shaderEditorOpen: false }),
+
+      projectBrowserOpen: false,
+      openProjectBrowser: () => set({ projectBrowserOpen: true }),
+      closeProjectBrowser: () => set({ projectBrowserOpen: false }),
+
+      debugConsoleOpen: false,
+      openDebugConsole: () => set({ debugConsoleOpen: true }),
+      closeDebugConsole: () => set({ debugConsoleOpen: false }),
+
+      mainMenuOpen: false,
+      toggleMainMenu: () => set((s) => ({ mainMenuOpen: !s.mainMenuOpen })),
+      closeMainMenu: () => set({ mainMenuOpen: false }),
+
+      // Menu de 3 pontos (⋯) alvo — abre o AnimationControllerEditor
+      animControllerTarget: null,
+      openAnimController: (conectId) => set({ animControllerTarget: conectId }),
+      closeAnimController: () => set({ animControllerTarget: null }),
+
+      // Atualizar animationController de um conect
+      setConectAnimationController: (instanceId, controller) => {
+        get()._pushHistory()
+        get().updateConect(instanceId, { animationController: controller })
+      },
+
       // ---------- Undo / Redo ----------
       undo: () => {
         const { past, future, objects } = get()

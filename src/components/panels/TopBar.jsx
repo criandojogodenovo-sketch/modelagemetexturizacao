@@ -32,6 +32,7 @@ export default function TopBar() {
 
   const toggleLeftDrawer = useStore((s) => s.toggleLeftDrawer)
   const toggleRightDrawer = useStore((s) => s.toggleRightDrawer)
+  const toggleMainMenu = useStore((s) => s.toggleMainMenu)
 
   const newProject = useStore((s) => s.newProject)
   const undo = useStore((s) => s.undo)
@@ -230,6 +231,14 @@ export default function TopBar() {
           <IconRedo width={14} height={14} />
         </button>
       </div>
+
+      <button
+        onClick={toggleMainMenu}
+        title="Menu principal (UI, Shaders, Projeto, Debug...)"
+        className="icon"
+      >
+        📋
+      </button>
 
       <button
         className="icon drawer-toggle"

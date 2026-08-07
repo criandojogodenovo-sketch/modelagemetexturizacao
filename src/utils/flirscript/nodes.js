@@ -409,6 +409,41 @@ export const NODE_DEFINITIONS = [
     outputs: [{ name: 'value', type: 'vec3' }],
     properties: { value: [0, 0, 0] },
   },
+
+  // ===== Debug =====
+  {
+    type: 'debug/print',
+    label: 'Imprimir / Log',
+    category: 'variables',
+    description: 'Imprime uma mensagem na Consola de Debug durante o jogo',
+    inputs: [
+      { name: 'exec', type: 'exec' },
+      { name: 'message', type: 'any', default: 'Olá mundo' },
+    ],
+    outputs: [{ name: 'exec', type: 'exec' }],
+  },
+  {
+    type: 'debug/warning',
+    label: 'Aviso (Warning)',
+    category: 'variables',
+    description: 'Imprime um aviso na Consola de Debug',
+    inputs: [
+      { name: 'exec', type: 'exec' },
+      { name: 'message', type: 'any', default: 'Atenção!' },
+    ],
+    outputs: [{ name: 'exec', type: 'exec' }],
+  },
+  {
+    type: 'debug/error',
+    label: 'Erro',
+    category: 'variables',
+    description: 'Imprime um erro na Consola de Debug',
+    inputs: [
+      { name: 'exec', type: 'exec' },
+      { name: 'message', type: 'any', default: 'Erro!' },
+    ],
+    outputs: [{ name: 'exec', type: 'exec' }],
+  },
 ]
 
 // Helper: procura a definição de um nó pelo seu tipo

@@ -77,7 +77,8 @@ export default function ConectsWindow({ onClose }) {
               (c) => c.category === cat.id && filteredBySearch(c)
             )
             if (conects.length === 0) return null
-            const isCollapsed = collapsed[cat.id] && !search
+            // Por defeito: expandido (false). collapsed[cat.id] === true significa recolhido.
+            const isCollapsed = search ? false : (collapsed[cat.id] === true)
             return (
               <div key={cat.id} className="conect-category">
                 <button

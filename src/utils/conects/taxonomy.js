@@ -132,6 +132,36 @@ export const CONECT_TAXONOMY = [
     ],
   },
   {
+    type: 'NpcObject',
+    label: 'NPC Object (IA)',
+    category: 'physics',
+    icon: '🤖',
+    description: 'Personagem controlado por IA: parado, patrulhar, perseguir, fugir',
+    hasPhysics: true,
+    hasVisual: true,
+    flirScriptable: true,
+    defaults: {
+      mass: 1,
+      moveSpeed: 3,
+      behavior: 'idle', // idle | patrol | chase | flee
+      detectionRadius: 8,
+      loseSightRadius: 12,
+      patrolPath: null, // instanceId de PathObject
+      patrolIndex: 0,
+      health: 100,
+      fixedRotation: true,
+    },
+    properties: [
+      prop('moveSpeed', 'Velocidade', 'number', 3, { min: 0.5, max: 20, step: 0.5 }),
+      prop('behavior', 'Comportamento', 'select', 'idle', { options: ['idle', 'patrol', 'chase', 'flee'] }),
+      prop('detectionRadius', 'Raio de deteção', 'number', 8, { min: 1, max: 50, step: 1 }),
+      prop('loseSightRadius', 'Raio de perda de vista', 'number', 12, { min: 2, max: 60, step: 1 }),
+      prop('patrolPath', 'Path de patrulha', 'objectRef', null),
+      prop('health', 'Vida', 'number', 100, { min: 0, max: 1000, step: 10 }),
+      prop('fixedRotation', 'Fixar rotação', 'boolean', true),
+    ],
+  },
+  {
     type: 'TriggerObject',
     label: 'Trigger Object',
     category: 'physics',

@@ -367,6 +367,33 @@ export function createFlirScriptRuntime(graphData, gameContext) {
         break
       }
 
+      // ===== Debug =====
+      case 'debug/print': {
+        const msg = readInput(1) ?? 'Olá mundo'
+        // Import dinâmico para evitar ciclo
+        import('../debug/debugStore.js').then(({ debugLog }) => {
+          debugLog(msg, 'log', node._instanceId ? `Conect ${node._instanceId.slice(-6)}` : 'FlirScript')
+        })
+        propagateExec(node, 0, payload)
+        break
+      }
+      case 'debug/warning': {
+        const msg = readInput(1) ?? 'Atenção!'
+        import('../debug/debugStore.js').then(({ debugLog }) => {
+          debugLog(msg, 'warning', node._instanceId ? `Conect ${node._instanceId.slice(-6)}` : 'FlirScript')
+        })
+        propagateExec(node, 0, payload)
+        break
+      }
+      case 'debug/error': {
+        const msg = readInput(1) ?? 'Erro!'
+        import('../debug/debugStore.js').then(({ debugLog }) => {
+          debugLog(msg, 'error', node._instanceId ? `Conect ${node._instanceId.slice(-6)}` : 'FlirScript')
+        })
+        propagateExec(node, 0, payload)
+        break
+      }
+
       default:
         // Nó desconhecido — apenas propaga exec
         propagateExec(node, 0, payload)
