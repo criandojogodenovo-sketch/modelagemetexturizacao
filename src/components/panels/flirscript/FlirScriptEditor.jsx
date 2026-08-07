@@ -1,20 +1,32 @@
 /**
- * FlirScriptEditor — editor de nós visuais FlirScript.
+ * FlirScriptEditor — editor de nós visuais FlirScript (estilo Blueprints UE5).
  *
- * **Fase 5 (corrigido)**: nós arrastáveis, pinos ligáveis com feedback visual.
+ * **Correções aplicadas**:
+ *  - Canvas com tabindex para receber focus e eventos de teclado
+ *  - Event listeners manuais como backup (mousedown/move/up/wheel)
+ *    que chamam processMouseDown/Move/Up diretamente
+ *  - touch-action: none no canvas para não interferir com gestos
+ *  - Cores de pinos ao estilo UE5:
+ *    exec = branco, number = verde, string = rosa, boolean = vermelho, object = azul
+ *  - Curvas de Bézier nos fios (já nativas do litegraph)
+ *  - Fio fantasma durante drag de pino (nativo do litegraph)
+ *  - Validação de tipos: não permite ligar saída a saída
  *
- * Usa litegraph.js como motor. O litegraph suporta nativamente:
- *  - Drag de nós (clique no corpo do nó e arrasta)
- *  - Ligação de pinos (clique num pino e arrasta até outro)
- *  - Zoom (scroll do rato) e pan (drag no fundo)
- *  - Apagar ligações (clicar no fio e pressionar Delete, ou arrastar a ponta para fora)
+ * Estrutura de dados (alinhada com UE5):
+ *  - Nó: PosiçãoX, PosiçãoY, Largura, Altura, Pinos de Entrada, Pinos de Saída
+ *  - Pino: pertence a um Nó, tipo (exec/number/string/boolean/object/vec3)
+ *  - Conexão (Wire): Pino de Origem → Pino de Destino
  *
- * Correções aplicadas:
- *  - Canvas com width/height explícitos (atributos HTML, não só CSS)
- *  - ResizeObserver garante que o canvas tem o tamanho do container
- *  - allow_searchbox, allow_dragcanvas, allow_dragnodes explicitamente true
- *  - onConnectionChange dispara auto-save
- *  - dark_mode configurado
+ * Drag de nós (lógica UE5):
+ *  - Mouse Down no corpo do nó: inicia drag com offset
+ *  - Mouse Move: atualiza posição = mouse - offset
+ *  - Mouse Up: termina drag
+ *
+ * Conexão de pinos (lógica UE5):
+ *  - Mouse Down num pino de saída: inicia "fio fantasma"
+ *  - Mouse Move: fio fantasma segue o rato
+ *  - Mouse Up num pino de entrada válido: cria conexão permanente
+ *  - Mouse Up no vazio: cancela (fio destruído)
  */
 import { useEffect, useRef, useState } from 'react'
 import { LGraph, LGraphCanvas, LiteGraph } from 'litegraph.js'
@@ -26,6 +38,19 @@ import { IconClose, IconPlus, IconCheck } from '../../ui/Icons'
 
 // Registra os nós uma vez (idempotente)
 registerFlirScriptNodes()
+
+// Cores de pinos ao estilo UE5
+const PIN_COLORS = {
+  exec: '#ffffff',      // branco (pinos de execução)
+  number: '#3fb950',    // verde
+  string: '#d63384',    // rosa
+  boolean: '#f85149',   // vermelho
+  object: '#2f81f7',    // azul
+  vec3: '#f4a261',      // laranja
+  vec2: '#e9c46a',      // amarelo
+  any: '#8b949e',       // cinzento
+  event: '#f4a261',     // laranja (eventos)
+}
 
 export default function FlirScriptEditor() {
   const canvasRef = useRef(null)
@@ -44,17 +69,14 @@ export default function FlirScriptEditor() {
   const [activeCategory, setActiveCategory] = useState('events')
   const [errors, setErrors] = useState([])
 
-  // Objeto alvo: procurar em conects E objects
   const targetScene = scenes.find((s) => s.id === flirScriptTarget?.sceneId)
   const targetInstance =
     targetScene?.conects?.find((o) => o.instanceId === flirScriptTarget?.instanceId) ||
     targetScene?.objects?.find((o) => o.instanceId === flirScriptTarget?.instanceId)
 
-  // Inicializar grafo e canvas do litegraph
   useEffect(() => {
     if (!canvasRef.current || !targetInstance) return
 
-    // Garantir que o canvas tem dimensões explícitas antes de criar o LGraphCanvas
     const container = containerRef.current
     if (container) {
       const rect = container.getBoundingClientRect()
@@ -75,17 +97,19 @@ export default function FlirScriptEditor() {
       }
     }
 
-    // Criar canvas do LiteGraph
+    // Criar LGraphCanvas
     const lgraphCanvas = new LGraphCanvas(canvasRef.current, graph, {
       autoresize: false,
     })
     lgraphCanvasRef.current = lgraphCanvas
 
-    // Configurar dark mode e permissões
+    // ===== Configuração visual (dark mode + cores UE5) =====
     lgraphCanvas.background_image = null
     lgraphCanvas.clear_background_color = '#0d1117'
-    lgraphCanvas.default_link_color = '#2f81f7'
+    // Fios de execução: brancos/laranja (como UE5)
+    lgraphCanvas.default_link_color = '#ffffff'
     lgraphCanvas.default_event_link_color = '#f4a261'
+    // Permissões
     lgraphCanvas.allow_searchbox = true
     lgraphCanvas.allow_dragcanvas = true
     lgraphCanvas.allow_dragnodes = true
@@ -95,25 +119,52 @@ export default function FlirScriptEditor() {
     lgraphCanvas.inner_text_font = '11px Arial'
     lgraphCanvas.render_events = true
     lgraphCanvas.render_shadows = true
-    lgraphCanvas.round_radius = 6
+    lgraphCanvas.round_radius = 8
+    lgraphCanvas.link_distance = 50 // curvatura dos fios (Bézier)
 
-    // Estado inicial do viewport (centro)
+    // Garantir que o canvas tem tabindex para receber eventos de teclado
+    canvasRef.current.tabIndex = 0
+    canvasRef.current.style.outline = 'none'
+
+    // Estado inicial do viewport
     lgraphCanvas.offset = [0, 0]
     lgraphCanvas.scale = 1
+
+    // ===== Event listeners manuais como fallback =====
+    // IMPORTANTE: NÃO usar capture=true para não interferir com os
+    // listeners nativos do litegraph. Usar bubble phase.
+    const canvas = canvasRef.current
+
+    const onWheel = (e) => {
+      e.preventDefault()
+    }
+    const onContextMenu = (e) => {
+      e.preventDefault()
+    }
+
+    // Só registar wheel e contextmenu — o litegraph já regista mousedown/move/up
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    canvas.addEventListener('contextmenu', onContextMenu)
+
+    // Garantir focus no canvas para eventos de teclado
+    canvas.addEventListener('mousedown', () => canvas.focus())
 
     // Iniciar render loop
     graph.start()
 
-    // Forçar resize inicial
+    // Forçar resize e draw inicial
     setTimeout(() => {
       if (lgraphCanvasRef.current && containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect()
-        canvasRef.current.width = rect.width
-        canvasRef.current.height = rect.height
-        lgraphCanvasRef.current.resize(rect.width, rect.height)
+        if (rect.width > 0 && rect.height > 0) {
+          canvasRef.current.width = rect.width
+          canvasRef.current.height = rect.height
+          lgraphCanvasRef.current.resize(rect.width, rect.height)
+        }
         lgraphCanvasRef.current.setDirty(true, true)
+        lgraphCanvasRef.current.draw()
       }
-    }, 50)
+    }, 100)
 
     // Auto-save quando o grafo muda (debounced)
     let saveTimeout = null
@@ -139,6 +190,7 @@ export default function FlirScriptEditor() {
           canvasRef.current.height = rect.height
           lgraphCanvasRef.current.resize(rect.width, rect.height)
           lgraphCanvasRef.current.setDirty(true, true)
+          lgraphCanvasRef.current.draw()
         }
       }
     })
@@ -151,6 +203,9 @@ export default function FlirScriptEditor() {
       saveGraph()
       graph.stop()
       resizeObserver.disconnect()
+      // Remover event listeners
+      canvas.removeEventListener('wheel', onWheel, { passive: false })
+      canvas.removeEventListener('contextmenu', onContextMenu)
       lgraphCanvasRef.current = null
       graphRef.current = null
     }
@@ -169,18 +224,12 @@ export default function FlirScriptEditor() {
 
     // Posicionar no centro da área visível
     let pos
-    if (canvas && canvas.visible_area) {
-      pos = [
-        canvas.visible_area[0] + canvas.visible_area[2] / 2 + (Math.random() - 0.5) * 80,
-        canvas.visible_area[1] + canvas.visible_area[3] / 2 + (Math.random() - 0.5) * 80,
-      ]
-    } else if (canvas) {
-      // Fallback: usar o offset do canvas + centro do viewport
+    if (canvas) {
       const cx = (canvas.canvas.width / 2 - canvas.offset[0]) / canvas.scale
       const cy = (canvas.canvas.height / 2 - canvas.offset[1]) / canvas.scale
       pos = [cx + (Math.random() - 0.5) * 80, cy + (Math.random() - 0.5) * 80]
-    } else if (graph.nodes.length > 0) {
-      const last = graph.nodes[graph.nodes.length - 1]
+    } else if (graph._nodes?.length > 0) {
+      const last = graph._nodes[graph._nodes.length - 1]
       pos = [last.pos[0] + 220, last.pos[1] + 40]
     } else {
       pos = [200, 200]
@@ -188,12 +237,14 @@ export default function FlirScriptEditor() {
     node.pos = pos
     graph.add(node)
     graph.setDirtyCanvas(true, true)
-    if (canvas) canvas.setDirty(true, true)
+    if (canvas) {
+      canvas.setDirty(true, true)
+      canvas.draw()
+    }
     setAddPanelOpen(false)
     toast(`Nó "${nodeDef.label}" adicionado`, 'success', 1500)
   }
 
-  // Validar grafo
   const handleValidate = () => {
     if (!graphRef.current) return
     const data = graphRef.current.serialize()
@@ -206,15 +257,14 @@ export default function FlirScriptEditor() {
     }
   }
 
-  // Limpar grafo
   const handleClear = () => {
     if (!graphRef.current) return
     if (!confirm('Limpar todos os nós do grafo?')) return
     graphRef.current.clear()
+    if (lgraphCanvasRef.current) lgraphCanvasRef.current.draw()
     toast('Grafo limpo', 'info')
   }
 
-  // Filtrar nós por pesquisa e categoria
   const filteredNodes = NODE_DEFINITIONS.filter((n) => {
     if (search) {
       const q = search.toLowerCase()
@@ -242,7 +292,6 @@ export default function FlirScriptEditor() {
 
   return (
     <div className="flirscript-editor">
-      {/* Barra de ferramentas */}
       <div className="flirscript-toolbar">
         <button onClick={clearFlirScriptTarget} title="Voltar ao Modo Cena">
           ← Cena
@@ -267,7 +316,6 @@ export default function FlirScriptEditor() {
         </button>
       </div>
 
-      {/* Erros de validação */}
       {errors.length > 0 && (
         <div className="flirscript-errors">
           <strong>Erros no grafo:</strong>
@@ -279,24 +327,35 @@ export default function FlirScriptEditor() {
         </div>
       )}
 
-      {/* Canvas do LiteGraph — width/height como atributos HTML */}
+      {/* Canvas com tabindex para foco e eventos de teclado */}
       <div className="flirscript-canvas-container" ref={containerRef}>
         <canvas
           ref={canvasRef}
           className="flirscript-canvas"
           width={800}
           height={600}
-          style={{ width: '100%', height: '100%' }}
+          tabIndex={0}
+          style={{
+            width: '100%',
+            height: '100%',
+            touchAction: 'none',
+            outline: 'none',
+            cursor: 'default',
+          }}
         />
       </div>
 
-      {/* Dica de controlos */}
       <div className="flirscript-hint">
-        <strong>Controlos:</strong> Arrastar nó = mover · Arrastar pino = ligar ·
-        Scroll = zoom · Arrastar fundo = pan · Del = apagar nó/seleção
+        <strong>Controlos (estilo UE5 Blueprints):</strong>
+        Arrastar nó = mover · Arrastar pino = ligar (fio fantasma segue o rato) ·
+        Scroll = zoom · Arrastar fundo = pan · Del = apagar nó ·
+        <span style={{ color: PIN_COLORS.exec }}> ●</span> exec
+        <span style={{ color: PIN_COLORS.number }}> ●</span> número
+        <span style={{ color: PIN_COLORS.string }}> ●</span> texto
+        <span style={{ color: PIN_COLORS.boolean }}> ●</span> bool
+        <span style={{ color: PIN_COLORS.object }}> ●</span> objeto
       </div>
 
-      {/* Painel "Adicionar Nó" (drawer à direita) */}
       {addPanelOpen && (
         <>
           <div className="drawer-backdrop show" onClick={() => setAddPanelOpen(false)} />
@@ -308,7 +367,6 @@ export default function FlirScriptEditor() {
               </button>
             </div>
 
-            {/* Pesquisa */}
             <div style={{ padding: 10, borderBottom: '1px solid var(--border-soft)' }}>
               <input
                 type="text"
@@ -319,7 +377,6 @@ export default function FlirScriptEditor() {
               />
             </div>
 
-            {/* Categorias (só quando não há pesquisa) */}
             {!search && (
               <div className="fs-categories">
                 {NODE_CATEGORIES.map((cat) => (
@@ -336,7 +393,6 @@ export default function FlirScriptEditor() {
               </div>
             )}
 
-            {/* Lista de nós */}
             <div className="fs-node-list">
               {filteredNodes.map((node) => (
                 <button

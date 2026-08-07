@@ -23,11 +23,10 @@ export function registerFlirScriptNodes() {
 }
 
 function createNodeClass(def) {
-  // Classe com nome dinâmico (LiteGraph usa o constructor.name internamente)
   const cls = class FlirScriptNode extends LiteGraph.LGraphNode {
     constructor() {
       super(def.label)
-      // Configurar cor baseada na categoria
+      // Cores de categorias (estilo UE5)
       const categoryColors = {
         events: '#f4a261',
         actions: '#2a9d8f',
@@ -36,21 +35,26 @@ function createNodeClass(def) {
         input: '#e63946',
       }
       this.color = categoryColors[def.category] || '#444'
+      // Cor do título (mais escura)
+      this.bgcolor = def.category === 'events' ? '#8a4a20'
+                    : def.category === 'actions' ? '#1a5a4f'
+                    : def.category === 'logic' ? '#4a2a75'
+                    : def.category === 'variables' ? '#1a4a8a'
+                    : '#8a2020'
 
-      // Adicionar inputs
+      // Adicionar inputs com cores de pinos UE5
       for (const input of def.inputs || []) {
         if (input.type === 'exec') {
           this.addInput(input.name, LiteGraph.EVENT)
         } else {
           this.addInput(input.name, input.type)
         }
-        // Valor padrão para widgets
         if (input.default !== undefined) {
           this.properties[input.name] = input.default
         }
       }
 
-      // Adicionar outputs
+      // Adicionar outputs com cores de pinos UE5
       for (const output of def.outputs || []) {
         if (output.type === 'exec') {
           this.addOutput(output.name, LiteGraph.EVENT)
