@@ -26,6 +26,7 @@ import Timeline from './components/panels/Timeline'
 import SceneEditorPanel from './components/panels/SceneEditorPanel'
 import ScenePreview from './components/panels/ScenePreview'
 import SceneLevel3D from './components/3d/SceneLevel3D'
+import FlirScriptEditor from './components/panels/flirscript/FlirScriptEditor'
 import Toasts from './components/ui/Toasts'
 import LoadingOverlay from './components/ui/LoadingOverlay'
 import BottomBar from './components/ui/BottomBar'
@@ -109,21 +110,26 @@ export default function App() {
       <TopBar />
       <OfflineIndicator />
 
-      <div className="app-body">
-        {appMode === 'scene' ? (
-          <SceneEditorPanel onClose={ui.leftDrawerOpen ? closeDrawers : null} />
-        ) : (
-          <LeftPanel open={ui.leftDrawerOpen} onClose={closeDrawers} />
-        )}
+      {appMode === 'flirscript' ? (
+        // Modo FlirScript: editor de nós ocupa todo o ecrã (abaixo da topbar)
+        <FlirScriptEditor />
+      ) : (
+        <div className="app-body">
+          {appMode === 'scene' ? (
+            <SceneEditorPanel onClose={ui.leftDrawerOpen ? closeDrawers : null} />
+          ) : (
+            <LeftPanel open={ui.leftDrawerOpen} onClose={closeDrawers} />
+          )}
 
-        {appMode === 'scene' ? (
-          <SceneLevel3D />
-        ) : (
-          <Viewport />
-        )}
+          {appMode === 'scene' ? (
+            <SceneLevel3D />
+          ) : (
+            <Viewport />
+          )}
 
-        <RightPanel open={ui.rightDrawerOpen} onClose={closeDrawers} />
-      </div>
+          <RightPanel open={ui.rightDrawerOpen} onClose={closeDrawers} />
+        </div>
+      )}
 
       <Timeline />
       <BottomBar />

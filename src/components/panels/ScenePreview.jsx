@@ -2,23 +2,24 @@
  * ScenePreview — modo de pré-visualização da cena em ecrã cheio.
  *
  * Mostra a cena ativa sem os painéis de edição, usando a gameCamera configurada.
- * O utilizador pode orbitar livremente (câmara orbital) ou alternar para a
- * gameCamera da cena (botão no canto).
+ * O utilizador pode orbitar livremente ou alternar para a gameCamera.
+ *
+ * **Fase 2 — FlirScript**: quando a preview abre, instanciamos um runtime
+ * FlirScript para cada objeto que tenha um grafo, e disparamos eventos
+ * (BeginPlay no início, Tick a cada frame, OnCollision, OnTouch, etc.).
  *
  * Botão "Sair" no canto superior direito para voltar ao editor.
- *
- * Esta é uma primeira aproximação ao "modo de jogo" — na Fase 2 será
- * substituído por um player real com lógica de scripting.
  */
 import { Suspense, useEffect, useRef, useState } from 'react'
-import { Canvas, useThree } from '@react-three/fiber'
+import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, ContactShadows } from '@react-three/drei'
 import * as THREE from 'three'
 import SceneObject from '../3d/SceneObject'
 import { useStore } from '../../store/useStore'
 import { IconClose, IconPlay } from '../ui/Icons'
+import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
 
-// Marcador do jogador (igual ao do SceneLevel3D)
+// Marcador do jogador
 function PlayerMarker({ position }) {
   return (
     <group position={position}>
@@ -58,6 +59,128 @@ function PreviewBackground({ background }) {
   return null
 }
 
+// Componente que instancia e executa os grafos FlirScript de cada objeto
+// Vive dentro do Canvas para ter acesso ao useFrame e useThree.
+function FlirScriptRunner({ instances, meshRefs, objects, activeSceneId }) {
+  const runtimesRef = useRef(new Map())
+  const gameContextRef = useRef(null)
+  const toast = useStore((s) => s.toast)
+
+  // Constroi o gameContext (API que os nós FlirScript podem chamar)
+  const buildGameContext = () => {
+    return {
+      globalVars: { _score: 0 },
+      moveObject: (instanceId, direction, speed) => {
+        const mesh = meshRefs.current.get(instanceId)
+        if (!mesh) return
+        const dt = 0.016 // aproximação
+        mesh.position.x += direction[0] * speed * dt
+        mesh.position.y += direction[1] * speed * dt
+        mesh.position.z += direction[2] * speed * dt
+        // Atualizar também no store para persistir
+        useStore.getState().updateSceneInstance(instanceId, {
+          position: [mesh.position.x, mesh.position.y, mesh.position.z],
+        })
+      },
+      rotateObject: (instanceId, rotation) => {
+        const mesh = meshRefs.current.get(instanceId)
+        if (!mesh) return
+        const dt = 0.016
+        mesh.rotation.x += THREE.MathUtils.degToRad(rotation[0]) * dt
+        mesh.rotation.y += THREE.MathUtils.degToRad(rotation[1]) * dt
+        mesh.rotation.z += THREE.MathUtils.degToRad(rotation[2]) * dt
+      },
+      playAnimation: (instanceId, clip) => {
+        // Fase 2: apenas log — integração real com o sistema de animação virá depois
+        console.log(`[FlirScript] playAnimation: ${instanceId} → ${clip}`)
+      },
+      playSound: (soundUrl) => {
+        try {
+          const audio = new Audio(soundUrl)
+          audio.play().catch(() => {})
+        } catch {}
+      },
+      destroyObject: (instanceId) => {
+        // Marcar para remoção no próximo frame
+        const mesh = meshRefs.current.get(instanceId)
+        if (mesh) mesh.visible = false
+      },
+      spawnObject: (objectName, position) => {
+        const obj = objects.find((o) => o.name === objectName)
+        if (obj) {
+          useStore.getState().addObjectToScene(obj.id, position)
+        }
+      },
+      changeScene: (sceneName) => {
+        const scenes = useStore.getState().scenes
+        const target = scenes.find((s) => s.name === sceneName)
+        if (target) {
+          useStore.getState().setActiveScene(target.id)
+          toast(`Mudou para a cena "${sceneName}"`, 'info')
+        }
+      },
+      setVisible: (instanceId, visible) => {
+        const mesh = meshRefs.current.get(instanceId)
+        if (mesh) mesh.visible = visible
+      },
+    }
+  }
+
+  // Inicializar runtimes quando as instâncias mudam
+  useEffect(() => {
+    // Limpar runtimes antigos
+    for (const rt of runtimesRef.current.values()) {
+      rt.dispose()
+    }
+    runtimesRef.current.clear()
+
+    if (!gameContextRef.current) {
+      gameContextRef.current = buildGameContext()
+    }
+
+    // Criar runtime para cada instância que tenha flirScript
+    for (const instance of instances) {
+      if (instance.flirScript) {
+        // Validar antes de executar
+        const errors = validateGraph(instance.flirScript)
+        if (errors.length > 0) {
+          console.warn(`[FlirScript] Erros no grafo de ${instance.instanceId}:`, errors)
+          continue
+        }
+        try {
+          const rt = createFlirScriptRuntime(instance.flirScript, gameContextRef.current)
+          // Marcar cada nó com o instanceId para que as ações saibam a que objeto se referem
+          rt.graph.nodes.forEach((node) => {
+            node._instanceId = instance.instanceId
+          })
+          runtimesRef.current.set(instance.instanceId, rt)
+          // Disparar BeginPlay
+          rt.triggerEvent('beginPlay')
+        } catch (err) {
+          console.error(`[FlirScript] Erro ao iniciar runtime de ${instance.instanceId}:`, err)
+        }
+      }
+    }
+
+    return () => {
+      for (const rt of runtimesRef.current.values()) {
+        rt.dispose()
+      }
+      runtimesRef.current.clear()
+    }
+  }, [instances, objects])
+
+  // Tick a cada frame
+  useFrame((_, delta) => {
+    for (const rt of runtimesRef.current.values()) {
+      rt.update(delta)
+      rt.triggerEvent('tick', { deltaTime: delta })
+    }
+  })
+
+  return null
+}
+
 export default function ScenePreview() {
   const scenes = useStore((s) => s.scenes)
   const activeSceneId = useStore((s) => s.activeSceneId)
@@ -67,11 +190,11 @@ export default function ScenePreview() {
   const closeScenePreview = useStore((s) => s.closeScenePreview)
   const [useGameCam, setUseGameCam] = useState(false)
   const orbitRef = useRef(null)
+  const meshRefs = useRef(new Map())
 
   const activeScene = scenes.find((s) => s.id === activeSceneId)
 
   useEffect(() => {
-    // ESC para sair
     const handler = (e) => {
       if (e.key === 'Escape') closeScenePreview()
     }
@@ -82,14 +205,12 @@ export default function ScenePreview() {
   if (!activeScene) return null
 
   const cam = activeScene.gameCamera
-  // Configuração da câmara consoante o tipo
   const cameraProps = cam.type === 'orthographic'
     ? { type: 'orthographic', position: cam.position, near: cam.near, far: cam.far, zoom: 5 / cam.orthoSize }
     : { type: 'perspective', position: cam.position, fov: cam.fov, near: cam.near, far: cam.far }
 
   return (
     <div className="scene-preview-fullscreen">
-      {/* Botão Sair */}
       <button
         className="preview-exit-btn"
         onClick={closeScenePreview}
@@ -99,12 +220,10 @@ export default function ScenePreview() {
         <span>Sair</span>
       </button>
 
-      {/* Botão alternar câmara */}
       <button
         className="preview-cam-btn"
         onClick={() => {
           setUseGameCam(!useGameCam)
-          // Se voltarmos ao orbital, garantir que o orbit está enabled
           if (useGameCam && orbitRef.current) {
             orbitRef.current.enabled = true
             orbitRef.current.update()
@@ -116,12 +235,12 @@ export default function ScenePreview() {
         {useGameCam ? 'Orbital' : 'Game Cam'}
       </button>
 
-      {/* Info bar */}
       <div className="preview-info">
         <strong>{activeScene.name}</strong>
         <span className="muted small">
           {' · '}{activeScene.objects.length} objetos
           {activeScene.playerObjectId && ' · jogador definido'}
+          {activeScene.objects.some((o) => o.flirScript) && ' · FlirScript ativo'}
         </span>
       </div>
 
@@ -164,13 +283,28 @@ export default function ScenePreview() {
             const isPlayer = instance.instanceId === activeScene.playerObjectId
             return (
               <group key={instance.instanceId}>
-                <SceneObject obj={sceneObj} isSelected={false} onSelect={() => {}} />
+                <SceneObject
+                  ref={(node) => {
+                    if (node) meshRefs.current.set(instance.instanceId, node)
+                    else meshRefs.current.delete(instance.instanceId)
+                  }}
+                  obj={sceneObj}
+                  isSelected={false}
+                  onSelect={() => {}}
+                />
                 {isPlayer && <PlayerMarker position={instance.position} />}
               </group>
             )
           })}
 
-          {/* Se useGameCam, posicionamos a câmara na gameCamera; caso contrário, orbital */}
+          {/* Runner do FlirScript — executa os grafos de cada objeto */}
+          <FlirScriptRunner
+            instances={activeScene.objects}
+            meshRefs={meshRefs}
+            objects={objects}
+            activeSceneId={activeSceneId}
+          />
+
           {!useGameCam && (
             <OrbitControls
               ref={orbitRef}
@@ -193,7 +327,6 @@ export default function ScenePreview() {
   )
 }
 
-// Componente que aplica a transformação da gameCamera à câmara do canvas
 function GameCameraRig({ camera: camConfig }) {
   const { camera } = useThree()
   useEffect(() => {

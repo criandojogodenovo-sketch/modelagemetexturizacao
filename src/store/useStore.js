@@ -826,10 +826,11 @@ export const useStore = create(
         }))
       },
 
-      // ---------- App Mode (Modelagem vs Cena) ----------
-      // Distingue entre o editor de objetos individuais (modelagem)
-      // e o editor de cenas/níveis (montar o nível com os objetos).
-      appMode: 'modeling', // 'modeling' | 'scene'
+      // ---------- App Mode (Modelagem vs Cena vs FlirScript) ----------
+      // Distingue entre o editor de objetos individuais (modelagem),
+      // o editor de cenas/níveis (montar o nível) e o editor de nós FlirScript.
+      appMode: 'modeling', // 'modeling' | 'scene' | 'flirscript'
+      flirScriptTarget: null, // { sceneId, instanceId } — objeto cujo script estamos a editar
       setAppMode: (mode) => {
         set({ appMode: mode })
         if (mode === 'scene') {
@@ -841,6 +842,45 @@ export const useStore = create(
             set({ activeSceneId: scenes[0].id })
           }
         }
+      },
+      setFlirScriptTarget: (sceneId, instanceId) => {
+        set({
+          flirScriptTarget: { sceneId, instanceId },
+          appMode: 'flirscript',
+        })
+      },
+      clearFlirScriptTarget: () => {
+        set({ flirScriptTarget: null, appMode: 'scene' })
+      },
+
+      // ---------- FlirScript (scripts visuais por objeto) ----------
+      // Cada instância de objeto numa cena pode ter um grafo FlirScript.
+      // O grafo é guardado dentro da instância (em scene.objects[].flirScript).
+      // Estrutura do grafo: { nodes: [...], links: [...], lastNodeId, lastLinkId, version }
+      setInstanceFlirScript: (instanceId, graphData) => {
+        const { activeSceneId } = get()
+        get()._pushHistory()
+        set((s) => ({
+          scenes: s.scenes.map((sc) =>
+            sc.id === activeSceneId
+              ? {
+                  ...sc,
+                  objects: sc.objects.map((o) =>
+                    o.instanceId === instanceId
+                      ? { ...o, flirScript: graphData }
+                      : o
+                  ),
+                }
+              : sc
+          ),
+        }))
+      },
+      getInstanceFlirScript: (instanceId) => {
+        const { scenes, activeSceneId } = get()
+        const scene = scenes.find((s) => s.id === activeSceneId)
+        if (!scene) return null
+        const inst = scene.objects.find((o) => o.instanceId === instanceId)
+        return inst?.flirScript || null
       },
 
       // ---------- Cenas / Níveis ----------

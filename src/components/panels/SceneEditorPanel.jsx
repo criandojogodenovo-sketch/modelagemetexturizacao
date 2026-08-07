@@ -34,6 +34,7 @@ export default function SceneEditorPanel({ onClose }) {
   const markAsPlayer = useStore((s) => s.markAsPlayer)
   const updateGameCamera = useStore((s) => s.updateGameCamera)
   const openScenePreview = useStore((s) => s.openScenePreview)
+  const setFlirScriptTarget = useStore((s) => s.setFlirScriptTarget)
   const toast = useStore((s) => s.toast)
 
   const activeScene = scenes.find((s) => s.id === activeSceneId)
@@ -180,6 +181,19 @@ export default function SceneEditorPanel({ onClose }) {
                               ⭐
                             </button>
                           )}
+                          <button
+                            onClick={() => setFlirScriptTarget(activeSceneId, instance.instanceId)}
+                            title="Editar FlirScript (lógica do objeto)"
+                            style={{
+                              padding: '2px 6px',
+                              fontSize: 10,
+                              background: instance.flirScript ? 'var(--accent-soft)' : undefined,
+                              borderColor: instance.flirScript ? 'var(--accent)' : undefined,
+                              color: instance.flirScript ? 'var(--accent)' : undefined,
+                            }}
+                          >
+                            🧩 {instance.flirScript ? '✓' : ''}
+                          </button>
                           <button
                             className="danger"
                             onClick={() => removeObjectFromScene(instance.instanceId)}

@@ -1449,3 +1449,255 @@ label {
     transform: translateX(0);
   }
 }
+
+/* ========================================================
+   FASE 2 — FlirScript (scripting visual)
+   ======================================================== */
+
+/* ===== FlirScriptEditor (ecrã cheio) ===== */
+.flirscript-editor {
+  position: fixed;
+  top: var(--topbar-h);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-app);
+  z-index: 10;
+}
+
+.app-shell:has(.offline-indicator) .flirscript-editor {
+  top: calc(var(--topbar-h) + 24px);
+}
+
+.flirscript-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.flirscript-toolbar .fs-target-info {
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.flirscript-toolbar .spacer {
+  flex: 1;
+}
+
+.flirscript-toolbar button {
+  font-size: 11px;
+  padding: 6px 10px;
+}
+
+/* Erros de validação */
+.flirscript-errors {
+  background: rgba(248, 81, 73, 0.1);
+  border-bottom: 1px solid var(--danger);
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--danger);
+  flex-shrink: 0;
+}
+
+.flirscript-errors ul {
+  margin: 4px 0 0 16px;
+  padding: 0;
+}
+
+/* Container do canvas (ocupa espaço restante) */
+.flirscript-canvas-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #0d1117;
+}
+
+.flirscript-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* Dica de controlos */
+.flirscript-hint {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  font-size: 10px;
+  color: var(--text-secondary);
+  pointer-events: none;
+  text-align: center;
+}
+
+/* Empty state (quando não há objeto alvo) */
+.flirscript-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ===== Painel "Adicionar Nó" (drawer à direita) ===== */
+.flirscript-add-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 300px;
+  max-width: 90vw;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+  box-shadow: var(--shadow-panel);
+}
+
+.flirscript-add-panel.open {
+  transform: translateX(0);
+}
+
+/* Categorias */
+.fs-categories {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.fs-cat-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.fs-cat-btn:hover {
+  background: var(--bg-hover);
+}
+
+.fs-cat-btn.active {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.fs-cat-btn span:first-child {
+  font-size: 16px;
+}
+
+/* Lista de nós */
+.fs-node-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fs-node-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.fs-node-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.fs-node-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.fs-node-desc {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.fs-node-pins {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.fs-node-pins .tag {
+  font-size: 9px;
+  padding: 1px 4px;
+}
+
+/* ===== Override do litegraph.css para dark mode ===== */
+.litegraph.litecontextmenu {
+  background: var(--bg-panel) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text-primary) !important;
+}
+
+.litegraph.litecontextmenu .litemenu-title {
+  background: var(--bg-panel-2) !important;
+  color: var(--text-primary) !important;
+}
+
+.litegraph.litecontextmenu .litemenu-entry {
+  color: var(--text-primary) !important;
+}
+
+.litegraph.litecontextmenu .litemenu-entry:hover {
+  background: var(--accent) !important;
+  color: #fff !important;
+}
+
+/* Em mobile, o painel de adicionar nó ocupa largura total */
+@media (max-width: 600px) {
+  .flirscript-add-panel {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .flirscript-hint {
+    display: none;
+  }
+
+  .flirscript-toolbar {
+    flex-wrap: wrap;
+    padding: 4px 6px;
+  }
+
+  .flirscript-toolbar button {
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+}

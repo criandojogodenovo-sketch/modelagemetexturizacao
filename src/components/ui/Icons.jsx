@@ -364,6 +364,12 @@ export const IconLibrary = (p) => (
   </svg>
 )
 
+export const IconCheck = (p) => (
+  <svg {...base(p)}>
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+)
+
 export const IconMoreGrid = (p) => (
   <svg {...base(p)}>
     <rect x="3" y="3" width="7" height="7" rx="1" />
