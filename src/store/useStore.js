@@ -856,31 +856,51 @@ export const useStore = create(
 
       // ---------- FlirScript (scripts visuais por objeto) ----------
       // Cada instância de objeto numa cena pode ter um grafo FlirScript.
-      // O grafo é guardado dentro da instância (em scene.objects[].flirScript).
+      // O grafo é guardado dentro da instância (em scene.objects[].flirScript OU scene.conects[].flirScript).
       // Estrutura do grafo: { nodes: [...], links: [...], lastNodeId, lastLinkId, version }
       setInstanceFlirScript: (instanceId, graphData) => {
-        const { activeSceneId } = get()
+        const { activeSceneId, flirScriptTarget } = get()
+        // Usar a sceneId do flirScriptTarget se disponível (para Conects doutra cena)
+        const targetSceneId = flirScriptTarget?.sceneId || activeSceneId
         get()._pushHistory()
         set((s) => ({
-          scenes: s.scenes.map((sc) =>
-            sc.id === activeSceneId
-              ? {
-                  ...sc,
-                  objects: sc.objects.map((o) =>
-                    o.instanceId === instanceId
-                      ? { ...o, flirScript: graphData }
-                      : o
-                  ),
-                }
-              : sc
-          ),
+          scenes: s.scenes.map((sc) => {
+            if (sc.id !== targetSceneId) return sc
+            // Procurar em objects E conects
+            const inObjects = sc.objects?.some((o) => o.instanceId === instanceId)
+            const inConects = sc.conects?.some((o) => o.instanceId === instanceId)
+            if (inObjects) {
+              return {
+                ...sc,
+                objects: sc.objects.map((o) =>
+                  o.instanceId === instanceId
+                    ? { ...o, flirScript: graphData }
+                    : o
+                ),
+              }
+            }
+            if (inConects) {
+              return {
+                ...sc,
+                conects: (sc.conects || []).map((o) =>
+                  o.instanceId === instanceId
+                    ? { ...o, flirScript: graphData }
+                    : o
+                ),
+              }
+            }
+            return sc
+          }),
         }))
       },
       getInstanceFlirScript: (instanceId) => {
-        const { scenes, activeSceneId } = get()
-        const scene = scenes.find((s) => s.id === activeSceneId)
+        const { scenes, activeSceneId, flirScriptTarget } = get()
+        const targetSceneId = flirScriptTarget?.sceneId || activeSceneId
+        const scene = scenes.find((s) => s.id === targetSceneId)
         if (!scene) return null
-        const inst = scene.objects.find((o) => o.instanceId === instanceId)
+        const inst =
+          scene.conects?.find((o) => o.instanceId === instanceId) ||
+          scene.objects?.find((o) => o.instanceId === instanceId)
         return inst?.flirScript || null
       },
 
@@ -1199,6 +1219,14 @@ export const useStore = create(
       debugConsoleOpen: false,
       openDebugConsole: () => set({ debugConsoleOpen: true }),
       closeDebugConsole: () => set({ debugConsoleOpen: false }),
+
+      terrainEditorOpen: false,
+      openTerrainEditor: () => set({ terrainEditorOpen: true }),
+      closeTerrainEditor: () => set({ terrainEditorOpen: false }),
+
+      homeVisible: false,
+      showHome: () => set({ homeVisible: true }),
+      hideHome: () => set({ homeVisible: false }),
 
       mainMenuOpen: false,
       toggleMainMenu: () => set((s) => ({ mainMenuOpen: !s.mainMenuOpen })),

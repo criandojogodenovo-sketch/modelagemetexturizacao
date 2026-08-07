@@ -2615,3 +2615,486 @@ label {
     max-width: 100%;
   }
 }
+
+/* ========================================================
+   FASE 5 — Home, Ebook, Terrain, Submenus, Landscape
+   ======================================================== */
+
+/* ===== ConectContextMenu submenu ===== */
+.conect-context-submenu {
+  margin-left: 16px;
+  border-left: 2px solid var(--border-soft);
+  padding-left: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.conect-context-submenu .submenu-item {
+  background: var(--bg-app) !important;
+  font-size: 11px !important;
+  padding: 6px 8px !important;
+}
+
+.conect-context-submenu .submenu-empty {
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 6px 8px;
+  font-style: italic;
+}
+
+/* ===== HomePage ===== */
+.home-page {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: var(--bg-app);
+  overflow-y: auto;
+}
+
+.home-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 30px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.home-logo {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.home-logo-icon {
+  font-size: 36px;
+}
+
+.home-logo h1 {
+  margin: 0;
+  font-size: 22px;
+  color: var(--text-primary);
+}
+
+.home-logo p {
+  margin: 2px 0 0 0;
+  font-size: 12px;
+}
+
+.home-ebook-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  padding: 10px 16px;
+}
+
+.home-content {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.home-section {
+  margin-bottom: 32px;
+}
+
+.home-section h2 {
+  font-size: 18px;
+  margin: 0 0 14px 0;
+  color: var(--text-primary);
+}
+
+.home-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.home-loading, .home-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+}
+
+.home-empty-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.home-empty h3 {
+  color: var(--text-primary);
+  margin: 0 0 6px 0;
+}
+
+.home-empty button {
+  margin-top: 12px;
+}
+
+.projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.project-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color 0.12s;
+}
+
+.project-card:hover {
+  border-color: var(--accent);
+}
+
+.project-card-thumb {
+  width: 100%;
+  aspect-ratio: 16/10;
+  background: linear-gradient(135deg, var(--bg-panel-2), var(--bg-app));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.project-card-icon {
+  font-size: 40px;
+  opacity: 0.7;
+}
+
+.project-card-info {
+  padding: 10px;
+  position: relative;
+}
+
+.project-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.project-card-meta {
+  margin-top: 2px;
+}
+
+.project-card-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 6px !important;
+  font-size: 12px;
+}
+
+.home-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.feature-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  text-align: center;
+}
+
+.feature-icon {
+  font-size: 28px;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.feature-card h3 {
+  margin: 0 0 4px 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.feature-card p {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.ebook-banner {
+  background: linear-gradient(135deg, var(--accent), #8957e5);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  color: #fff;
+}
+
+.ebook-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ebook-banner-icon {
+  font-size: 32px;
+}
+
+.ebook-banner h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.ebook-banner p {
+  margin: 2px 0 0 0;
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.ebook-banner-cta {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* ===== Ebook ===== */
+.ebook-container {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  background: var(--bg-app);
+  display: flex;
+  flex-direction: column;
+}
+
+.ebook-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.ebook-header h1 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.ebook-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.ebook-toc {
+  width: 240px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ebook-toc-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ebook-toc-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.ebook-toc-item.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ebook-toc-icon {
+  font-size: 14px;
+}
+
+.ebook-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 30px;
+  max-width: 700px;
+}
+
+.ebook-content h3 {
+  color: var(--text-primary);
+  margin-top: 0;
+}
+
+.ebook-content h4 {
+  color: var(--accent);
+  margin-top: 16px;
+}
+
+.ebook-content p, .ebook-content ul, .ebook-content ol {
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.ebook-content code {
+  background: var(--bg-panel-2);
+  color: var(--warning);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+.ebook-illustration {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 20px auto;
+  background: var(--bg-panel);
+  border-radius: var(--radius-md);
+}
+
+@media (max-width: 768px) {
+  .ebook-toc {
+    width: 180px;
+  }
+  .ebook-content {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  .ebook-body {
+    flex-direction: column;
+  }
+  .ebook-toc {
+    width: 100%;
+    max-height: 120px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+/* ===== TerrainEditor ===== */
+.terrain-editor {
+  position: fixed;
+  top: var(--topbar-h);
+  left: 0;
+  bottom: 0;
+  width: 380px;
+  max-width: 90vw;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(-100%);
+  transition: transform 0.22s ease;
+  box-shadow: var(--shadow-panel);
+}
+
+.terrain-editor.open {
+  transform: translateX(0);
+}
+
+.terrain-editor-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+@media (max-width: 600px) {
+  .terrain-editor {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+/* ===== Landscape orientation (mobile horizontal) ===== */
+@media (max-width: 1024px) and (orientation: landscape) and (max-height: 500px) {
+  /* Em landscape com pouca altura, ajustar a topbar para ser mais compacta */
+  :root {
+    --topbar-h: 40px;
+  }
+
+  .topbar {
+    padding: 0 8px;
+  }
+
+  .topbar .brand .brand-text {
+    display: none;
+  }
+
+  /* Painéis laterais ocupam menos largura em landscape */
+  .panel.left {
+    width: 220px !important;
+  }
+  .panel.right {
+    width: 240px !important;
+  }
+
+  /* BottomBar mais compacta */
+  .bottom-bar {
+    height: 52px;
+  }
+
+  .bb-btn {
+    min-height: 48px;
+  }
+
+  .bb-label {
+    font-size: 9px;
+  }
+
+  /* Tabs mais compactas */
+  .tab-btn {
+    padding: 4px 2px;
+    min-height: 36px;
+    font-size: 8px;
+  }
+
+  /* Mostrar brand text em landscape mesmo no mobile */
+  .topbar .brand .brand-text {
+    display: inline;
+    font-size: 11px;
+  }
+}
+
+/* Aviso de orientação (recomendar landscape) */
+.orientation-hint {
+  display: none;
+}
+
+@media (max-width: 768px) and (orientation: portrait) and (max-height: 500px) {
+  /* Em portrait com pouca altura, mostrar hint para rodar */
+  .orientation-hint {
+    display: block;
+    position: fixed;
+    bottom: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-elevated);
+    border: 1px solid var(--warning);
+    color: var(--warning);
+    padding: 6px 12px;
+    border-radius: var(--radius-md);
+    font-size: 10px;
+    z-index: 30;
+    pointer-events: none;
+  }
+}

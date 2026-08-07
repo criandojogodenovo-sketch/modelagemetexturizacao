@@ -33,6 +33,8 @@ export default function TopBar() {
   const toggleLeftDrawer = useStore((s) => s.toggleLeftDrawer)
   const toggleRightDrawer = useStore((s) => s.toggleRightDrawer)
   const toggleMainMenu = useStore((s) => s.toggleMainMenu)
+  const showHome = useStore((s) => s.showHome)
+  const openTerrainEditor = useStore((s) => s.openTerrainEditor)
 
   const newProject = useStore((s) => s.newProject)
   const undo = useStore((s) => s.undo)
@@ -160,6 +162,21 @@ export default function TopBar() {
         <span className="drawer-toggle" style={{ display: 'none' }}> </span>
         <span className="brand-text">Modelagem 3D</span>
       </div>
+
+      <button
+        onClick={showHome}
+        title="Página principal (projetos + ebook)"
+        className="icon"
+      >
+        🏠
+      </button>
+      <button
+        onClick={openTerrainEditor}
+        title="Editor de Terrenos"
+        className="icon"
+      >
+        ⛰️
+      </button>
 
       {/* Seletor de modo: Modelagem vs Cena */}
       <AppModeSwitch />

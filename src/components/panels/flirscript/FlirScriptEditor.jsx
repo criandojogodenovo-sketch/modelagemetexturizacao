@@ -41,8 +41,11 @@ export default function FlirScriptEditor() {
   const [errors, setErrors] = useState([])
 
   // Objeto alvo e seu grafo atual
+  // Procurar em ambos: objects (catálogo) e conects (Conects da cena)
   const targetScene = scenes.find((s) => s.id === flirScriptTarget?.sceneId)
-  const targetInstance = targetScene?.objects.find((o) => o.instanceId === flirScriptTarget?.instanceId)
+  const targetInstance =
+    targetScene?.conects?.find((o) => o.instanceId === flirScriptTarget?.instanceId) ||
+    targetScene?.objects?.find((o) => o.instanceId === flirScriptTarget?.instanceId)
 
   // Inicializar grafo
   useEffect(() => {

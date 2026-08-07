@@ -33,8 +33,10 @@ import UIEditor from './components/panels/ui-editor/UIEditor'
 import ShaderEditor from './components/panels/shader-editor/ShaderEditor'
 import ProjectBrowser from './components/panels/project-browser/ProjectBrowser'
 import DebugConsole from './components/panels/debug/DebugConsole'
+import TerrainEditor from './components/panels/terrain/TerrainEditor'
 import AnimationControllerEditor from './components/panels/AnimationControllerEditor'
 import MainMenu from './components/ui/MainMenu'
+import HomePage from './components/home/HomePage'
 import Toasts from './components/ui/Toasts'
 import LoadingOverlay from './components/ui/LoadingOverlay'
 import BottomBar from './components/ui/BottomBar'
@@ -65,6 +67,10 @@ export default function App() {
   const closeAnimController = useStore((s) => s.closeAnimController)
   const mainMenuOpen = useStore((s) => s.mainMenuOpen)
   const closeMainMenu = useStore((s) => s.closeMainMenu)
+  const terrainEditorOpen = useStore((s) => s.terrainEditorOpen)
+  const closeTerrainEditor = useStore((s) => s.closeTerrainEditor)
+  const homeVisible = useStore((s) => s.homeVisible)
+  const hideHome = useStore((s) => s.hideHome)
 
   const undo = useStore((s) => s.undo)
   const redo = useStore((s) => s.redo)
@@ -131,6 +137,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      {homeVisible && <HomePage onOpenProject={hideHome} />}
       <TopBar />
       <OfflineIndicator />
 
@@ -168,6 +175,7 @@ export default function App() {
       {shaderEditorOpen && <ShaderEditor onClose={closeShaderEditor} />}
       {projectBrowserOpen && <ProjectBrowser onClose={closeProjectBrowser} />}
       {debugConsoleOpen && <DebugConsole onClose={closeDebugConsole} />}
+      {terrainEditorOpen && <TerrainEditor onClose={closeTerrainEditor} />}
       {animControllerTarget && (
         <div className="modal-backdrop" onClick={closeAnimController}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600, width: '90%', maxHeight: '90vh', overflowY: 'auto' }}>

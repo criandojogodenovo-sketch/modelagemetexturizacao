@@ -136,22 +136,36 @@ function LuminousMesh({ conect }) {
 // ===== TerrainObject =====
 function TerrainMesh({ conect, setMeshRef }) {
   const geometry = useMemo(() => {
+    const seg = conect.segments || 64
     const g = new THREE.PlaneGeometry(
-      conect.width, conect.depth, conect.segments, conect.segments
+      conect.width || 50, conect.depth || 50, seg, seg
     )
     g.rotateX(-Math.PI / 2)
-    // Gerar heightmap simples com noise
     const positions = g.attributes.position
-    const seed = conect.heightmapSeed || 1
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i)
-      const z = positions.getZ(i)
-      const h = Math.sin(x * 0.3 + seed) * Math.cos(z * 0.3 + seed) * (conect.heightScale || 1)
-      positions.setY(i, h)
+    const heightScale = conect.heightScale || 5
+
+    // Se há heightmap exportado do TerrainEditor, usá-lo
+    if (conect.heightmap && conect.heightmap.length > 0) {
+      const hm = conect.heightmap
+      // positions.count = (seg+1) * (seg+1) que deve bater com hm.length
+      for (let i = 0; i < positions.count && i < hm.length; i++) {
+        positions.setY(i, hm[i] * heightScale)
+      }
+    } else {
+      // Fallback: gerar procedural
+      const seed = conect.heightmapSeed || 1
+      for (let i = 0; i < positions.count; i++) {
+        const x = positions.getX(i)
+        const z = positions.getZ(i)
+        const h =
+          Math.sin(x * 0.3 + seed) * Math.cos(z * 0.3 + seed) * 0.5 +
+          Math.sin(x * 0.1 + z * 0.1) * 0.3
+        positions.setY(i, h * heightScale)
+      }
     }
     g.computeVertexNormals()
     return g
-  }, [conect.width, conect.depth, conect.segments, conect.heightScale, conect.heightmapSeed])
+  }, [conect.width, conect.depth, conect.segments, conect.heightScale, conect.heightmapSeed, conect.heightmap])
 
   return (
     <mesh
@@ -161,7 +175,11 @@ function TerrainMesh({ conect, setMeshRef }) {
       receiveShadow
       castShadow
     >
-      <meshStandardMaterial color="#5a7d3a" roughness={0.9} metalness={0} />
+      <meshStandardMaterial
+        color={conect.textureColor || '#5a7d3a'}
+        roughness={0.9}
+        metalness={0}
+      />
     </mesh>
   )
 }
