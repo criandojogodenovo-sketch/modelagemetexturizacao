@@ -3674,6 +3674,60 @@ label {
   padding: 0 8px;
 }
 
+/* === P7: Syntax highlighting overlay === */
+.flircode-editor-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.flircode-highlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 8px 12px;
+  font-family: Monaco, Menlo, 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  tab-size: 4;
+  white-space: pre;
+  overflow: auto;
+  pointer-events: none;
+  color: var(--text-primary);
+  background: transparent;
+  word-wrap: normal;
+}
+
+.flircode-textarea-overlay {
+  position: absolute;
+  inset: 0;
+  flex: none;
+  background: transparent !important;
+  color: transparent !important;
+  caret-color: var(--text-primary);
+  -webkit-text-fill-color: transparent;
+}
+
+.flircode-textarea-overlay::selection {
+  background: rgba(47, 129, 247, 0.3);
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+.flircode-textarea-overlay::placeholder {
+  color: var(--text-muted);
+  -webkit-text-fill-color: var(--text-muted);
+}
+
+/* === Cores de syntax highlighting (tema dark) === */
+.fc-keyword  { color: #ff7b72; font-weight: 600; }     /* vermelho-rosa — fun, var, if, etc. */
+.fc-builtin  { color: #d2a8ff; }                        /* roxo — playAnim, move, etc. */
+.fc-event    { color: #ffa657; font-weight: 600; }      /* laranja — onStart, onTick, etc. */
+.fc-string   { color: #a5d6ff; }                        /* azul claro — "strings" */
+.fc-number   { color: #79c0ff; }                        /* azul — 123, 4.5 */
+.fc-comment  { color: #6e7681; font-style: italic; }    /* cinzento — $$ comentários */
+.fc-func     { color: #d2a8ff; }                        /* roxo claro — funções do utilizador */
+
 .flircode-textarea {
   flex: 1;
   background: var(--bg-app);

@@ -86,15 +86,43 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   const timerStatesRef = useRef(new Map())
   const joystickRef = useRef({ x: 0, z: 0, active: false })
 
+  // P2.5 fix: armazenar a cena ativa num ref para que modificações feitas pelo
+  // FlirCode (createObject, etc.) NÃO reiniciem o jogo (evita loop infinito).
+  // O useEffect só deve correr quando isGameMode muda (true→false ou false→true),
+  // não quando activeScene é modificado por spawnObject.
+  const activeSceneRef = useRef(activeScene)
+  const objectsRef = useRef(objects)
+  const gameStartedRef = useRef(false)
+
+  // Atualizar refs sem re-disparar o useEffect
+  useEffect(() => {
+    // Só atualizar o ref se o jogo ainda não começou OU se a cena mudou de verdade
+    // (não por spawnObject, mas por mudança de cena manual via changeScene)
+    if (!gameStartedRef.current || (activeScene && activeScene.id !== activeSceneRef.current?.id)) {
+      activeSceneRef.current = activeScene
+      objectsRef.current = objects
+    } else {
+      // Jogo em curso: manter o snapshot antigo, mas atualizar objects (para spawn)
+      objectsRef.current = objects
+    }
+  }, [activeScene, objects])
+
+  // Use o ref para o setup
+  const setupScene = activeSceneRef.current
+
   // Setup quando o modo jogo é activado
   useEffect(() => {
-    if (!isGameMode || !activeScene) return
+    if (!isGameMode || !setupScene) return
+    gameStartedRef.current = true
 
     debugLog('Jogo iniciado', 'log', 'Game')
 
     // Criar gameContext
     const gameContext = {
       globalVars: { _score: 0 },
+      // P2.5: setVar/getVar — expostos no gameContext para o FlirCode
+      setVar: (name, value) => { gameContext.globalVars[name] = value },
+      getVar: (name) => gameContext.globalVars[name] ?? 0,
       moveObject: (instanceId, direction, speed) => {
         const mesh = meshRefs.current.get(instanceId) || conectMeshRefs.current.get(instanceId)
         if (mesh) {
@@ -117,7 +145,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       },
       playSound: (url) => { try { new Audio(url).play() } catch {} },
       playSoundByName: (name) => {
-        const sc = (activeScene.conects || []).find((c) => c.type === 'SoundObject' && c.name === name)
+        const sc = (setupScene.conects || []).find((c) => c.type === 'SoundObject' && c.name === name)
         if (sc && sc.url) { try { const a = new Audio(sc.url); a.volume = sc.volume ?? 1; a.loop = sc.loop || false; a.play() } catch {} }
       },
       destroyObject: (instanceId) => {
@@ -125,7 +153,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         if (mesh) mesh.visible = false
       },
       spawnObject: (objectName, position) => {
-        const obj = objects.find((o) => o.name === objectName)
+        const obj = objectsRef.current.find((o) => o.name === objectName)
         if (obj) useStore.getState().addObjectToScene(obj.id, position)
       },
       changeScene: (sceneName) => {
@@ -176,10 +204,18 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         return false
       },
       distanceTo: (instanceId, targetName) => {
-        for (const inst of activeScene.objects || []) {
-          const obj = objects.find((o) => o.id === inst.objectId)
-          if (obj && obj.name === targetName) {
+        // P2.5: procurar em objects E conects da cena ativa
+        for (const inst of setupScene.objects || []) {
+          const obj = objectsRef.current.find((o) => o.id === inst.objectId)
+          if (obj && (obj.name === targetName || inst.name === targetName)) {
             const target = meshRefs.current.get(inst.instanceId)
+            const source = meshRefs.current.get(instanceId) || conectMeshRefs.current.get(instanceId)
+            if (source && target) return source.position.distanceTo(target.position)
+          }
+        }
+        for (const conect of setupScene.conects || []) {
+          if (conect.name === targetName) {
+            const target = conectMeshRefs.current.get(conect.instanceId)
             const source = meshRefs.current.get(instanceId) || conectMeshRefs.current.get(instanceId)
             if (source && target) return source.position.distanceTo(target.position)
           }
@@ -191,17 +227,17 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     window._flirGameContext = gameContext
 
     // Física
-    const gravity = activeScene.physics?.gravity || [0, -9.82, 0]
+    const gravity = setupScene.physics?.gravity || [0, -9.82, 0]
     physicsRef.current = createPhysicsSystem({ gravity: gravity[1] })
 
     // Registar conects com física
     setTimeout(() => {
       if (!physicsRef.current) return
-      for (const conect of activeScene.conects || []) {
+      for (const conect of setupScene.conects || []) {
         const mesh = conectMeshRefs.current.get(conect.instanceId)
         if (mesh) physicsRef.current.addConect(conect, mesh)
       }
-      for (const conect of activeScene.conects || []) {
+      for (const conect of setupScene.conects || []) {
         if (conect.type === 'JointObject' && conect.targetA && conect.targetB) {
           physicsRef.current.addJoint(conect)
         }
@@ -245,11 +281,11 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         debugLog('Erro ao inicializar script: ' + err.message, 'error', 'Script')
       }
     }
-    for (const inst of activeScene.objects || []) setupRuntime(inst, inst.flirScript)
-    for (const conect of activeScene.conects || []) setupRuntime(conect, conect.flirScript)
+    for (const inst of setupScene.objects || []) setupRuntime(inst, inst.flirScript)
+    for (const conect of setupScene.conects || []) setupRuntime(conect, conect.flirScript)
 
     // Animation players
-    for (const inst of [...(activeScene.objects || []), ...(activeScene.conects || [])]) {
+    for (const inst of [...(setupScene.objects || []), ...(setupScene.conects || [])]) {
       if (inst.animations && Object.keys(inst.animations).length > 0) {
         const player = createAnimationPlayer(inst.animations, () => meshRefs.current.get(inst.instanceId) || conectMeshRefs.current.get(inst.instanceId), () => null)
         animPlayersRef.current.set(inst.instanceId, player)
@@ -259,17 +295,17 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     }
 
     // NPC AI
-    for (const conect of activeScene.conects || []) {
+    for (const conect of setupScene.conects || []) {
       if (conect.type === 'NpcObject') {
         const ai = createNPCAI(conect, {
           getPlayerPos: () => {
-            const player = (activeScene.conects || []).find((c) => c.type === 'PersonalObject')
+            const player = (setupScene.conects || []).find((c) => c.type === 'PersonalObject')
             if (!player) return null
             const pm = conectMeshRefs.current.get(player.instanceId)
             return pm ? [pm.position.x, pm.position.y, pm.position.z] : null
           },
           getPathPoints: (pathId) => {
-            const path = (activeScene.conects || []).find((c) => c.instanceId === pathId)
+            const path = (setupScene.conects || []).find((c) => c.instanceId === pathId)
             return path?.points || null
           },
           physicsMove: (id, dir, speed) => physicsRef.current?.movePersonal(id, dir, speed),
@@ -287,18 +323,18 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     }
 
     // Timers
-    for (const conect of activeScene.conects || []) {
+    for (const conect of setupScene.conects || []) {
       if (conect.type === 'TimerObject' && conect.autoStart) {
         timerStatesRef.current.set(conect.instanceId, { remaining: conect.duration || 5, loop: conect.loop || false, duration: conect.duration || 5 })
       }
     }
 
     // SkyObject / FogObject
-    const skyConect = (activeScene.conects || []).find((c) => c.type === 'SkyObject')
+    const skyConect = (setupScene.conects || []).find((c) => c.type === 'SkyObject')
     if (skyConect) {
       // Aplicado via SceneBackgroundSolid se mudar o background
     }
-    const fogConect = (activeScene.conects || []).find((c) => c.type === 'FogObject')
+    const fogConect = (setupScene.conects || []).find((c) => c.type === 'FogObject')
     // Fog aplicado no useFrame
 
     // Joystick touch
@@ -330,8 +366,9 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       window._flirGameContext = null
+      gameStartedRef.current = false
     }
-  }, [isGameMode, activeScene, objects])
+  }, [isGameMode, setupScene])
 
   // Loop do jogo
   useFrame((_, delta) => {

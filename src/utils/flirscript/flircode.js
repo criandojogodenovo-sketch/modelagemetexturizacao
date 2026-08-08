@@ -202,14 +202,49 @@ function parseValue(text) {
   if (text.startsWith('"') && text.endsWith('"')) {
     return { type: 'string', value: text.slice(1, -1) }
   }
+  // Expressão com concatenação (+) — suporta "string" + var + "string" + ...
+  // Não divide dentro de strings (respeita aspas)
+  if (text.includes('+') && !/^-?\d/.test(text)) {
+    const parts = splitPlus(text)
+    if (parts.length > 1) {
+      return { type: 'concat', parts: parts.map(parseValue) }
+    }
+  }
   // Número
   const num = parseFloat(text)
   if (!isNaN(num)) return { type: 'number', value: num }
   // Booleano
   if (text === 'true') return { type: 'boolean', value: true }
   if (text === 'false') return { type: 'boolean', value: false }
+  // Chamada de função embutida como valor: identifier(args)
+  // Ex: getVar("teste"), distanceTo("Cubo"), collidingWith("tipo"), isTouching(), getUIValue("nome")
+  const callMatch = text.match(/^(\w+)\s*\(([^)]*)\)$/)
+  if (callMatch) {
+    const funcName = callMatch[1]
+    const args = callMatch[2].split(',').map((a) => a.trim()).filter((a) => a)
+    return { type: 'call_value', funcName, args: args.map(parseValue) }
+  }
   // Variável
   return { type: 'var', name: text }
+}
+
+// Divide uma expressão por + respeitando aspas (não divide dentro de strings)
+function splitPlus(text) {
+  const parts = []
+  let current = ''
+  let inString = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (c === '"') inString = !inString
+    if (c === '+' && !inString) {
+      parts.push(current.trim())
+      current = ''
+    } else {
+      current += c
+    }
+  }
+  parts.push(current.trim())
+  return parts.filter((p) => p)
 }
 
 // ===== Runtime =====
@@ -249,7 +284,20 @@ export function createFlirCodeRuntime(source, gameContext) {
       case 'number': return val.value
       case 'string': return val.value
       case 'boolean': return val.value
-      case 'var': return localVars[val.name] ?? gameContext.getVar?.(val.name) ?? 0
+      case 'concat': return val.parts.map((p) => {
+        const v = evalValue(p)
+        return v === null || v === undefined ? '' : String(v)
+      }).join('')
+      case 'call_value': {
+        // Avaliar a função embutida e retornar o resultado
+        return execBuiltin(val.funcName, val.args, {})
+      }
+      case 'var': {
+        // Primeiro procura em localVars, depois em globalVars (via getVar)
+        if (val.name in localVars) return localVars[val.name]
+        const gv = gameContext.getVar?.(val.name)
+        return gv ?? 0
+      }
       default: return null
     }
   }

@@ -123,9 +123,38 @@ export const BOOLEAN_OPS = [
 
 function newProjectState() {
   return {
+    // Cena/objetos
     ...initialScene,
     objects: [],
     selectedId: null,
+    // Multi-cena — LIMPAR (era o bug P1: conects/scripts persistiam entre projetos)
+    scenes: [],
+    activeSceneId: null,
+    selectedConectId: null,
+    // App mode — voltar a modeling
+    appMode: 'modeling',
+    flirScriptTarget: null,
+    // UI Editor — limpar telas
+    uiScreens: [],
+    activeUIScreenId: null,
+    selectedUIElementId: null,
+    // Animation
+    animation: {
+      playing: false,
+      currentTime: 0,
+      duration: 60,
+      fps: 30,
+      activeClip: 'idle',
+      loop: true,
+    },
+    // Edit mode
+    editSelectionMode: 'face',
+    selectedVertices: [],
+    selectedEdges: [],
+    selectedFaces: [],
+    // History — limpar (não faz sentido desfazer para o projeto anterior)
+    past: [],
+    future: [],
   }
 }
 
@@ -256,6 +285,14 @@ export const useStore = create(
       newProject: () => {
         get()._pushHistory()
         set({ ...newProjectState() })
+        // Limpar o auto-save do IndexedDB (PROJECT_ID = 'default') para que
+        // o projeto anterior não seja restaurado acidentalmente num refresh.
+        // Import dinâmico para evitar circular dependency.
+        import('../utils/db').then(({ deleteProject, isIndexedDBAvailable }) => {
+          if (isIndexedDBAvailable()) {
+            deleteProject('default').catch(() => {})
+          }
+        }).catch(() => {})
         get().toast('Novo projeto criado', 'info')
       },
 
@@ -1375,7 +1412,7 @@ export const useStore = create(
 
       // ---------- Projeto: guardar/carregar ----------
       exportProjectJSON: () => {
-        const { objects, background, grid, lights, scenes, activeSceneId, appMode } = get()
+        const { objects, background, grid, lights, scenes, activeSceneId, appMode, uiScreens, activeUIScreenId } = get()
         return JSON.stringify(
           {
             version: 3,
@@ -1384,6 +1421,8 @@ export const useStore = create(
             scenes,
             activeSceneId,
             appMode,
+            uiScreens,
+            activeUIScreenId,
           },
           null,
           2
@@ -1404,6 +1443,16 @@ export const useStore = create(
             scenes: data.scenes || [],
             activeSceneId: data.activeSceneId || (data.scenes && data.scenes[0]?.id) || null,
             appMode: data.appMode || 'modeling',
+            // P1: limpar state que não é exportado mas deve ser resetado
+            selectedConectId: null,
+            flirScriptTarget: null,
+            selectedUIElementId: null,
+            // UI screens — só manter se o projeto exportar as suas
+            uiScreens: data.uiScreens || [],
+            activeUIScreenId: data.uiScreens?.[0]?.id || null,
+            // History — limpar (não desfazer para o projeto anterior)
+            past: [],
+            future: [],
           })
           get().toast('Projeto carregado', 'success')
           return true

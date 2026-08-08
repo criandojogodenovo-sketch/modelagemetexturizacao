@@ -10,9 +10,10 @@
  * O interpretador (flircode.js) compila o texto em runtime durante
  * "Executar Jogo", garantindo compatibilidade total com Conects e físicas.
  */
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useStore } from '../../../store/useStore'
 import { parseFlirCode } from '../../../utils/flirscript/flircode'
+import { highlightFlirCode } from '../../../utils/flirscript/flircodeHighlight'
 import { debugLog } from '../../../utils/debug/debugStore'
 import { IconClose, IconCheck } from '../../ui/Icons'
 
@@ -88,10 +89,16 @@ export default function FlirCodeEditor() {
     setLineCount(lines)
   }, [code])
 
-  // Sincronizar scroll dos números de linha com o textarea
+  // Sincronizar scroll dos números de linha E do highlight overlay com o textarea
   const handleScroll = () => {
-    if (textareaRef.current && lineNumbersRef.current) {
-      lineNumbersRef.current.scrollTop = textareaRef.current.scrollTop
+    if (textareaRef.current) {
+      const { scrollTop, scrollLeft } = textareaRef.current
+      if (lineNumbersRef.current) lineNumbersRef.current.scrollTop = scrollTop
+      const pre = textareaRef.current.parentElement?.querySelector('.flircode-highlight')
+      if (pre) {
+        pre.scrollTop = scrollTop
+        pre.scrollLeft = scrollLeft
+      }
     }
   }
 
@@ -181,28 +188,38 @@ export default function FlirCodeEditor() {
         <button onClick={() => insertSnippet('playAnim("idle")\n')} title="Animação">🏃 Anim</button>
       </div>
 
-      {/* Editor de texto com números de linha */}
+      {/* Editor de texto com números de linha + syntax highlighting overlay */}
       <div className="flircode-textarea-wrap">
         <div className="flircode-line-numbers" ref={lineNumbersRef}>
           {Array.from({ length: lineCount }, (_, i) => (
             <div key={i} className="flircode-line-number">{i + 1}</div>
           ))}
         </div>
-        <textarea
-          ref={textareaRef}
-          className="flircode-textarea"
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          onScroll={handleScroll}
-          spellCheck="false"
-          placeholder="Escreve o teu script FlirCode aqui..."
-          style={{
-            fontFamily: 'Monaco, Menlo, "Courier New", monospace',
-            fontSize: 13,
-            lineHeight: '1.5',
-            tabSize: 4,
-          }}
-        />
+        <div className="flircode-editor-area">
+          {/* Highlight overlay — mostra o código colorido por baixo do textarea */}
+          <pre
+            className="flircode-highlight"
+            aria-hidden="true"
+            dangerouslySetInnerHTML={{ __html: highlightFlirCode(code) + '\n' }}
+          />
+          {/* Textarea transparente — o utilizador escreve aqui, o texto é invisível
+              mas o caret está visível. O overlay por baixo mostra as cores. */}
+          <textarea
+            ref={textareaRef}
+            className="flircode-textarea flircode-textarea-overlay"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            onScroll={handleScroll}
+            spellCheck="false"
+            placeholder="Escreve o teu script FlirCode aqui..."
+            style={{
+              fontFamily: 'Monaco, Menlo, "Courier New", monospace',
+              fontSize: 13,
+              lineHeight: '1.5',
+              tabSize: 4,
+            }}
+          />
+        </div>
       </div>
 
       {/* Referência rápida */}
