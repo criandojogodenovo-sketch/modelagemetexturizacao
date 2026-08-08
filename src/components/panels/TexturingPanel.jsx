@@ -7,28 +7,28 @@
  *  - Material PBR completo: cor base, roughness, metalness, emissive, opacity
  *  - Texturas: difusa, normal, roughness, metalness, emissive (upload ou URL)
  *  - UV tiling: repeat X/Y, offset X/Y, rotação
- *  - Mixin de cores: multiply, screen, overlay
- *  - Biblioteca de materiais predefinidos (21 presets)
- *  - Baked textures: gerar textura a partir do material atual
- *  - Salvar material como preset personalizado
- *  - Aplicar ao objeto selecionado
+ *  - Biblioteca de materiais predefinidos (12 presets)
  *  - Copy/paste material entre objetos
+ *  - Texture Paint: pintura direta no modelo (Draw, Soften, Smudge, Clone, Fill, Mask)
+ *  - Texturização Procedural: Noise, Voronoi, Wave, Marble, Wood + ColorRamp
  *
  * Layout otimizado para mobile horizontal:
- *  - Tabs compactas no topo (Material | Texturas | UV | Biblioteca)
+ *  - Tabs compactas no topo (Material | Texturas | UV | Pintar | Procedural | Biblioteca)
  *  - Sliders grandes para toque
- *  - Preview do material (esfera/cubo)
  */
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useStore } from '../../store/useStore'
 import { IconClose } from '../ui/Icons'
 import { findMaterial } from '../../utils/materialLibrary'
+import { createPaintCanvas, paintAtUV, canvasToDataURL, dataURLToCanvas, generateProceduralTexture } from '../../utils/texturePaint'
 
 const TEX_TABS = [
   { id: 'material', label: 'Material', icon: '🎨' },
   { id: 'textures', label: 'Texturas', icon: '🖼️' },
   { id: 'uv', label: 'UV', icon: '📐' },
-  { id: 'library', label: 'Biblioteca', icon: '📚' },
+  { id: 'paint', label: 'Pintar', icon: '🖌️' },
+  { id: 'procedural', label: 'Procedural', icon: '🌀' },
+  { id: 'library', label: 'Biblio.', icon: '📚' },
 ]
 
 const MATERIAL_PRESETS = [
@@ -52,12 +52,108 @@ export default function TexturingPanel({ onClose }) {
   const updateObject = useStore((s) => s.updateObject)
   const toast = useStore((s) => s.toast)
 
+  const selected = objects.find((o) => o.id === selectedId)
+
   const [activeTab, setActiveTab] = useState('material')
   const [clipboard, setClipboard] = useState(null)
   const fileInputRef = useRef(null)
   const [textureSlot, setTextureSlot] = useState('map') // map | normalMap | roughnessMap | metalnessMap | emissiveMap
 
-  const selected = objects.find((o) => o.id === selectedId)
+  // Texture Paint state
+  const [brush, setBrush] = useState({ type: 'draw', color: '#ff0000', size: 30, strength: 0.5 })
+  const [cloneSource, setCloneSource] = useState(null)
+  const paintCanvasRef = useRef(null)
+  const [paintPreview, setPaintPreview] = useState(null)
+
+  // Procedural state
+  const [procType, setProcType] = useState('noise')
+  const [procParams, setProcParams] = useState({ scale: 4, color1: '#3a5a2a', color2: '#1a2a1a', octaves: 4 })
+
+  // Inicializar canvas de pintura quando o tab é aberto
+  useEffect(() => {
+    if (activeTab === 'paint' && selected && !paintCanvasRef.current) {
+      // Carregar textura existente ou criar nova
+      if (selected.material?.map) {
+        dataURLToCanvas(selected.material.map).then((c) => {
+          paintCanvasRef.current = c
+          setPaintPreview(canvasToDataURL(c))
+        })
+      } else {
+        const c = createPaintCanvas(512)
+        paintCanvasRef.current = c
+        setPaintPreview(canvasToDataURL(c))
+      }
+    }
+  }, [activeTab, selected])
+
+  const BRUSH_TYPES = [
+    { id: 'draw', label: 'Draw', icon: '✏️', desc: 'Pincel padrão para aplicar cor' },
+    { id: 'soften', label: 'Soften', icon: '🌫️', desc: 'Desfoca e suaviza transições' },
+    { id: 'smudge', label: 'Smudge', icon: '💧', desc: 'Arrasta e mistura cores' },
+    { id: 'clone', label: 'Clone', icon: '📎', desc: 'Copia padrão de uma área para outra' },
+    { id: 'fill', label: 'Fill', icon: '🪣', desc: 'Balde de tinta para preencher áreas' },
+    { id: 'mask', label: 'Mask', icon: '🚫', desc: 'Bloqueia áreas para não receber tinta' },
+  ]
+
+  const PROC_TYPES = [
+    { id: 'noise', label: 'Noise', icon: '📊' },
+    { id: 'voronoi', label: 'Voronoi', icon: '🧩' },
+    { id: 'wave', label: 'Wave', icon: '〰️' },
+    { id: 'marble', label: 'Marble', icon: '🏛️' },
+    { id: 'wood', label: 'Wood', icon: '🪵' },
+  ]
+
+  // Simular pintura no canvas (o utilizador pinta no preview 2D)
+  const handlePaintClick = (e) => {
+    if (!paintCanvasRef.current) return
+    const canvas = paintCanvasRef.current
+    const ctx = canvas.getContext('2d')
+    const rect = e.currentTarget.getBoundingClientRect()
+    const u = (e.clientX - rect.left) / rect.width
+    const v = (e.clientY - rect.top) / rect.height
+    paintAtUV(ctx, u, v, { ...brush, cloneSource })
+    setPaintPreview(canvasToDataURL(canvas))
+  }
+
+  const handlePaintDrag = (e) => {
+    if (e.buttons !== 1) return // só pinta com botão pressionado
+    handlePaintClick(e)
+  }
+
+  const savePaintTexture = () => {
+    if (!paintCanvasRef.current || !selected) return
+    const dataURL = canvasToDataURL(paintCanvasRef.current)
+    setMat({ map: dataURL })
+    toast('Textura pintada aplicada ao objeto', 'success')
+  }
+
+  const clearPaint = () => {
+    if (!paintCanvasRef.current) return
+    const c = createPaintCanvas(512)
+    paintCanvasRef.current = c
+    setPaintPreview(canvasToDataURL(c))
+  }
+
+  const setCloneSrc = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const u = (e.clientX - rect.left) / rect.width
+    const v = (e.clientY - rect.top) / rect.height
+    setCloneSource({ x: u, y: v })
+    toast('Fonte de clone definida', 'info')
+  }
+
+  // Gerar textura procedural
+  const generateProcedural = () => {
+    const canvas = generateProceduralTexture(procType, procParams)
+    const dataURL = canvasToDataURL(canvas)
+    setMat({ map: dataURL })
+    toast(`Textura procedural "${procType}" gerada e aplicada`, 'success')
+  }
+
+  const previewProcedural = () => {
+    const canvas = generateProceduralTexture(procType, procParams)
+    setPaintPreview(canvasToDataURL(canvas))
+  }
 
   if (!selected) {
     return (
@@ -268,6 +364,174 @@ export default function TexturingPanel({ onClose }) {
                 style={{ width: '100%', marginTop: 8 }}>
                 🔄 Resetar UV
               </button>
+            </>
+          )}
+
+          {/* TAB: Texture Paint (Pintura direta) */}
+          {activeTab === 'paint' && (
+            <>
+              <div className="small muted mb-2">
+                Pinta diretamente na textura do modelo. Arrasta no preview para pintar.
+              </div>
+
+              {/* Tipos de pincel */}
+              <div className="prop-row">
+                <label>Pincel</label>
+                <div className="tex-brush-grid">
+                  {BRUSH_TYPES.map((b) => (
+                    <button
+                      key={b.id}
+                      className={`tex-brush-btn ${brush.type === b.id ? 'active' : ''}`}
+                      onClick={() => setBrush({ ...brush, type: b.id })}
+                      title={b.desc}
+                    >
+                      <span style={{ fontSize: 16 }}>{b.icon}</span>
+                      <span>{b.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Cor do pincel */}
+              {brush.type !== 'mask' && brush.type !== 'soften' && brush.type !== 'smudge' && (
+                <div className="prop-row">
+                  <label>Cor</label>
+                  <input type="color" value={brush.color} onChange={(e) => setBrush({ ...brush, color: e.target.value })} />
+                </div>
+              )}
+
+              {/* Tamanho */}
+              <div className="prop-row">
+                <label>Tamanho: {brush.size}px</label>
+                <input type="range" min="5" max="100" step="1" value={brush.size}
+                  onChange={(e) => setBrush({ ...brush, size: Number(e.target.value) })} />
+              </div>
+
+              {/* Força */}
+              <div className="prop-row">
+                <label>Força: {brush.strength.toFixed(2)}</label>
+                <input type="range" min="0.05" max="1" step="0.05" value={brush.strength}
+                  onChange={(e) => setBrush({ ...brush, strength: Number(e.target.value) })} />
+              </div>
+
+              {/* Clone source */}
+              {brush.type === 'clone' && (
+                <div className="prop-row">
+                  <label>Fonte do clone (clica no preview)</label>
+                  <div className="small muted">
+                    {cloneSource ? `Fonte: (${cloneSource.x.toFixed(2)}, ${cloneSource.y.toFixed(2)})` : 'Ainda não definida'}
+                  </div>
+                </div>
+              )}
+
+              {/* Preview de pintura */}
+              <div className="prop-row">
+                <label>Preview (pinta aqui)</label>
+                <div
+                  className="tex-paint-preview"
+                  onMouseDown={brush.type === 'clone' && !cloneSource ? setCloneSrc : handlePaintClick}
+                  onMouseMove={handlePaintDrag}
+                  style={{
+                    width: '100%',
+                    aspectRatio: '1',
+                    backgroundImage: paintPreview ? `url(${paintPreview})` : 'none',
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                    border: '2px solid var(--accent)',
+                    borderRadius: 'var(--radius-md)',
+                    cursor: 'crosshair',
+                    imageRendering: 'pixelated',
+                  }}
+                />
+              </div>
+
+              {/* Ações */}
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                <button onClick={clearPaint} style={{ flex: 1 }}>🧹 Limpar</button>
+                <button onClick={savePaintTexture} className="primary" style={{ flex: 1 }}>💾 Aplicar ao objeto</button>
+              </div>
+            </>
+          )}
+
+          {/* TAB: Texturização Procedural */}
+          {activeTab === 'procedural' && (
+            <>
+              <div className="small muted mb-2">
+                Gera texturas matematicamente — sem imagens externas. Padrões infinitos.
+              </div>
+
+              {/* Tipo de textura procedural */}
+              <div className="prop-row">
+                <label>Tipo</label>
+                <div className="tex-brush-grid">
+                  {PROC_TYPES.map((p) => (
+                    <button
+                      key={p.id}
+                      className={`tex-brush-btn ${procType === p.id ? 'active' : ''}`}
+                      onClick={() => setProcType(p.id)}
+                    >
+                      <span style={{ fontSize: 16 }}>{p.icon}</span>
+                      <span>{p.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Escala */}
+              <div className="prop-row">
+                <label>Escala: {procParams.scale}</label>
+                <input type="range" min="1" max="20" step="1" value={procParams.scale}
+                  onChange={(e) => setProcParams({ ...procParams, scale: Number(e.target.value) })} />
+              </div>
+
+              {/* Oitavas (apenas noise/marble/wood) */}
+              {(procType === 'noise' || procType === 'marble' || procType === 'wood') && (
+                <div className="prop-row">
+                  <label>Oitavas: {procParams.octaves}</label>
+                  <input type="range" min="1" max="8" step="1" value={procParams.octaves}
+                    onChange={(e) => setProcParams({ ...procParams, octaves: Number(e.target.value) })} />
+                </div>
+              )}
+
+              {/* Cor 1 */}
+              <div className="prop-row">
+                <label>Cor 1 (escuro)</label>
+                <input type="color" value={procParams.color1} onChange={(e) => setProcParams({ ...procParams, color1: e.target.value })} />
+              </div>
+
+              {/* Cor 2 */}
+              <div className="prop-row">
+                <label>Cor 2 (claro)</label>
+                <input type="color" value={procParams.color2} onChange={(e) => setProcParams({ ...procParams, color2: e.target.value })} />
+              </div>
+
+              {/* Preview */}
+              <div className="prop-row">
+                <label>Preview</label>
+                <div
+                  className="tex-proc-preview"
+                  style={{
+                    width: '100%',
+                    aspectRatio: '1',
+                    backgroundImage: paintPreview ? `url(${paintPreview})` : 'none',
+                    backgroundSize: 'cover',
+                    border: '2px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                  }}
+                />
+              </div>
+
+              {/* Ações */}
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                <button onClick={previewProcedural} style={{ flex: 1 }}>👁️ Preview</button>
+                <button onClick={generateProcedural} className="primary" style={{ flex: 1 }}>🌀 Gerar e Aplicar</button>
+              </div>
+
+              <div className="small muted mt-2">
+                <strong>Dica:</strong> Usa Noise para sujeira/desgaste, Voronoi para células/escamas,
+                Wave para padrões regulares, Marble para veios de mármore, Wood para anéis de madeira.
+                Combina com ColorRamp para gradients de cor mais complexos.
+              </div>
             </>
           )}
 
