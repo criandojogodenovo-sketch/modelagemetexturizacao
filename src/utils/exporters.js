@@ -254,3 +254,49 @@ export async function importOBJ(file) {
 
   return objects
 }
+
+// Importa um ficheiro .fbx (binary ou ASCII) usando FBXLoader do three.js
+// Suporta modelos simples (só malha) e modelos com rigs/animações
+export async function importFBX(file) {
+  const arrayBuffer = await file.arrayBuffer()
+  const THREE = await import('three')
+  const { FBXLoader } = await import('three/examples/jsm/loaders/FBXLoader.js')
+  const loader = new FBXLoader()
+
+  let object
+  try {
+    object = loader.parse(arrayBuffer, '')
+  } catch (err) {
+    throw new Error('Falha ao fazer parse do FBX: ' + err.message)
+  }
+
+  // Extrair meshes
+  const meshes = extractMeshes(object)
+  const objects = meshes.map((mesh, i) => {
+    const obj = meshToStoreObject(mesh, i)
+    // FBX pode ter esqueleto e animações
+    if (mesh.skeleton) {
+      obj.skeleton = {
+        bones: mesh.skeleton.bones.map((bone, j) => ({
+          id: bone.name || `bone_${j}`,
+          name: bone.name || `Bone_${j}`,
+          position: [bone.position.x, bone.position.y, bone.position.z],
+          rotation: [bone.rotation.x, bone.rotation.y, bone.rotation.z],
+          scale: [bone.scale.x, bone.scale.y, bone.scale.z],
+          parent: bone.parent ? (bone.parent.name || null) : null,
+        })),
+      }
+    }
+    // Animações do FBX (THREE.AnimationClip[])
+    if (object.animations && object.animations.length > 0) {
+      obj.animations = {}
+      for (const clip of object.animations) {
+        // Converter AnimationClip para formato do animationPlayer
+        obj.animations[clip.name || `anim_${i}`] = clip
+      }
+    }
+    return obj
+  })
+
+  return objects
+}

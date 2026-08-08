@@ -13,7 +13,7 @@
 import { useRef, useState } from 'react'
 import { useStore } from '../../store/useStore'
 import { HOTKEYS } from '../../hooks/useHotkeys'
-import { exportSceneAsGLB, exportSceneAsOBJ, importGLB, importGLTF, importOBJ } from '../../utils/exporters'
+import { exportSceneAsGLB, exportSceneAsOBJ, importGLB, importGLTF, importOBJ, importFBX } from '../../utils/exporters'
 import {
   IconMenu,
   IconUndo,
@@ -146,6 +146,8 @@ export default function TopBar() {
         importedObjects = await importGLTF(file)
       } else if (importType === 'obj') {
         importedObjects = await importOBJ(file)
+      } else if (importType === 'fbx') {
+        importedObjects = await importFBX(file)
       } else if (importType === 'json' || importType === 'flirengine') {
         const text = await file.text()
         loadProjectJSON(text)
@@ -240,6 +242,13 @@ export default function TopBar() {
           className="icon topbar-hide-narrow"
         >
           <span className="hide-mobile">OBJ</span>
+        </button>
+        <button
+          onClick={() => handleImportClick('fbx')}
+          title="Importar FBX (com animações e esqueleto)"
+          className="icon topbar-hide-narrow"
+        >
+          <span className="hide-mobile">FBX</span>
         </button>
         <button
           onClick={() => handleImportClick('json')}
@@ -338,6 +347,7 @@ export default function TopBar() {
           importType === 'glb' ? '.glb,model/gltf-binary' :
           importType === 'gltf' ? '.gltf,model/gltf+json' :
           importType === 'obj' ? '.obj' :
+          importType === 'fbx' ? '.fbx' :
           '.json,application/json'
         }
         style={{ display: 'none' }}
@@ -412,6 +422,10 @@ function MoreActionsMenu({ onClose, actions }) {
           <button className="mm-item" onClick={() => { actions.handleImportClick('obj'); onClose() }}>
             <span className="mm-icon">📦</span>
             <div><div className="mm-label">Importar OBJ</div></div>
+          </button>
+          <button className="mm-item" onClick={() => { actions.handleImportClick('fbx'); onClose() }}>
+            <span className="mm-icon">📦</span>
+            <div><div className="mm-label">Importar FBX (animações)</div></div>
           </button>
           <button className="mm-item" onClick={() => { actions.handleImportClick('json'); onClose() }}>
             <span className="mm-icon">📦</span>

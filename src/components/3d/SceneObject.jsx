@@ -79,7 +79,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
   const geometry = useMemo(() => {
     let base
     if (obj.customGeometry) {
-      // Geometria editada (edit mode / sculpt / boolean)
+      // Geometria editada (edit mode / sculpt / boolean) ou importada (FBX)
       base = new THREE.BufferGeometry()
       base.setAttribute('position', new THREE.Float32BufferAttribute(obj.customGeometry.positions, 3))
       if (obj.customGeometry.normals) {
@@ -89,6 +89,10 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       }
       if (obj.customGeometry.uvs) {
         base.setAttribute('uv', new THREE.Float32BufferAttribute(obj.customGeometry.uvs, 2))
+      }
+      // Suportar índices (FBX importado pode ter)
+      if (obj.customGeometry.indices) {
+        base.setIndex(obj.customGeometry.indices)
       }
     } else if (obj.imported && obj.bufferGeometry) {
       base = obj.bufferGeometry

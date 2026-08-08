@@ -502,10 +502,10 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       }
     }
 
-    // Joystick → PersonalObject
+    // Joystick → PersonalObject — usar setupScene (ref)
     const keys = window._flirKeys || {}
     if (joystickRef.current.active || keys['w'] || keys['a'] || keys['s'] || keys['d']) {
-      for (const conect of activeScene.conects || []) {
+      for (const conect of setupScene?.conects || []) {
         if (conect.type === 'PersonalObject') {
           const speed = conect.moveSpeed || 5
           let mx = 0, mz = 0
@@ -522,14 +522,14 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       }
     }
 
-    // Câmara: ViewObject ativa
-    const viewConects = (activeScene.conects || []).filter((c) => c.type === 'ViewObject')
+    // Câmara: ViewObject ativa — usar setupScene (ref) para consistência
+    const viewConects = (setupScene?.conects || []).filter((c) => c.type === 'ViewObject')
     const activeView = viewConects.find((c) => c.cameraRole === 'player') || viewConects.find((c) => c.cameraRole === 'primary') || viewConects[0]
     if (activeView) {
       // Se cameraRole='player' e não tem followTarget, seguir PersonalObject
       let targetId = activeView.followTarget
       if (!targetId && activeView.cameraRole === 'player') {
-        const player = (activeScene.conects || []).find((c) => c.type === 'PersonalObject')
+        const player = (setupScene?.conects || []).find((c) => c.type === 'PersonalObject')
         if (player) targetId = player.instanceId
       }
       if (targetId && activeView.followMode && activeView.followMode !== 'none') {
@@ -552,8 +552,9 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       } else {
         // Câmara estática na posição da ViewObject
         camera.position.set(...(activeView.position || [5, 4, 6]))
-        if (activeView.rotation) camera.rotation.set(...activeView.rotation)
-        else camera.lookAt(0, 0, 0)
+        // Sempre olhar para a origem (ou para o centro dos objetos da cena)
+        // a menos que followMode esteja definido
+        camera.lookAt(0, 0, 0)
       }
     }
   })
@@ -749,6 +750,10 @@ function ConectSelectorWrapper({ conect, objects, isSelected, onSelect, setMeshR
     if (isGameMode) return
     e.stopPropagation()
     onSelect()
+  }
+  // Sistema 4: ViewObject deve ser invisível no modo jogo (só é gizmo do editor)
+  if (isGameMode && conect.type === 'ViewObject') {
+    return null
   }
   return (
     <group onPointerDown={handlePointerDown}>

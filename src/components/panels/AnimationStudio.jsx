@@ -22,7 +22,37 @@ async function parseFBX(arrayBuffer) {
   const THREE = await import('three')
   const { FBXLoader } = await import('three/examples/jsm/loaders/FBXLoader.js')
   const loader = new FBXLoader()
-  const object = loader.parse(arrayBuffer, '')
+  // FBXLoader.parse espera um ArrayBuffer ou string (para ASCII FBX)
+  let object
+  try {
+    object = loader.parse(arrayBuffer, '')
+  } catch (err) {
+    throw new Error('Falha ao fazer parse do FBX: ' + err.message + '. Verifica se o ficheiro é um FBX válido (binário ou ASCII).')
+  }
+
+  // Extrair geometria/malha do objeto FBX
+  let mesh = null
+  object.traverse((child) => {
+    if (child.isMesh && !mesh) {
+      mesh = child
+    }
+  })
+
+  // Extrair esqueleto (se existir)
+  let skeleton = null
+  if (mesh && mesh.skeleton) {
+    skeleton = {
+      bones: mesh.skeleton.bones.map((bone, i) => ({
+        id: bone.name || `bone_${i}`,
+        name: bone.name || `Bone_${i}`,
+        position: [bone.position.x, bone.position.y, bone.position.z],
+        rotation: [bone.rotation.x, bone.rotation.y, bone.rotation.z],
+        scale: [bone.scale.x, bone.scale.y, bone.scale.z],
+        parent: bone.parent ? (bone.parent.name || `bone_${mesh.skeleton.bones.indexOf(bone.parent)}`) : null,
+      })),
+    }
+  }
+
   // Extrair animações e converter para formato do animationPlayer
   const animations = {}
   if (object.animations && object.animations.length > 0) {
@@ -31,7 +61,21 @@ async function parseFBX(arrayBuffer) {
       animations[clip.name || 'anim'] = keyframes
     }
   }
-  return { object, animations }
+
+  // Extrair geometria serializável (vértices, faces) para o catálogo
+  let geometryData = null
+  if (mesh && mesh.geometry) {
+    const geo = mesh.geometry
+    geometryData = {
+      // Formato compatível com customGeometry do SceneObject
+      positions: geo.attributes.position ? Array.from(geo.attributes.position.array) : [],
+      normals: geo.attributes.normal ? Array.from(geo.attributes.normal.array) : [],
+      uvs: geo.attributes.uv ? Array.from(geo.attributes.uv.array) : [],
+      indices: geo.index ? Array.from(geo.index.array) : null,
+    }
+  }
+
+  return { object, mesh, skeleton, animations, geometryData }
 }
 
 /**
@@ -159,16 +203,45 @@ export default function AnimationStudio({ onClose }) {
     toast('A importar FBX...', 'info')
     try {
       const buffer = await fileToArrayBuffer(file)
-      const { animations: fbxAnimations } = await parseFBX(buffer)
-      if (Object.keys(fbxAnimations).length === 0) {
-        toast('FBX sem animações', 'warning')
-        return
+      const { skeleton: fbxSkeleton, animations: fbxAnimations, geometryData } = await parseFBX(buffer)
+
+      // 1. Adicionar modelo ao catálogo (como objeto importado)
+      if (geometryData) {
+        const modelName = file.name.replace(/\.fbx$/i, '')
+        const newObject = {
+          id: `obj_fbx_${Date.now()}`,
+          name: modelName,
+          type: 'fbxImport',
+          position: [0, 0.5, 0],
+          rotation: [0, 0, 0],
+          scale: [1, 1, 1],
+          visible: true,
+          material: { color: '#cccccc', roughness: 0.7, metalness: 0.1 },
+          customGeometry: geometryData,
+          skeleton: fbxSkeleton,
+          animations: fbxAnimations,
+          imported: true,
+        }
+        useStore.getState().addImportedObject(newObject)
+        toast(`Modelo "${modelName}" adicionado ao catálogo`, 'success')
       }
-      // Adicionar animações ao objeto selecionado
-      const newAnimations = { ...animations, ...fbxAnimations }
-      useStore.getState().updateObject(selected.id, { animations: newAnimations })
-      toast(`${Object.keys(fbxAnimations).length} animação(ões) importada(s) do FBX`, 'success')
+
+      // 2. Adicionar animações ao objeto selecionado (se houver)
+      if (Object.keys(fbxAnimations).length > 0) {
+        const newAnimations = { ...animations, ...fbxAnimations }
+        useStore.getState().updateObject(selected.id, { animations: newAnimations })
+        toast(`${Object.keys(fbxAnimations).length} animação(ões) importada(s)`, 'success')
+      } else if (!geometryData) {
+        toast('FBX sem malha nem animações', 'warning')
+      }
+
+      // 3. Adicionar esqueleto ao objeto selecionado (se houver)
+      if (fbxSkeleton) {
+        useStore.getState().updateObject(selected.id, { skeleton: fbxSkeleton })
+        toast(`Esqueleto com ${fbxSkeleton.bones.length} ossos importado`, 'success')
+      }
     } catch (err) {
+      console.error('Erro ao importar FBX:', err)
       toast('Erro ao importar FBX: ' + err.message, 'error')
     }
     e.target.value = ''

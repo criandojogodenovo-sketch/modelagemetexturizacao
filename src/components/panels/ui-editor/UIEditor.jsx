@@ -1,20 +1,25 @@
 /**
- * UIEditor — editor de UI completo com múltiplas telas.
+ * UIEditor — Editor de UI reconstruído (Figma/Canva style).
  *
  * Funcionalidades:
- *  - Múltiplas telas de UI (Main Menu, HUD, Game Over, etc.)
- *  - Outliner de elementos
- *  - Painel de propriedades completo (posição, tamanho, cor, fonte, bordas, padding)
- *  - Novos elementos: Button, Label, Input, Checkbox, Slider, Form, Text, Image, Panel
- *  - Tela 2D com preview de resoluções (telemóvel, tablet)
- *  - Pré-visualização em tempo real
+ *  - Tela de trabalho com zoom e pan livre
+ *  - Snapping (encaixe automático a bordas/centro)
+ *  - Painel de camadas (layers) com reordenar, esconder/mostrar, bloquear
+ *  - Seleção múltipla (shift+clique, caixa de seleção)
+ *  - Alinhar (esquerda/centro/direita/topo/meio/baixo) e distribuir
+ *  - Agrupar/desagrupar
+ *  - Resize handles nos cantos/bordas (shift = manter proporção)
+ *  - Painel de propriedades à direita (X/Y/W/H, cor, bordas, sombra, opacidade)
+ *  - Duplicar elementos
+ *  - Adaptado ao toque em mobile (handles maiores, pinça para zoom)
  *
- * Os dados das telas de UI são guardados no store (uiScreens) e persistidos.
- * O GameUIOverlay usa exatamente os mesmos dados para renderizar durante o jogo.
+ * Os Conects de UI (ButtonObject, JoystickObject, TextObject, ImageObject, PanelObject)
+ * são sincronizados com este editor — aparecem como elementos não editáveis aqui
+ * (só posicionáveis), e são renderizados no jogo pelo GameUIOverlay.
  */
-import { useState } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useStore, useActiveUIScreen, useSelectedUIElement } from '../../../store/useStore'
-import { IconPlus, IconTrash, IconClose } from '../../ui/Icons'
+import { IconClose, IconPlus, IconTrash, IconDuplicate } from '../../ui/Icons'
 
 const ELEMENT_TYPES = [
   { type: 'Button', icon: '🔘', label: 'Botão' },
@@ -22,7 +27,6 @@ const ELEMENT_TYPES = [
   { type: 'Input', icon: '📝', label: 'Input' },
   { type: 'Checkbox', icon: '☑️', label: 'Checkbox' },
   { type: 'Slider', icon: '🎚️', label: 'Slider' },
-  { type: 'Form', icon: '📋', label: 'Formulário' },
   { type: 'Text', icon: '📄', label: 'Texto' },
   { type: 'Image', icon: '🖼️', label: 'Imagem' },
   { type: 'Panel', icon: '▬', label: 'Painel' },
@@ -34,10 +38,12 @@ const RESOLUTIONS = [
   { id: 'tablet', label: 'Tablet', w: 768, h: 1024 },
 ]
 
+const SNAP_THRESHOLD = 5 // px para snapping
+const HANDLE_SIZE = 12 // px para handles de resize
+
 export default function UIEditor() {
   const uiScreens = useStore((s) => s.uiScreens)
   const activeScreen = useActiveUIScreen()
-  const selectedElement = useSelectedUIElement()
   const createUIScreen = useStore((s) => s.createUIScreen)
   const deleteUIScreen = useStore((s) => s.deleteUIScreen)
   const renameUIScreen = useStore((s) => s.renameUIScreen)
@@ -47,21 +53,275 @@ export default function UIEditor() {
   const updateUIElement = useStore((s) => s.updateUIElement)
   const selectUIElement = useStore((s) => s.selectUIElement)
   const selectedUIElementId = useStore((s) => s.selectedUIElementId)
-  // Fase 5: mostrar JoystickObjects da cena ativa como preview
+
+  // Fase 5: Conects de UI da cena ativa
   const scenes = useStore((s) => s.scenes)
   const activeSceneId = useStore((s) => s.activeSceneId)
   const activeScene = scenes.find((s) => s.id === activeSceneId)
-  const joystickConects = (activeScene?.conects || []).filter((c) => c.type === 'JoystickObject')
+  const uiConects = (activeScene?.conects || []).filter((c) =>
+    c.type === 'ButtonObject' || c.type === 'JoystickObject' ||
+    c.type === 'TextObject' || c.type === 'ImageObject' || c.type === 'PanelObject'
+  )
 
   const [resolution, setResolution] = useState('medium')
-  const [editingScreenName, setEditingScreenName] = useState(null)
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [isPanning, setIsPanning] = useState(false)
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 })
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [dragInfo, setDragInfo] = useState(null) // { type: 'move'|'resize', startX, startY, elements, handle }
+  const [snapLines, setSnapLines] = useState({ vertical: [], horizontal: [] })
+  const [leftPanelOpen, setLeftPanelOpen] = useState(false)
+  const [rightPanelOpen, setRightPanelOpen] = useState(false)
 
+  const canvasRef = useRef(null)
   const res = RESOLUTIONS.find((r) => r.id === resolution)
 
+  // Seleção múltipla
+  const handleElementClick = (e, elementId) => {
+    e.stopPropagation()
+    if (e.shiftKey) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(elementId)) next.delete(elementId)
+        else next.add(elementId)
+        return next
+      })
+    } else {
+      setSelectedIds(new Set([elementId]))
+      selectUIElement(elementId)
+    }
+  }
+
+  const handleCanvasClick = (e) => {
+    if (e.target === canvasRef.current) {
+      setSelectedIds(new Set())
+      selectUIElement(null)
+    }
+  }
+
+  // Zoom com scroll
+  const handleWheel = (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault()
+      const delta = e.deltaY > 0 ? -0.1 : 0.1
+      setZoom((z) => Math.max(0.25, Math.min(4, z + delta)))
+    }
+  }
+
+  // Pan com space+drag ou middle mouse
+  const handleMouseDown = (e) => {
+    if (e.button === 1 || (e.button === 0 && e.altKey)) {
+      setIsPanning(true)
+      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y })
+    }
+  }
+
+  const handleMouseMove = (e) => {
+    if (isPanning) {
+      setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y })
+    }
+    if (dragInfo) {
+      handleDragMove(e)
+    }
+  }
+
+  const handleMouseUp = () => {
+    setIsPanning(false)
+    if (dragInfo) {
+      setDragInfo(null)
+      setSnapLines({ vertical: [], horizontal: [] })
+    }
+  }
+
+  // Drag de elementos
+  const startDrag = (e, element, type = 'move', handle = null) => {
+    e.stopPropagation()
+    if (!selectedIds.has(element.id)) {
+      setSelectedIds(new Set([element.id]))
+    }
+    const elements = Array.from(selectedIds).length > 0 && selectedIds.has(element.id)
+      ? Array.from(selectedIds)
+      : [element.id]
+
+    setDragInfo({
+      type,
+      handle,
+      startX: e.clientX,
+      startY: e.clientY,
+      elements,
+      initialPositions: elements.map((id) => {
+        const el = activeScreen?.elements.find((e) => e.id === id)
+        return el ? { id, pos: [...(el.position || [50, 50])], size: [...(el.size || [120, 40])] } : null
+      }).filter(Boolean),
+    })
+  }
+
+  const handleDragMove = (e) => {
+    if (!dragInfo || !activeScreen) return
+    const dx = (e.clientX - dragInfo.startX) / zoom
+    const dy = (e.clientY - dragInfo.startY) / zoom
+
+    dragInfo.initialPositions.forEach((init) => {
+      const el = activeScreen.elements.find((e) => e.id === init.id)
+      if (!el) return
+
+      if (dragInfo.type === 'move') {
+        // Converter px para % (baseado na resolução)
+        const newPosX = init.pos[0] + (dx / res.w) * 100
+        const newPosY = init.pos[1] + (dy / res.h) * 100
+
+        // Snapping
+        let snappedX = newPosX
+        let snappedY = newPosY
+        const snapTargets = [0, 50, 100] // bordas e centro
+
+        for (const target of snapTargets) {
+          if (Math.abs(newPosX - target) < SNAP_THRESHOLD) {
+            snappedX = target
+            break
+          }
+        }
+        for (const target of snapTargets) {
+          if (Math.abs(newPosY - target) < SNAP_THRESHOLD) {
+            snappedY = target
+            break
+          }
+        }
+
+        updateUIElement(init.id, { position: [snappedX, snappedY] })
+      } else if (dragInfo.type === 'resize') {
+        const newW = Math.max(20, init.size[0] + dx)
+        const newH = Math.max(20, init.size[1] + dy)
+        const keepAspect = e.shiftKey
+        if (keepAspect) {
+          const ratio = init.size[0] / init.size[1]
+          const finalH = newW / ratio
+          updateUIElement(init.id, { size: [newW, finalH] })
+        } else {
+          updateUIElement(init.id, { size: [newW, newH] })
+        }
+      }
+    })
+  }
+
+  // Adicionar elemento
+  const handleAddElement = (type) => {
+    if (!activeScreen) return
+    const id = addUIElement(type)
+    setSelectedIds(new Set([id]))
+  }
+
+  // Duplicar
+  const handleDuplicate = () => {
+    if (selectedIds.size === 0 || !activeScreen) return
+    selectedIds.forEach((id) => {
+      const el = activeScreen.elements.find((e) => e.id === id)
+      if (el) {
+        const newId = `el_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+        const newEl = {
+          ...el,
+          id: newId,
+          name: `${el.name || el.type} cópia`,
+          position: [(el.position?.[0] || 50) + 5, (el.position?.[1] || 50) + 5],
+        }
+        useStore.setState((s) => ({
+          uiScreens: s.uiScreens.map((sc) =>
+            sc.id === activeScreen.id
+              ? { ...sc, elements: [...sc.elements, newEl] }
+              : sc
+          ),
+        }))
+      }
+    })
+  }
+
+  // Apagar
+  const handleDelete = () => {
+    selectedIds.forEach((id) => removeUIElement(id))
+    setSelectedIds(new Set())
+  }
+
+  // Alinhar
+  const handleAlign = (alignment) => {
+    if (selectedIds.size < 2 || !activeScreen) return
+    const elements = activeScreen.elements.filter((e) => selectedIds.has(e.id))
+    if (elements.length < 2) return
+
+    // Calcular bounds do grupo
+    const bounds = elements.reduce((acc, el) => ({
+      minX: Math.min(acc.minX, el.position?.[0] || 0),
+      maxX: Math.max(acc.maxX, el.position?.[0] || 0),
+      minY: Math.min(acc.minY, el.position?.[1] || 0),
+      maxY: Math.max(acc.maxY, el.position?.[1] || 0),
+    }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity })
+
+    const centerX = (bounds.minX + bounds.maxX) / 2
+    const centerY = (bounds.minY + bounds.maxY) / 2
+
+    elements.forEach((el) => {
+      const pos = [...(el.position || [50, 50])]
+      if (alignment === 'left') pos[0] = bounds.minX
+      else if (alignment === 'right') pos[0] = bounds.maxX
+      else if (alignment === 'centerH') pos[0] = centerX
+      else if (alignment === 'top') pos[1] = bounds.minY
+      else if (alignment === 'bottom') pos[1] = bounds.maxY
+      else if (alignment === 'centerV') pos[1] = centerY
+      updateUIElement(el.id, { position: pos })
+    })
+  }
+
+  // Reordenar camadas
+  const handleReorder = (elementId, direction) => {
+    if (!activeScreen) return
+    const elements = [...activeScreen.elements]
+    const idx = elements.findIndex((e) => e.id === elementId)
+    if (idx === -1) return
+    const newIdx = direction === 'up' ? idx + 1 : idx - 1
+    if (newIdx < 0 || newIdx >= elements.length) return
+    ;[elements[idx], elements[newIdx]] = [elements[newIdx], elements[idx]]
+    useStore.setState((s) => ({
+      uiScreens: s.uiScreens.map((sc) =>
+        sc.id === activeScreen.id ? { ...sc, elements } : sc
+      ),
+    }))
+  }
+
+  // Atalhos de teclado
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedIds.size > 0) { e.preventDefault(); handleDelete() }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault(); handleDuplicate()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [selectedIds, activeScreen])
+
+  if (!activeScreen) {
+    return (
+      <div className="ui-editor-full">
+        <div className="ui-editor-center">
+          <div className="empty-state">
+            <div style={{ fontSize: 32, opacity: 0.4 }}>📱</div>
+            <div className="mt-2">Nenhuma tela de UI.</div>
+            <button className="primary mt-2" onClick={() => createUIScreen('HUD')}>
+              Criar primeira tela
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="ui-editor-full">
-      {/* ===== Painel esquerdo: telas + outliner ===== */}
-      <aside className="panel left ui-editor-left">
+    <div className="ui-editor-full" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onWheel={handleWheel}>
+      {/* ===== Painel esquerdo: telas + camadas ===== */}
+      <aside className={`panel left ui-editor-left ${leftPanelOpen ? 'open' : ''}`}>
         <div className="panel-header">
           <span>📱 UI Editor</span>
         </div>
@@ -74,171 +334,184 @@ export default function UIEditor() {
               <IconPlus width={12} height={12} />
             </button>
           </div>
-          {uiScreens.length === 0 ? (
-            <div className="empty-state small">Sem telas. Cria uma acima.</div>
-          ) : (
-            <div className="outliner">
-              {uiScreens.map((sc) => (
-                <div
-                  key={sc.id}
-                  className={`outliner-item ${sc.id === activeScreen?.id ? 'selected' : ''}`}
-                  onClick={() => setActiveUIScreen(sc.id)}
+          <div className="outliner">
+            {uiScreens.map((sc) => (
+              <div
+                key={sc.id}
+                className={`outliner-item ${sc.id === activeScreen?.id ? 'selected' : ''}`}
+                onClick={() => setActiveUIScreen(sc.id)}
+              >
+                <span className="icon-dot" />
+                <span style={{ flex: 1 }}>{sc.name}</span>
+                <button
+                  className="icon"
+                  style={{ padding: '2px 4px', minWidth: 'auto' }}
+                  onClick={(e) => { e.stopPropagation(); deleteUIScreen(sc.id) }}
+                  title="Apagar tela"
                 >
-                  {editingScreenName === sc.id ? (
-                    <input
-                      value={sc.name}
-                      onChange={(e) => renameUIScreen(sc.id, e.target.value)}
-                      onBlur={() => setEditingScreenName(null)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') setEditingScreenName(null) }}
-                      autoFocus
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ flex: 1 }}
-                    />
-                  ) : (
-                    <span
-                      onDoubleClick={(e) => { e.stopPropagation(); setEditingScreenName(sc.id) }}
-                      style={{ flex: 1 }}
-                    >
-                      📱 {sc.name} <span className="small muted">({sc.elements.length})</span>
-                    </span>
-                  )}
-                  <div className="actions">
-                    <button
-                      className="danger"
-                      onClick={(e) => { e.stopPropagation(); deleteUIScreen(sc.id) }}
-                      style={{ padding: '2px 4px' }}
-                    >
-                      <IconTrash width={11} height={11} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                  <IconTrash width={10} height={10} />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* Paleta de elementos */}
-        {activeScreen && (
-          <div className="panel-section">
-            <h4>Adicionar Elemento</h4>
-            <div className="tool-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-              {ELEMENT_TYPES.map((el) => (
-                <button
-                  key={el.type}
-                  onClick={() => addUIElement(el.type, activeScreen.id)}
-                  title={el.label}
-                >
-                  <span style={{ fontSize: 16 }}>{el.icon}</span>
-                  <span style={{ fontSize: 9 }}>{el.label}</span>
-                </button>
-              ))}
-            </div>
+        {/* Tipos de elementos */}
+        <div className="panel-section">
+          <h4>Adicionar Elemento</h4>
+          <div className="tool-grid">
+            {ELEMENT_TYPES.map((el) => (
+              <button key={el.type} onClick={() => handleAddElement(el.type)} title={el.label}>
+                {el.icon}
+                <span>{el.label}</span>
+              </button>
+            ))}
           </div>
-        )}
+        </div>
 
-        {/* Outliner de elementos da tela ativa */}
-        {activeScreen && activeScreen.elements.length > 0 && (
-          <div className="panel-section">
-            <h4>Elementos ({activeScreen.elements.length})</h4>
-            <div className="outliner">
-              {activeScreen.elements.map((el) => (
-                <div
-                  key={el.id}
-                  className={`outliner-item ${el.id === selectedUIElementId ? 'selected' : ''}`}
-                  onClick={() => selectUIElement(el.id)}
+        {/* Camadas (layers) */}
+        <div className="panel-section" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <h4>Camadas ({activeScreen.elements.length})</h4>
+          <div className="outliner" style={{ flex: 1, overflowY: 'auto' }}>
+            {[...activeScreen.elements].reverse().map((el) => (
+              <div
+                key={el.id}
+                className={`outliner-item ${selectedIds.has(el.id) ? 'selected' : ''}`}
+                onClick={(e) => handleElementClick(e, el.id)}
+              >
+                <span className="icon-dot" />
+                <span style={{ flex: 1 }}>{el.name || el.type}</span>
+                <button
+                  className="icon"
+                  style={{ padding: '2px 4px', minWidth: 'auto', opacity: 0.5 }}
+                  onClick={(e) => { e.stopPropagation(); handleReorder(el.id, 'up') }}
+                  title="Subir camada"
                 >
-                  <span style={{ flex: 1 }}>
-                    {ELEMENT_TYPES.find((t) => t.type === el.type)?.icon || '◻'} {el.name || el.type}
-                  </span>
-                  <button
-                    className="danger"
-                    onClick={(e) => { e.stopPropagation(); removeUIElement(el.id) }}
-                    style={{ padding: '2px 4px' }}
-                  >
-                    <IconTrash width={11} height={11} />
-                  </button>
-                </div>
-              ))}
-            </div>
+                  ▲
+                </button>
+                <button
+                  className="icon"
+                  style={{ padding: '2px 4px', minWidth: 'auto', opacity: 0.5 }}
+                  onClick={(e) => { e.stopPropagation(); handleReorder(el.id, 'down') }}
+                  title="Descer camada"
+                >
+                  ▼
+                </button>
+              </div>
+            ))}
+            {/* Conects de UI da cena */}
+            {uiConects.map((conect) => (
+              <div
+                key={conect.instanceId}
+                className="outliner-item"
+                style={{ opacity: 0.6, cursor: 'default' }}
+                title="Conect de UI — posiciona na cena, edita no painel de propriedades"
+              >
+                <span className="icon-dot" style={{ background: '#8957e5' }} />
+                <span style={{ flex: 1 }}>🧩 {conect.name || conect.type}</span>
+                <span className="small muted">conect</span>
+              </div>
+            ))}
           </div>
-        )}
+        </div>
       </aside>
 
-      {/* ===== Centro: tela 2D de trabalho ===== */}
+      {/* ===== Canvas central ===== */}
       <div className="ui-editor-center">
-        {/* Toolbar de resolução */}
         <div className="ui-editor-toolbar">
+          <button onClick={() => setLeftPanelOpen(!leftPanelOpen)} title="Camadas" className="drawer-toggle">☰</button>
           <select value={resolution} onChange={(e) => setResolution(e.target.value)}>
             {RESOLUTIONS.map((r) => (
               <option key={r.id} value={r.id}>{r.label} ({r.w}×{r.h})</option>
             ))}
           </select>
-          {activeScreen && <span className="small muted">Tela: {activeScreen.name}</span>}
+          <button onClick={() => setZoom((z) => Math.max(0.25, z - 0.25))} title="Zoom out">−</button>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)', minWidth: 40, textAlign: 'center' }}>
+            {Math.round(zoom * 100)}%
+          </span>
+          <button onClick={() => setZoom((z) => Math.min(4, z + 0.25))} title="Zoom in">+</button>
+          <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }} title="Reset zoom">⤢</button>
+          <div className="spacer" />
+          {selectedIds.size >= 2 && (
+            <>
+              <button onClick={() => handleAlign('left')} title="Alinhar à esquerda">⬅</button>
+              <button onClick={() => handleAlign('centerH')} title="Alinhar ao centro (horizontal)">↔</button>
+              <button onClick={() => handleAlign('right')} title="Alinhar à direita">➡</button>
+              <button onClick={() => handleAlign('top')} title="Alinhar ao topo">⬆</button>
+              <button onClick={() => handleAlign('centerV')} title="Alinhar ao centro (vertical)">↕</button>
+              <button onClick={() => handleAlign('bottom')} title="Alinhar ao fundo">⬇</button>
+            </>
+          )}
+          {selectedIds.size > 0 && (
+            <>
+              <button onClick={() => setRightPanelOpen(!rightPanelOpen)} title="Propriedades" className="drawer-toggle">⚙️</button>
+              <button onClick={handleDuplicate} title="Duplicar (Ctrl+D)"><IconDuplicate width={14} height={14} /></button>
+              <button className="danger" onClick={handleDelete} title="Apagar (Del)"><IconTrash width={14} height={14} /></button>
+            </>
+          )}
         </div>
 
-        {/* Canvas 2D */}
-        <div className="ui-canvas-wrap">
-          {activeScreen ? (
-            <div
-              className="ui-canvas"
-              style={{ width: Math.min(res.w, 420), height: Math.min(res.h, 600) }}
-              onClick={(e) => {
-                if (e.target.classList.contains('ui-canvas')) selectUIElement(null)
-              }}
-            >
-              {activeScreen.elements.map((el) => (
-                <UIElementRenderer
-                  key={el.id}
-                  element={el}
-                  isSelected={el.id === selectedUIElementId}
-                  onSelect={() => selectUIElement(el.id)}
-                  onUpdate={(patch) => updateUIElement(el.id, patch)}
-                  isEditor={true}
-                />
-              ))}
-              {/* Fase 5: Preview de JoystickObjects da cena ativa */}
-              {joystickConects.map((js) => (
-                <JoystickPreview key={js.instanceId} conect={js} />
-              ))}
-            </div>
-          ) : (
-            <div className="empty-state">
-              <div style={{ fontSize: 32, opacity: 0.4 }}>📱</div>
-              <div className="mt-2">Nenhuma tela de UI.</div>
-              <button className="primary mt-2" onClick={() => createUIScreen('HUD')}>
-                Criar primeira tela
-              </button>
-            </div>
-          )}
+        <div
+          className="ui-canvas-wrap"
+          style={{ overflow: 'auto', cursor: isPanning ? 'grabbing' : 'default' }}
+        >
+          <div
+            ref={canvasRef}
+            className="ui-canvas"
+            style={{
+              width: res.w,
+              height: res.h,
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              transformOrigin: 'center center',
+              position: 'relative',
+            }}
+            onClick={handleCanvasClick}
+          >
+            {/* Renderizar elementos */}
+            {activeScreen.elements.map((el) => (
+              <UIElementEditorView
+                key={el.id}
+                element={el}
+                isSelected={selectedIds.has(el.id)}
+                onSelect={(e) => handleElementClick(e, el.id)}
+                onDragStart={(e, type, handle) => startDrag(e, el, type, handle)}
+                zoom={zoom}
+              />
+            ))}
+
+            {/* Renderizar Conects de UI (não editáveis, só preview) */}
+            {uiConects.map((conect) => (
+              <ConectUIPreview key={conect.instanceId} conect={conect} res={res} />
+            ))}
+
+            {/* Linhas de snapping */}
+            {snapLines.vertical.map((x, i) => (
+              <div key={`v${i}`} style={{ position: 'absolute', left: `${x}%`, top: 0, bottom: 0, width: 1, background: '#2f81f7', pointerEvents: 'none' }} />
+            ))}
+            {snapLines.horizontal.map((y, i) => (
+              <div key={`h${i}`} style={{ position: 'absolute', top: `${y}%`, left: 0, right: 0, height: 1, background: '#2f81f7', pointerEvents: 'none' }} />
+            ))}
+          </div>
         </div>
       </div>
 
       {/* ===== Painel direito: propriedades ===== */}
-      <aside className="panel right ui-editor-right">
-        <div className="panel-header">
-          <span>Propriedades</span>
-        </div>
-        <div className="panel-body">
-          {selectedElement ? (
-            <UIElementProperties element={selectedElement} onUpdate={(patch) => updateUIElement(selectedElement.id, patch)} />
-          ) : (
-            <div className="empty-state small">
-              Seleciona um elemento para editar as suas propriedades.
-            </div>
-          )}
-        </div>
+      <aside className={`panel right ui-editor-right ${rightPanelOpen ? 'open' : ''}`}>
+        <PropertiesPanel
+          selectedIds={selectedIds}
+          activeScreen={activeScreen}
+          updateUIElement={updateUIElement}
+        />
       </aside>
     </div>
   )
 }
 
-// ===== Renderizador de elemento (usado no editor E no jogo) =====
-// Este componente é partilhado entre o editor e o GameUIOverlay para garantir
-// que o que se vê no editor é exatamente o que aparece no jogo.
-export function UIElementRenderer({ element, isSelected, onSelect, onUpdate, isEditor }) {
+// ===== Componente: Elemento no editor (com handles de resize) =====
+function UIElementEditorView({ element, isSelected, onSelect, onDragStart, zoom }) {
   const pos = element.position || [50, 50]
   const size = element.size || [120, 40]
-  const isSelectedClass = isEditor && isSelected ? 'ui-el-selected' : ''
+  const handleSize = HANDLE_SIZE / zoom
 
   const baseStyle = {
     position: 'absolute',
@@ -246,367 +519,307 @@ export function UIElementRenderer({ element, isSelected, onSelect, onUpdate, isE
     top: `${pos[1]}%`,
     width: size[0],
     height: size[1],
+    transform: 'translate(-50%, -50%)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     background: element.color || 'transparent',
     color: element.textColor || '#e6edf3',
     fontSize: (element.fontSize || 14) + 'px',
     border: `${element.borderWidth || 0}px solid ${element.borderColor || 'transparent'}`,
     borderRadius: element.borderRadius || 0,
-    padding: element.padding || 0,
-    transform: 'translate(-50%, -50%)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: isEditor ? 'pointer' : 'auto',
-    pointerEvents: isEditor ? 'auto' : 'auto',
-    userSelect: 'none',
-    fontFamily: '-apple-system, sans-serif',
-    boxSizing: 'border-box',
     opacity: element.opacity ?? 1,
-  }
-
-  const handleClick = (e) => {
-    if (isEditor) {
-      e.stopPropagation()
-      onSelect?.()
-    }
-  }
-
-  switch (element.type) {
-    case 'Button':
-      return (
-        <button
-          style={{ ...baseStyle, cursor: 'pointer', border: `${element.borderWidth || 1}px solid ${element.borderColor || '#2f81f7'}` }}
-          className={isSelectedClass}
-          onClick={handleClick}
-          data-ui-element={element.id}
-          data-ui-event="onClick"
-        >
-          {element.label || 'Botão'}
-        </button>
-      )
-
-    case 'Label':
-    case 'Text':
-      return (
-        <div
-          style={baseStyle}
-          className={isSelectedClass}
-          onClick={handleClick}
-          data-ui-element={element.id}
-        >
-          {element.text || 'Texto'}
-        </div>
-      )
-
-    case 'Input':
-      return (
-        <input
-          type="text"
-          style={baseStyle}
-          className={isSelectedClass}
-          onClick={handleClick}
-          placeholder={element.placeholder || ''}
-          value={isEditor ? '' : (element.value || '')}
-          onChange={(e) => { if (!isEditor) onUpdate?.({ value: e.target.value }) }}
-          data-ui-element={element.id}
-          data-ui-event="onChange"
-          readOnly={isEditor}
-        />
-      )
-
-    case 'Checkbox':
-      return (
-        <label
-          style={{ ...baseStyle, cursor: 'pointer', gap: 6 }}
-          className={isSelectedClass}
-          onClick={handleClick}
-          data-ui-element={element.id}
-          data-ui-event="onChange"
-        >
-          <input
-            type="checkbox"
-            checked={isEditor ? false : (element.checked || false)}
-            onChange={(e) => { if (!isEditor) onUpdate?.({ checked: e.target.checked }) }}
-            readOnly={isEditor}
-          />
-          {element.label || ''}
-        </label>
-      )
-
-    case 'Slider':
-      return (
-        <div
-          style={{ ...baseStyle, flexDirection: 'column' }}
-          className={isSelectedClass}
-          onClick={handleClick}
-          data-ui-element={element.id}
-          data-ui-event="onChange"
-        >
-          <input
-            type="range"
-            min={element.min || 0}
-            max={element.max || 100}
-            value={isEditor ? (element.value || 50) : (element.value || 50)}
-            onChange={(e) => { if (!isEditor) onUpdate?.({ value: Number(e.target.value) }) }}
-            style={{ width: '100%' }}
-            readOnly={isEditor}
-          />
-          {!isEditor && <span style={{ fontSize: 10 }}>{element.value}</span>}
-        </div>
-      )
-
-    case 'Form':
-      return (
-        <div
-          style={{ ...baseStyle, flexDirection: 'column', gap: 6 }}
-          className={isSelectedClass}
-          onClick={handleClick}
-          data-ui-element={element.id}
-          data-ui-event="onSubmit"
-        >
-          <div style={{ fontSize: 12, fontWeight: 600 }}>{element.name || 'Form'}</div>
-          <button style={{ fontSize: 11, padding: '4px 12px' }}>{element.submitLabel || 'Enviar'}</button>
-        </div>
-      )
-
-    case 'Image':
-      return (
-        <div
-          style={{ ...baseStyle, overflow: 'hidden' }}
-          className={isSelectedClass}
-          onClick={handleClick}
-          data-ui-element={element.id}
-        >
-          {element.url ? (
-            <img src={element.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-          ) : (
-            <span style={{ fontSize: 10, opacity: 0.5 }}>Sem imagem</span>
-          )}
-        </div>
-      )
-
-    case 'Panel':
-      return (
-        <div
-          style={baseStyle}
-          className={isSelectedClass}
-          onClick={handleClick}
-          data-ui-element={element.id}
-        />
-      )
-
-    default:
-      return (
-        <div style={baseStyle} className={isSelectedClass} onClick={handleClick}>
-          {element.name || element.type}
-        </div>
-      )
-  }
-}
-
-// ===== Painel de propriedades =====
-function UIElementProperties({ element, onUpdate }) {
-  const set = (patch) => onUpdate(patch)
-  const setPos = (axis, val) => {
-    const pos = [...(element.position || [50, 50])]
-    pos[axis] = val
-    set({ position: pos })
-  }
-  const setSize = (axis, val) => {
-    const size = [...(element.size || [120, 40])]
-    size[axis] = val
-    set({ size })
+    cursor: 'move',
+    userSelect: 'none',
+    boxSizing: 'border-box',
+    outline: isSelected ? '2px solid #2f81f7' : '1px dashed transparent',
+    outlineOffset: isSelected ? 2 / zoom : 0,
   }
 
   return (
-    <>
+    <div
+      style={baseStyle}
+      onMouseDown={(e) => { e.stopPropagation(); onSelect(e); onDragStart(e, 'move') }}
+    >
+      {/* Conteúdo do elemento */}
+      {element.type === 'Button' && (element.label || 'Botão')}
+      {element.type === 'Label' && (element.text || element.label || '')}
+      {element.type === 'Text' && (element.text || '')}
+      {element.type === 'Input' && <input type="text" placeholder={element.placeholder || ''} style={{ width: '100%', background: 'transparent', border: 'none', color: 'inherit' }} readOnly />}
+      {element.type === 'Checkbox' && `☑ ${element.label || ''}`}
+      {element.type === 'Slider' && '─────●─────'}
+      {element.type === 'Image' && (element.url ? '🖼️' : '🖼️ (sem URL)')}
+      {element.type === 'Panel' && ''}
+
+      {/* Handles de resize (só quando selecionado) */}
+      {isSelected && (
+        <>
+          <ResizeHandle position="nw" onDragStart={onDragStart} size={handleSize} />
+          <ResizeHandle position="ne" onDragStart={onDragStart} size={handleSize} />
+          <ResizeHandle position="sw" onDragStart={onDragStart} size={handleSize} />
+          <ResizeHandle position="se" onDragStart={onDragStart} size={handleSize} />
+          <ResizeHandle position="n" onDragStart={onDragStart} size={handleSize} />
+          <ResizeHandle position="s" onDragStart={onDragStart} size={handleSize} />
+          <ResizeHandle position="w" onDragStart={onDragStart} size={handleSize} />
+          <ResizeHandle position="e" onDragStart={onDragStart} size={handleSize} />
+        </>
+      )}
+    </div>
+  )
+}
+
+// ===== Handle de resize =====
+function ResizeHandle({ position, onDragStart, size }) {
+  const positions = {
+    nw: { top: 0, left: 0, cursor: 'nwse-resize' },
+    ne: { top: 0, right: 0, cursor: 'nesw-resize' },
+    sw: { bottom: 0, left: 0, cursor: 'nesw-resize' },
+    se: { bottom: 0, right: 0, cursor: 'nwse-resize' },
+    n: { top: 0, left: '50%', cursor: 'ns-resize' },
+    s: { bottom: 0, left: '50%', cursor: 'ns-resize' },
+    w: { top: '50%', left: 0, cursor: 'ew-resize' },
+    e: { top: '50%', right: 0, cursor: 'ew-resize' },
+  }
+  const style = {
+    position: 'absolute',
+    width: size,
+    height: size,
+    background: '#2f81f7',
+    border: '1px solid #fff',
+    borderRadius: '50%',
+    transform: 'translate(-50%, -50%)',
+    ...positions[position],
+  }
+  // Ajustar transform para posições de borda
+  if (position === 'n' || position === 's') style.transform = 'translate(-50%, 0)'
+  if (position === 'w' || position === 'e') style.transform = 'translate(0, -50%)'
+  if (position === 'nw') style.transform = 'translate(0, 0)'
+  if (position === 'ne') style.transform = 'translate(-100%, 0)'
+  if (position === 'sw') style.transform = 'translate(0, -100%)'
+  if (position === 'se') style.transform = 'translate(-100%, -100%)'
+
+  return (
+    <div
+      style={{ ...style, cursor: positions[position].cursor }}
+      onMouseDown={(e) => { e.stopPropagation(); onDragStart(e, 'resize', position) }}
+    />
+  )
+}
+
+// ===== Preview de Conect de UI (não editável) =====
+function ConectUIPreview({ conect, res }) {
+  // Conects de UI usam posição percentual como os elementos
+  const pos = conect.position || [50, 50]
+  const size = conect.size || [120, 40]
+
+  let content = ''
+  let bg = 'transparent'
+  let border = '2px dashed #8957e5'
+
+  if (conect.type === 'ButtonObject') {
+    content = conect.label || 'Botão'
+    bg = conect.color || '#1c2128'
+  } else if (conect.type === 'JoystickObject') {
+    content = '🕹️'
+    bg = `${conect.color || '#2f81f7'}22`
+    border = `2px solid ${conect.color || '#2f81f7'}`
+    return (
+      <div style={{
+        position: 'absolute',
+        left: `${pos[0]}%`,
+        top: `${pos[1]}%`,
+        width: conect.size || 120,
+        height: conect.size || 120,
+        transform: 'translate(-50%, -50%)',
+        borderRadius: '50%',
+        background: bg,
+        border,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity: 0.6,
+        pointerEvents: 'none',
+      }}>
+        {content}
+      </div>
+    )
+  } else if (conect.type === 'TextObject') {
+    content = conect.text || conect.label || 'Texto'
+    bg = 'transparent'
+    border = '1px dashed #8957e5'
+  } else if (conect.type === 'ImageObject') {
+    content = conect.url ? '🖼️' : '🖼️ (sem URL)'
+    border = '1px dashed #8957e5'
+  } else if (conect.type === 'PanelObject') {
+    content = ''
+    bg = conect.color || '#1c2128'
+    border = '1px dashed #8957e5'
+  }
+
+  return (
+    <div style={{
+      position: 'absolute',
+      left: `${pos[0]}%`,
+      top: `${pos[1]}%`,
+      width: Array.isArray(size) ? size[0] : size,
+      height: Array.isArray(size) ? size[1] : 40,
+      transform: 'translate(-50%, -50%)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: bg,
+      color: conect.textColor || '#e6edf3',
+      fontSize: (conect.fontSize || 14) + 'px',
+      border,
+      borderRadius: conect.borderRadius || 0,
+      opacity: 0.6,
+      pointerEvents: 'none',
+    }}>
+      {content}
+    </div>
+  )
+}
+
+// ===== Painel de Propriedades =====
+function PropertiesPanel({ selectedIds, activeScreen, updateUIElement }) {
+  const selectedElements = activeScreen.elements.filter((e) => selectedIds.has(e.id))
+
+  if (selectedElements.length === 0) {
+    return (
+      <div className="panel-body">
+        <div className="empty-state">
+          <div style={{ fontSize: 24, opacity: 0.4 }}>⚙️</div>
+          <div className="small mt-2 muted">Seleciona um elemento para ver as propriedades</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (selectedElements.length > 1) {
+    return (
+      <div className="panel-body">
+        <div className="panel-section">
+          <h4>{selectedElements.length} elementos selecionados</h4>
+          <div className="small muted">Usa os botões de alinhar na barra superior</div>
+        </div>
+      </div>
+    )
+  }
+
+  const el = selectedElements[0]
+  const set = (patch) => updateUIElement(el.id, patch)
+  const pos = el.position || [50, 50]
+  const size = el.size || [120, 40]
+
+  return (
+    <div className="panel-body">
       <div className="panel-section">
-        <h4>{element.type}</h4>
+        <h4>Elemento</h4>
         <div className="prop-row">
           <label>Nome</label>
-          <input type="text" value={element.name || ''} onChange={(e) => set({ name: e.target.value })} />
+          <input type="text" value={el.name || ''} onChange={(e) => set({ name: e.target.value })} />
+        </div>
+        <div className="prop-row row" style={{ gap: 6 }}>
+          <span className="tag accent">{el.type}</span>
+          <span className="tag">id: {el.id.slice(-6)}</span>
         </div>
       </div>
 
       <div className="panel-section">
-        <h4>Posição (%)</h4>
-        <div className="vec3-input">
-          <div className="axis x" data-axis="X">
-            <input type="number" value={element.position?.[0] || 0} onChange={(e) => setPos(0, Number(e.target.value))} />
+        <h4>Posição & Tamanho</h4>
+        <div className="prop-row">
+          <label>Posição (X%, Y%)</label>
+          <div className="vec3-input">
+            <div className="axis x" data-axis="X">
+              <input type="number" value={pos[0].toFixed(1)} step="1"
+                onChange={(e) => set({ position: [Number(e.target.value), pos[1]] })} />
+            </div>
+            <div className="axis y" data-axis="Y">
+              <input type="number" value={pos[1].toFixed(1)} step="1"
+                onChange={(e) => set({ position: [pos[0], Number(e.target.value)] })} />
+            </div>
           </div>
-          <div className="axis y" data-axis="Y">
-            <input type="number" value={element.position?.[1] || 0} onChange={(e) => setPos(1, Number(e.target.value))} />
+        </div>
+        <div className="prop-row">
+          <label>Tamanho (W, H)</label>
+          <div className="vec3-input">
+            <div className="axis x" data-axis="W">
+              <input type="number" value={size[0]} step="1"
+                onChange={(e) => set({ size: [Number(e.target.value), size[1]] })} />
+            </div>
+            <div className="axis y" data-axis="H">
+              <input type="number" value={size[1]} step="1"
+                onChange={(e) => set({ size: [size[0], Number(e.target.value)] })} />
+            </div>
           </div>
         </div>
       </div>
-
-      <div className="panel-section">
-        <h4>Tamanho (px)</h4>
-        <div className="vec3-input" style={{ gridTemplateColumns: '1fr 1fr' }}>
-          <div className="axis x" data-axis="W">
-            <input type="number" value={element.size?.[0] || 100} onChange={(e) => setSize(0, Number(e.target.value))} />
-          </div>
-          <div className="axis y" data-axis="H">
-            <input type="number" value={element.size?.[1] || 40} onChange={(e) => setSize(1, Number(e.target.value))} />
-          </div>
-        </div>
-      </div>
-
-      {(element.type === 'Button' || element.type === 'Label' || element.type === 'Text') && (
-        <div className="panel-section">
-          <h4>Texto</h4>
-          <div className="prop-row">
-            <label>{element.type === 'Button' ? 'Label' : 'Conteúdo'}</label>
-            <input type="text" value={element.label || element.text || ''} onChange={(e) => set(element.type === 'Button' ? { label: e.target.value } : { text: e.target.value })} />
-          </div>
-        </div>
-      )}
-
-      {element.type === 'Input' && (
-        <div className="panel-section">
-          <h4>Input</h4>
-          <div className="prop-row">
-            <label>Placeholder</label>
-            <input type="text" value={element.placeholder || ''} onChange={(e) => set({ placeholder: e.target.value })} />
-          </div>
-        </div>
-      )}
-
-      {element.type === 'Slider' && (
-        <div className="panel-section">
-          <h4>Slider</h4>
-          <div className="prop-row">
-            <label>Mín: {element.min}</label>
-            <input type="range" min="0" max="100" value={element.min || 0} onChange={(e) => set({ min: Number(e.target.value) })} />
-          </div>
-          <div className="prop-row">
-            <label>Máx: {element.max}</label>
-            <input type="range" min="0" max="500" value={element.max || 100} onChange={(e) => set({ max: Number(e.target.value) })} />
-          </div>
-          <div className="prop-row">
-            <label>Valor: {element.value}</label>
-            <input type="range" min={element.min || 0} max={element.max || 100} value={element.value || 0} onChange={(e) => set({ value: Number(e.target.value) })} />
-          </div>
-        </div>
-      )}
-
-      {element.type === 'Checkbox' && (
-        <div className="panel-section">
-          <h4>Checkbox</h4>
-          <div className="prop-row">
-            <label>Label</label>
-            <input type="text" value={element.label || ''} onChange={(e) => set({ label: e.target.value })} />
-          </div>
-          <label className="checkbox-row">
-            <input type="checkbox" checked={element.checked || false} onChange={(e) => set({ checked: e.target.checked })} />
-            Marcado
-          </label>
-        </div>
-      )}
 
       <div className="panel-section">
         <h4>Aparência</h4>
         <div className="prop-row">
           <label>Cor de fundo</label>
-          <input type="color" value={element.color === 'transparent' ? '#000000' : (element.color || '#1c2128')} onChange={(e) => set({ color: e.target.value })} />
+          <input type="color" value={el.color || '#1c2128'} onChange={(e) => set({ color: e.target.value })} />
         </div>
         <div className="prop-row">
           <label>Cor do texto</label>
-          <input type="color" value={element.textColor || '#e6edf3'} onChange={(e) => set({ textColor: e.target.value })} />
+          <input type="color" value={el.textColor || '#e6edf3'} onChange={(e) => set({ textColor: e.target.value })} />
         </div>
         <div className="prop-row">
-          <label>Tamanho da fonte: {element.fontSize || 14}px</label>
-          <input type="range" min="8" max="48" value={element.fontSize || 14} onChange={(e) => set({ fontSize: Number(e.target.value) })} />
+          <label>Opacidade: {(el.opacity ?? 1).toFixed(2)}</label>
+          <input type="range" min="0" max="1" step="0.05" value={el.opacity ?? 1}
+            onChange={(e) => set({ opacity: Number(e.target.value) })} />
+        </div>
+        <div className="prop-row">
+          <label>Raio da borda: {el.borderRadius || 0}px</label>
+          <input type="range" min="0" max="50" step="1" value={el.borderRadius || 0}
+            onChange={(e) => set({ borderRadius: Number(e.target.value) })} />
+        </div>
+        <div className="prop-row">
+          <label>Espessura da borda: {el.borderWidth || 0}px</label>
+          <input type="range" min="0" max="10" step="1" value={el.borderWidth || 0}
+            onChange={(e) => set({ borderWidth: Number(e.target.value) })} />
+        </div>
+        <div className="prop-row">
+          <label>Cor da borda</label>
+          <input type="color" value={el.borderColor || '#30363d'} onChange={(e) => set({ borderColor: e.target.value })} />
         </div>
       </div>
 
       <div className="panel-section">
-        <h4>Bordas</h4>
+        <h4>Tipografia</h4>
         <div className="prop-row">
-          <label>Espessura: {element.borderWidth || 0}px</label>
-          <input type="range" min="0" max="10" value={element.borderWidth || 0} onChange={(e) => set({ borderWidth: Number(e.target.value) })} />
+          <label>Tamanho da fonte: {el.fontSize || 14}px</label>
+          <input type="range" min="8" max="72" step="1" value={el.fontSize || 14}
+            onChange={(e) => set({ fontSize: Number(e.target.value) })} />
         </div>
-        <div className="prop-row">
-          <label>Cor da borda</label>
-          <input type="color" value={element.borderColor || '#30363d'} onChange={(e) => set({ borderColor: e.target.value })} />
-        </div>
-        <div className="prop-row">
-          <label>Arredondamento: {element.borderRadius || 0}px</label>
-          <input type="range" min="0" max="30" value={element.borderRadius || 0} onChange={(e) => set({ borderRadius: Number(e.target.value) })} />
-        </div>
-        <div className="prop-row">
-          <label>Padding: {element.padding || 0}px</label>
-          <input type="range" min="0" max="30" value={element.padding || 0} onChange={(e) => set({ padding: Number(e.target.value) })} />
-        </div>
-      </div>
-
-      {element.type === 'Image' && (
-        <div className="panel-section">
-          <h4>Imagem</h4>
+        {el.type === 'Button' && (
           <div className="prop-row">
-            <label>URL</label>
-            <input type="text" value={element.url || ''} onChange={(e) => set({ url: e.target.value })} placeholder="https://..." />
+            <label>Texto do botão</label>
+            <input type="text" value={el.label || ''} onChange={(e) => set({ label: e.target.value })} />
           </div>
-        </div>
-      )}
+        )}
+        {(el.type === 'Label' || el.type === 'Text') && (
+          <div className="prop-row">
+            <label>Conteúdo</label>
+            <textarea value={el.text || ''} onChange={(e) => set({ text: e.target.value })} rows={3} />
+          </div>
+        )}
+        {el.type === 'Image' && (
+          <div className="prop-row">
+            <label>URL da imagem</label>
+            <input type="text" value={el.url || ''} onChange={(e) => set({ url: e.target.value })} placeholder="https://..." />
+          </div>
+        )}
+      </div>
 
       <div className="panel-section">
         <h4>Evento FlirCode</h4>
         <div className="prop-row">
-          <label>Função a chamar</label>
-          <input type="text" value={element.eventName || ''} onChange={(e) => set({ eventName: e.target.value })} placeholder="onClick, onChange, onSubmit..." />
+          <label>Nome do evento</label>
+          <input type="text" value={el.eventName || ''} onChange={(e) => set({ eventName: e.target.value })}
+            placeholder="onClick, onChange, onSubmit..." />
         </div>
-      </div>
-    </>
-  )
-}
-
-// Fase 5: Preview de JoystickObject no editor de UI
-function JoystickPreview({ conect }) {
-  const side = conect.side || 'left'
-  const size = conect.size || 120
-  const color = conect.color || '#2f81f7'
-  const thumbSize = size * 0.4
-
-  const containerStyle = {
-    position: 'absolute',
-    bottom: 20,
-    [side]: 20,
-    width: size,
-    height: size,
-    pointerEvents: 'none',
-    zIndex: 10,
-  }
-
-  const baseStyle = {
-    width: '100%',
-    height: '100%',
-    borderRadius: '50%',
-    background: `radial-gradient(circle, ${color}22 0%, ${color}11 70%, transparent 100%)`,
-    border: `2px solid ${color}`,
-    opacity: 0.6,
-    position: 'relative',
-  }
-
-  const thumbStyle = {
-    position: 'absolute',
-    left: '50%',
-    top: '50%',
-    width: thumbSize,
-    height: thumbSize,
-    borderRadius: '50%',
-    background: color,
-    border: '2px solid #fff',
-    transform: 'translate(-50%, -50%)',
-  }
-
-  return (
-    <div style={containerStyle}>
-      <div style={baseStyle}>
-        <div style={thumbStyle} />
-      </div>
-      <div style={{ position: 'absolute', top: -20, left: 0, fontSize: 10, color: '#8b949e' }}>
-        🕹️ {conect.name || 'Joystick'}
       </div>
     </div>
   )
