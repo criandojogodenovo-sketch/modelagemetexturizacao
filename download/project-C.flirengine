@@ -1,0 +1,97 @@
+{
+  "version": 3,
+  "createdAt": "2026-08-08T07:53:08.570Z",
+  "scene": {
+    "objects": [],
+    "background": {
+      "type": "solid",
+      "color": "#0d1117",
+      "gradientTop": "#1a2332",
+      "gradientBottom": "#0a0d12"
+    },
+    "grid": {
+      "visible": true,
+      "size": 20,
+      "divisions": 20,
+      "color": "#30363d"
+    },
+    "lights": {
+      "ambient": {
+        "intensity": 0.6,
+        "color": "#ffffff"
+      },
+      "directional": {
+        "intensity": 1.2,
+        "color": "#ffffff",
+        "position": [
+          5,
+          8,
+          5
+        ]
+      },
+      "hdri": null
+    }
+  },
+  "scenes": [
+    {
+      "id": "scene_vtu4p0ba",
+      "name": "Nível 1",
+      "objects": [],
+      "playerObjectId": null,
+      "gameCamera": {
+        "type": "perspective",
+        "position": [
+          5,
+          4,
+          6
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "fov": 50,
+        "near": 0.1,
+        "far": 200,
+        "orthoSize": 5
+      },
+      "background": null,
+      "grid": null,
+      "lights": null,
+      "conects": [
+        {
+          "instanceId": "conect_91x4ddfs",
+          "type": "RigidObject",
+          "name": "Rigid Object",
+          "position": [
+            0,
+            0.5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "visible": true,
+          "flirScript": null,
+          "mass": 1,
+          "friction": 0.3,
+          "restitution": 0.4,
+          "linearDamping": 0.01,
+          "angularDamping": 0.01,
+          "fixedRotation": false
+        }
+      ]
+    }
+  ],
+  "activeSceneId": "scene_vtu4p0ba",
+  "appMode": "scene",
+  "uiScreens": [],
+  "activeUIScreenId": null
+}

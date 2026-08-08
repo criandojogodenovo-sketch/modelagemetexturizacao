@@ -137,3 +137,65 @@ Stage Summary:
 - Build production OK (1.96s, 2.4MB precache)
 - Unity alignment atingido: tabs, multi-layer splat blending, falloff types,
   drag painting, brush cursor, import/export PNG, custom layers
+
+---
+Task ID: P-FINAL
+Agent: main
+Task: P1 bug + P2.5 FlirCode + syntax highlighting + relatório final
+
+Work Log:
+
+=== P1: Bug crítico — Novo Projeto trazia dados do projeto anterior ===
+- Reproduzido: criar projeto A com Rigidbody conect → Home → Novo Projeto →
+  CONECTS NA CENA (1) aparecia em B (conect do projeto A persistia)
+- Causa: newProjectState() só limpava objects/selectedId, NÃO limpava scenes,
+  activeSceneId, uiScreens, flirScriptTarget, etc.
+- Correção: newProjectState() agora retorna reset COMPLETO + newProject() limpa
+  IndexedDB auto-save + loadProjectJSON() reseta state não exportado +
+  exportProjectJSON() agora inclui uiScreens
+- Testado: Novo Projeto → CONECTS NA CENA (0) ✓; Abrir .flirengine → conects
+  restaurados ✓; Novo Projeto após abrir → CONECTS NA CENA (0) ✓
+
+=== P2.5: Funções FlirCode — bugs corrigidos ===
+5 bugs encontrados e corrigidos:
+1. String concat ("text" + var) — parseValue não suportava + → splitPlus()
+2. Function call as value (var x = getVar("y")) — novo tipo 'call_value'
+3. setVar/getVar não expostos no gameContext → adicionados
+4. Loop infinito no createObject → activeSceneRef + gameStartedRef
+5. distanceTo só procurava em objects → agora procura em conects também
+
+Funções confirmadas via debug console:
+- wait: loga (não pausa, limitação sincrona)
+- collidingWith: retorna bool
+- distanceTo: retorna 5 (cubo em x=5)
+- isTouching: retorna bool
+- rotate/scale: modificam mesh
+- setUIValue/getUIValue: leem/escrevem UI
+- showUIScreen/hideUIScreen: mostram/escondem telas
+- playSound: toca SoundObject
+- destroy: mesh.visible = false
+- createObject: adiciona à cena
+- changeScene: muda cena ativa
+- setVar/getVar: "valor123" confirmado
+- String concat: "Distancia ao Cubo: 5" confirmado
+
+=== P3: Syntax highlighting no FlirCode editor ===
+- Novo: src/utils/flirscript/flircodeHighlight.js
+- Overlay technique: <pre> colorido + <textarea> transparente
+- 7 tipos de destaque: keywords, builtins, events, strings, numbers, comments, user funcs
+- Cores estilo VSCode dark theme
+- Atualiza em tempo real
+- Scroll sincronizado
+
+=== Build + Commit ===
+- npm run build: ✓ (1.19s, 2429 KiB precache)
+- Commit: 5670c37
+- Push: ✓ para origin/main
+
+Stage Summary:
+- 6 arquivos modificados (+366, -41)
+- 1 novo arquivo: flircodeHighlight.js
+- P1 bug crítico corrigido e testado
+- P2.5: 5 bugs FlirCode corrigidos, todas as funções confirmadas
+- P3: syntax highlighting implementado com 7 cores
+- Build production OK
