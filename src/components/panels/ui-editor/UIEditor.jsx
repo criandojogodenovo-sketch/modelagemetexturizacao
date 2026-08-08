@@ -210,6 +210,8 @@ export default function UIEditor() {
     if (!activeScreen) return
     const id = addUIElement(type)
     setSelectedIds(new Set([id]))
+    // Fechar painel esquerdo em mobile para o utilizador ver o elemento adicionado
+    setLeftPanelOpen(false)
   }
 
   // Duplicar
@@ -320,6 +322,10 @@ export default function UIEditor() {
 
   return (
     <div className="ui-editor-full" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onWheel={handleWheel}>
+      {/* Backdrop para fechar painel esquerdo ao clicar fora (mobile) */}
+      {leftPanelOpen && (
+        <div className="drawer-backdrop show" onClick={() => setLeftPanelOpen(false)} />
+      )}
       {/* ===== Painel esquerdo: telas + camadas ===== */}
       <aside className={`panel left ui-editor-left ${leftPanelOpen ? 'open' : ''}`}>
         <div className="panel-header">
@@ -495,6 +501,10 @@ export default function UIEditor() {
         </div>
       </div>
 
+      {/* Backdrop para fechar painel direito ao clicar fora (mobile) */}
+      {rightPanelOpen && (
+        <div className="drawer-backdrop show" onClick={() => setRightPanelOpen(false)} />
+      )}
       {/* ===== Painel direito: propriedades ===== */}
       <aside className={`panel right ui-editor-right ${rightPanelOpen ? 'open' : ''}`}>
         <PropertiesPanel
