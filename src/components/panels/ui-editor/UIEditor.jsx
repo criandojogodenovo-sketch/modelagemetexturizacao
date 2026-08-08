@@ -47,6 +47,11 @@ export default function UIEditor() {
   const updateUIElement = useStore((s) => s.updateUIElement)
   const selectUIElement = useStore((s) => s.selectUIElement)
   const selectedUIElementId = useStore((s) => s.selectedUIElementId)
+  // Fase 5: mostrar JoystickObjects da cena ativa como preview
+  const scenes = useStore((s) => s.scenes)
+  const activeSceneId = useStore((s) => s.activeSceneId)
+  const activeScene = scenes.find((s) => s.id === activeSceneId)
+  const joystickConects = (activeScene?.conects || []).filter((c) => c.type === 'JoystickObject')
 
   const [resolution, setResolution] = useState('medium')
   const [editingScreenName, setEditingScreenName] = useState(null)
@@ -190,6 +195,10 @@ export default function UIEditor() {
                   onUpdate={(patch) => updateUIElement(el.id, patch)}
                   isEditor={true}
                 />
+              ))}
+              {/* Fase 5: Preview de JoystickObjects da cena ativa */}
+              {joystickConects.map((js) => (
+                <JoystickPreview key={js.instanceId} conect={js} />
               ))}
             </div>
           ) : (
@@ -549,5 +558,56 @@ function UIElementProperties({ element, onUpdate }) {
         </div>
       </div>
     </>
+  )
+}
+
+// Fase 5: Preview de JoystickObject no editor de UI
+function JoystickPreview({ conect }) {
+  const side = conect.side || 'left'
+  const size = conect.size || 120
+  const color = conect.color || '#2f81f7'
+  const thumbSize = size * 0.4
+
+  const containerStyle = {
+    position: 'absolute',
+    bottom: 20,
+    [side]: 20,
+    width: size,
+    height: size,
+    pointerEvents: 'none',
+    zIndex: 10,
+  }
+
+  const baseStyle = {
+    width: '100%',
+    height: '100%',
+    borderRadius: '50%',
+    background: `radial-gradient(circle, ${color}22 0%, ${color}11 70%, transparent 100%)`,
+    border: `2px solid ${color}`,
+    opacity: 0.6,
+    position: 'relative',
+  }
+
+  const thumbStyle = {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    width: thumbSize,
+    height: thumbSize,
+    borderRadius: '50%',
+    background: color,
+    border: '2px solid #fff',
+    transform: 'translate(-50%, -50%)',
+  }
+
+  return (
+    <div style={containerStyle}>
+      <div style={baseStyle}>
+        <div style={thumbStyle} />
+      </div>
+      <div style={{ position: 'absolute', top: -20, left: 0, fontSize: 10, color: '#8b949e' }}>
+        🕹️ {conect.name || 'Joystick'}
+      </div>
+    </div>
   )
 }

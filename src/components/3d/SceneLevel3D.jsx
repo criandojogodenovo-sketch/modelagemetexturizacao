@@ -94,6 +94,60 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   const objectsRef = useRef(objects)
   const gameStartedRef = useRef(false)
 
+  // Expor joystickRef globalmente para o GameUIOverlay poder atualizá-lo
+  useEffect(() => {
+    window._flirJoystick = joystickRef.current
+    return () => { window._flirJoystick = null }
+  }, [])
+
+  // Use o ref para o setup
+  const setupScene = activeSceneRef.current
+
+  // Fase 5: Expor multiplayer globalmente e configurar sync de estado do PersonalObject
+  useEffect(() => {
+    if (!isGameMode) return
+    let mp
+    import('../../utils/multiplayer/multiplayerManager').then(({ multiplayer }) => {
+      mp = multiplayer
+      window._multiplayer = mp
+      // Configurar getter de estado local (posição do PersonalObject)
+      mp.setLocalStateGetter(() => {
+        for (const conect of setupScene?.conects || []) {
+          if (conect.type === 'PersonalObject') {
+            const mesh = conectMeshRefs.current.get(conect.instanceId)
+            if (mesh) {
+              return {
+                position: [mesh.position.x, mesh.position.y, mesh.position.z],
+                rotation: [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
+                playerId: mp.playerId,
+              }
+            }
+          }
+        }
+        return null
+      })
+      // Registar callbacks para eventos multiplayer → FlirCode
+      mp.on('playerJoin', (playerId) => {
+        for (const rt of runtimesRef.current.values()) {
+          rt.triggerEvent('onPlayerJoin', { playerId })
+        }
+      })
+      mp.on('playerLeave', (playerId) => {
+        for (const rt of runtimesRef.current.values()) {
+          rt.triggerEvent('onPlayerLeave', { playerId })
+        }
+      })
+      mp.on('message', (playerId, data) => {
+        for (const rt of runtimesRef.current.values()) {
+          rt.triggerEvent('onMessage', { playerId, data })
+        }
+      })
+    })
+    return () => {
+      window._multiplayer = null
+    }
+  }, [isGameMode, setupScene])
+
   // Atualizar refs sem re-disparar o useEffect
   useEffect(() => {
     // Só atualizar o ref se o jogo ainda não começou OU se a cena mudou de verdade
@@ -106,9 +160,6 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       objectsRef.current = objects
     }
   }, [activeScene, objects])
-
-  // Use o ref para o setup
-  const setupScene = activeSceneRef.current
 
   // Setup quando o modo jogo é activado
   useEffect(() => {
@@ -223,6 +274,21 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         return 0
       },
       isTouching: () => joystickRef.current.active,
+      // Fase 5: Multiplayer functions
+      sendMessage: (data) => {
+        try {
+          const mp = window._multiplayer
+          if (mp && mp.connected) mp.sendMessage(data)
+        } catch {}
+      },
+      getPlayers: () => {
+        const mp = window._multiplayer
+        return mp && mp.connected ? mp.getOtherPlayers().length + 1 : 1
+      },
+      getPlayerState: (playerId) => {
+        const mp = window._multiplayer
+        return mp && mp.connected ? mp.getPlayerState(playerId) : null
+      },
     }
     window._flirGameContext = gameContext
 

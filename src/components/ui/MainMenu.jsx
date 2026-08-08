@@ -22,6 +22,9 @@ export default function MainMenu({ onClose }) {
   const openDebugConsole = useStore((s) => s.openDebugConsole)
   const openGameExport = useStore((s) => s.openGameExport)
   const toggleConectsWindow = useStore((s) => s.toggleConectsWindow)
+  const openMultiplayerPanel = useStore((s) => s.openMultiplayerPanel)
+  const togglePerfStats = useStore((s) => s.togglePerfStats)
+  const openPostProcessing = useStore((s) => s.openPostProcessing)
 
   const handle = (fn) => () => {
     fn()
@@ -76,6 +79,30 @@ export default function MainMenu({ onClose }) {
               <div className="mm-desc small muted">Erros, avisos e logs durante o jogo</div>
             </div>
           </button>
+          <div className="mm-divider" />
+          {/* Fase 5: Multiplayer + Performance */}
+          <button className="mm-item" onClick={handle(openMultiplayerPanel)}>
+            <span className="mm-icon">🌐</span>
+            <div>
+              <div className="mm-label">Multiplayer</div>
+              <div className="mm-desc small muted">Criar/entrar em salas, jogar com outros</div>
+            </div>
+          </button>
+          <button className="mm-item" onClick={handle(togglePerfStats)}>
+            <span className="mm-icon">📊</span>
+            <div>
+              <div className="mm-label">Estatísticas (FPS)</div>
+              <div className="mm-desc small muted">FPS, draw calls, objetos, avisos</div>
+            </div>
+          </button>
+          <button className="mm-item" onClick={handle(openPostProcessing)}>
+            <span className="mm-icon">🎨</span>
+            <div>
+              <div className="mm-label">Pós-Processamento</div>
+              <div className="mm-desc small muted">Bloom, SSAO, Depth of Field, Color Grading</div>
+            </div>
+          </button>
+          <div className="mm-divider" />
           <button className="mm-item primary" onClick={handle(openGameExport)}>
             <span className="mm-icon">🎮</span>
             <div>

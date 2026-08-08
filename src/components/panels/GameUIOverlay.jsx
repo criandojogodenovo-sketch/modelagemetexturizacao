@@ -4,21 +4,48 @@
  * **Fase 6 (corrigido)**: Cada elemento é renderizado diretamente com
  * pointer-events: auto. Botões disparam onClick, inputs disparam onChange.
  * Não há botões invisíveis separados — o próprio elemento é clicável.
+ *
+ * **Fase 5**: Adiciona JoystickObject rendering — joystick virtual touch
+ * que controla o PersonalObject via joystickRef.
  */
 import { useStore } from '../../store/useStore'
 import { debugLog } from '../../utils/debug/debugStore'
+import JoystickControl from '../ui/JoystickControl'
 
 export default function GameUIOverlay() {
   const uiScreens = useStore((s) => s.uiScreens)
+  const scenes = useStore((s) => s.scenes)
+  const activeSceneId = useStore((s) => s.activeSceneId)
   const visibleScreens = uiScreens.filter((sc) => sc.visible !== false)
 
-  if (visibleScreens.length === 0) return null
+  const activeScene = scenes.find((s) => s.id === activeSceneId)
+  // Procurar JoystickObjects na cena ativa
+  const joysticks = (activeScene?.conects || []).filter((c) => c.type === 'JoystickObject')
+
+  if (visibleScreens.length === 0 && joysticks.length === 0) return null
 
   const handleEvent = (element, eventType, value) => {
     debugLog(`UI Event: ${element.name}.${eventType}`, 'log', 'UI')
     const eventName = element.eventName || eventType
     if (window._flirGameContext?.triggerUIEvent) {
       window._flirGameContext.triggerUIEvent(eventName, { element, value })
+    }
+  }
+
+  // Joystick move handler — atualiza o joystickRef global
+  const handleJoystickMove = (x, z) => {
+    if (window._flirJoystick) {
+      window._flirJoystick.x = x
+      window._flirJoystick.z = z
+      window._flirJoystick.active = (x !== 0 || z !== 0)
+    }
+  }
+
+  const handleJoystickEnd = () => {
+    if (window._flirJoystick) {
+      window._flirJoystick.x = 0
+      window._flirJoystick.z = 0
+      window._flirJoystick.active = false
     }
   }
 
@@ -153,6 +180,19 @@ export default function GameUIOverlay() {
           }
         })
       )}
+
+      {/* Joysticks virtuais — renderizados a partir de JoystickObjects na cena */}
+      {joysticks.map((js) => (
+        <JoystickControl
+          key={js.instanceId}
+          side={js.side || 'left'}
+          size={js.size || 120}
+          color={js.color || '#2f81f7'}
+          deadzone={js.deadzone ?? 0.1}
+          onMove={handleJoystickMove}
+          onEnd={handleJoystickEnd}
+        />
+      ))}
     </div>
   )
 }

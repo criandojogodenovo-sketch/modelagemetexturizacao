@@ -9,7 +9,7 @@
  *
  * Acessível quando o utilizador abre a app (primeira vista) ou via botão Home.
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../../store/useStore'
 import { listProjects, loadProject, deleteProject } from '../../utils/db'
 import Ebook from './Ebook'
@@ -21,6 +21,7 @@ export default function HomePage({ onOpenProject }) {
   const newProject = useStore((s) => s.newProject)
   const loadProjectJSON = useStore((s) => s.loadProjectJSON)
   const toast = useStore((s) => s.toast)
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
     listProjects()
@@ -32,6 +33,26 @@ export default function HomePage({ onOpenProject }) {
   const handleNew = () => {
     newProject()
     onOpenProject?.()
+  }
+
+  // Abrir projeto .flirengine do disco
+  const handleOpenFlirEngine = () => {
+    fileInputRef.current?.setAttribute('accept', '.flirengine,.json')
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      loadProjectJSON(text)
+      toast(`Projeto "${file.name}" carregado`, 'success')
+      onOpenProject?.()
+    } catch (err) {
+      toast('Erro ao abrir projeto: ' + err.message, 'error')
+    }
+    e.target.value = ''
   }
 
   const handleOpen = async (projectId) => {
@@ -85,9 +106,14 @@ export default function HomePage({ onOpenProject }) {
         <section className="home-section">
           <div className="home-section-header">
             <h2>📁 Os meus projetos</h2>
-            <button className="primary" onClick={handleNew}>
-              + Novo Projeto
-            </button>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button onClick={handleOpenFlirEngine} title="Abrir projeto .flirengine">
+                📂 Abrir
+              </button>
+              <button className="primary" onClick={handleNew}>
+                + Novo Projeto
+              </button>
+            </div>
           </div>
 
           {loading ? (
@@ -166,6 +192,15 @@ export default function HomePage({ onOpenProject }) {
           </div>
         </section>
       </div>
+
+      {/* Input hidden para abrir .flirengine */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".flirengine,.json"
+        style={{ display: 'none' }}
+        onChange={handleFileChange}
+      />
     </div>
   )
 }

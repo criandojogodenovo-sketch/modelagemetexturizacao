@@ -1114,6 +1114,14 @@ export const useStore = create(
         }))
       },
 
+      // Fase 5: Update scene properties (postProcessing, physics, etc.)
+      updateScene: (sceneId, patch) => {
+        get()._pushHistory()
+        set((s) => ({
+          scenes: s.scenes.map((sc) => (sc.id === sceneId ? { ...sc, ...patch } : sc)),
+        }))
+      },
+
       setActiveScene: (sceneId) => set({ activeSceneId: sceneId }),
 
       reorderScenes: (fromIndex, toIndex) => {
@@ -1356,6 +1364,18 @@ export const useStore = create(
       terrainEditorOpen: false,
       openTerrainEditor: () => set({ terrainEditorOpen: true }),
       closeTerrainEditor: () => set({ terrainEditorOpen: false }),
+
+      // Fase 5: Multiplayer + Performance + Post-processing
+      multiplayerPanelOpen: false,
+      openMultiplayerPanel: () => set({ multiplayerPanelOpen: true }),
+      closeMultiplayerPanel: () => set({ multiplayerPanelOpen: false }),
+
+      perfStatsVisible: false,
+      togglePerfStats: () => set((s) => ({ perfStatsVisible: !s.perfStatsVisible })),
+
+      postProcessingOpen: false,
+      openPostProcessing: () => set({ postProcessingOpen: true }),
+      closePostProcessing: () => set({ postProcessingOpen: false }),
 
       animStudioOpen: false,
       openAnimStudio: () => set({ animStudioOpen: true }),

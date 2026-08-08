@@ -15,7 +15,7 @@ import { useStore } from '../../../store/useStore'
 import { parseFlirCode } from '../../../utils/flirscript/flircode'
 import { highlightFlirCode } from '../../../utils/flirscript/flircodeHighlight'
 import { debugLog } from '../../../utils/debug/debugStore'
-import { IconClose, IconCheck } from '../../ui/Icons'
+import { IconClose, IconCheck, IconSave } from '../../ui/Icons'
 
 // Template default para um novo script
 const DEFAULT_SCRIPT = `$$ Script FlirCode
@@ -116,6 +116,14 @@ export default function FlirCodeEditor() {
     }
   }
 
+  // Guardar explicitamente (além do auto-save)
+  const handleSaveNow = () => {
+    if (!targetInstance) return
+    clearTimeout(saveTimeout)
+    setInstanceFlirScript(targetInstance.instanceId, 'FLIRCODE:' + code)
+    toast('FlirCode guardado', 'success')
+  }
+
   // Inserir snippet
   const insertSnippet = (snippet) => {
     const textarea = textareaRef.current
@@ -159,6 +167,9 @@ export default function FlirCodeEditor() {
           <span className="muted small"> · {targetInstance.name}</span>
         </div>
         <div className="spacer" />
+        <button onClick={handleSaveNow} title="Guardar alterações" className="primary">
+          <IconSave width={14} height={14} /> Guardar
+        </button>
         <button onClick={handleValidate} title="Validar sintaxe">
           <IconCheck width={14} height={14} /> Validar
         </button>

@@ -36,6 +36,9 @@ import DebugConsole from './components/panels/debug/DebugConsole'
 import TerrainEditor from './components/panels/terrain/TerrainEditor'
 import AnimationStudio from './components/panels/AnimationStudio'
 import AnimationControllerEditor from './components/panels/AnimationControllerEditor'
+import MultiplayerPanel from './components/panels/MultiplayerPanel'
+import PostProcessingPanel from './components/panels/PostProcessingPanel'
+import PerformanceStatsOverlay from './components/ui/PerformanceStatsOverlay'
 import MainMenu from './components/ui/MainMenu'
 import HomePage from './components/home/HomePage'
 import Toasts from './components/ui/Toasts'
@@ -72,6 +75,11 @@ export default function App() {
   const closeTerrainEditor = useStore((s) => s.closeTerrainEditor)
   const animStudioOpen = useStore((s) => s.animStudioOpen)
   const closeAnimStudio = useStore((s) => s.closeAnimStudio)
+  const multiplayerPanelOpen = useStore((s) => s.multiplayerPanelOpen)
+  const closeMultiplayerPanel = useStore((s) => s.closeMultiplayerPanel)
+  const perfStatsVisible = useStore((s) => s.perfStatsVisible)
+  const postProcessingOpen = useStore((s) => s.postProcessingOpen)
+  const closePostProcessing = useStore((s) => s.closePostProcessing)
   const homeVisible = useStore((s) => s.homeVisible)
   const hideHome = useStore((s) => s.hideHome)
 
@@ -178,6 +186,9 @@ export default function App() {
       {debugConsoleOpen && <DebugConsole onClose={closeDebugConsole} />}
       {terrainEditorOpen && <TerrainEditor onClose={closeTerrainEditor} />}
       {animStudioOpen && <AnimationStudio onClose={closeAnimStudio} />}
+      {multiplayerPanelOpen && <MultiplayerPanel onClose={closeMultiplayerPanel} />}
+      {postProcessingOpen && <PostProcessingPanel onClose={closePostProcessing} />}
+      {perfStatsVisible && <PerformanceStatsOverlay />}
       {animControllerTarget && (
         <div className="modal-backdrop" onClick={closeAnimController}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600, width: '90%', maxHeight: '90vh', overflowY: 'auto' }}>

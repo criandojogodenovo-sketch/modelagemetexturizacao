@@ -29,6 +29,7 @@ import AppModeSwitch from '../ui/AppModeSwitch'
 export default function TopBar() {
   const fileInputRef = useRef()
   const [importType, setImportType] = useState('glb')
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false)
 
   const toggleLeftDrawer = useStore((s) => s.toggleLeftDrawer)
   const toggleRightDrawer = useStore((s) => s.toggleRightDrawer)
@@ -188,24 +189,21 @@ export default function TopBar() {
       <button
         onClick={showHome}
         title="Página principal (projetos + ebook)"
-        className="icon"
-        data-landscape="hide"
+        className="icon topbar-hide-mobile"
       >
         🏠
       </button>
       <button
         onClick={openTerrainEditor}
         title="Editor de Terrenos"
-        className="icon"
-        data-landscape="hide"
+        className="icon topbar-hide-mobile"
       >
         ⛰️
       </button>
       <button
         onClick={openAnimStudio}
         title="Estúdio de Animação (keyframes, FBX, controlador)"
-        className="icon"
-        data-landscape="hide"
+        className="icon topbar-hide-mobile"
       >
         🏃
       </button>
@@ -213,14 +211,14 @@ export default function TopBar() {
       {/* Seletor de modo: Modelagem vs Cena */}
       <AppModeSwitch />
 
-      <div className="group" data-landscape="hide">
+      <div className="group topbar-hide-mobile">
         <button onClick={newProject} title="Novo projeto" className="icon">
           <IconFile width={14} height={14} />
           <span className="hide-mobile">Novo</span>
         </button>
       </div>
 
-      <div className="group" data-landscape="hide">
+      <div className="group topbar-hide-mobile">
         <button
           onClick={() => handleImportClick('glb')}
           title="Importar GLB"
@@ -232,21 +230,21 @@ export default function TopBar() {
         <button
           onClick={() => handleImportClick('gltf')}
           title="Importar GLTF"
-          className="icon"
+          className="icon topbar-hide-narrow"
         >
           <span className="hide-mobile">GLTF</span>
         </button>
         <button
           onClick={() => handleImportClick('obj')}
           title="Importar OBJ"
-          className="icon"
+          className="icon topbar-hide-narrow"
         >
           <span className="hide-mobile">OBJ</span>
         </button>
         <button
           onClick={() => handleImportClick('json')}
           title="Importar projeto JSON"
-          className="icon"
+          className="icon topbar-hide-narrow"
         >
           <span className="hide-mobile">JSON</span>
         </button>
@@ -259,23 +257,23 @@ export default function TopBar() {
         </button>
       </div>
 
-      <div className="group" data-landscape="hide">
+      <div className="group topbar-hide-mobile">
         <button onClick={handleSave} title="Guardar no navegador" className="icon">
           <IconSave width={14} height={14} />
           <span className="hide-mobile">Guardar</span>
         </button>
-        <button onClick={handleLoadSnapshot} title="Carregar do navegador" className="icon">
+        <button onClick={handleLoadSnapshot} title="Carregar do navegador" className="icon topbar-hide-narrow">
           <IconImport width={14} height={14} />
           <span className="hide-mobile">Carregar</span>
         </button>
       </div>
 
-      <div className="group" data-landscape="hide">
+      <div className="group topbar-hide-mobile">
         <button onClick={handleSaveFlirEngine} title="Guardar como .flirengine" className="icon">
           💾
           <span className="hide-mobile">.flirengine</span>
         </button>
-        <button onClick={handleOpenFlirEngine} title="Abrir .flirengine" className="icon">
+        <button onClick={handleOpenFlirEngine} title="Abrir .flirengine" className="icon topbar-hide-narrow">
           📂
           <span className="hide-mobile">Abrir</span>
         </button>
@@ -291,6 +289,31 @@ export default function TopBar() {
           <IconRedo width={14} height={14} />
         </button>
       </div>
+
+      {/* Botão "Mais" — visível só em mobile, abre menu overflow com todas as ações escondidas */}
+      <button
+        className="icon drawer-toggle topbar-more-btn"
+        onClick={() => setMoreMenuOpen(true)}
+        title="Mais ações (Guardar, Importar, Abrir...)"
+      >
+        ⋮
+      </button>
+      {moreMenuOpen && (
+        <MoreActionsMenu
+          onClose={() => setMoreMenuOpen(false)}
+          actions={{
+            newProject,
+            handleSave,
+            handleLoadSnapshot,
+            handleSaveFlirEngine,
+            handleOpenFlirEngine,
+            handleImportClick,
+            showHome,
+            openTerrainEditor,
+            openAnimStudio,
+          }}
+        />
+      )}
 
       <button
         onClick={toggleMainMenu}
@@ -330,6 +353,73 @@ export default function TopBar() {
         />
       )}
     </header>
+  )
+}
+
+// Menu overflow para mobile — mostra ações escondidas da topbar
+function MoreActionsMenu({ onClose, actions }) {
+  return (
+    <>
+      <div className="drawer-backdrop show" onClick={onClose} />
+      <aside className="more-actions-menu open">
+        <div className="panel-header">
+          <span>Mais ações</span>
+          <button className="icon" onClick={onClose} title="Fechar">✕</button>
+        </div>
+        <div className="more-actions-body">
+          <button className="mm-item" onClick={() => { actions.showHome(); onClose() }}>
+            <span className="mm-icon">🏠</span>
+            <div><div className="mm-label">Página principal</div></div>
+          </button>
+          <button className="mm-item" onClick={() => { actions.newProject(); onClose() }}>
+            <span className="mm-icon">📄</span>
+            <div><div className="mm-label">Novo projeto</div></div>
+          </button>
+          <button className="mm-item" onClick={() => { actions.openTerrainEditor(); onClose() }}>
+            <span className="mm-icon">⛰️</span>
+            <div><div className="mm-label">Editor de Terrenos</div></div>
+          </button>
+          <button className="mm-item" onClick={() => { actions.openAnimStudio(); onClose() }}>
+            <span className="mm-icon">🏃</span>
+            <div><div className="mm-label">Estúdio de Animação</div></div>
+          </button>
+          <div className="mm-divider" />
+          <button className="mm-item" onClick={() => { actions.handleSave(); onClose() }}>
+            <span className="mm-icon">💾</span>
+            <div><div className="mm-label">Guardar no navegador</div></div>
+          </button>
+          <button className="mm-item" onClick={() => { actions.handleLoadSnapshot(); onClose() }}>
+            <span className="mm-icon">📂</span>
+            <div><div className="mm-label">Carregar do navegador</div></div>
+          </button>
+          <button className="mm-item" onClick={() => { actions.handleSaveFlirEngine(); onClose() }}>
+            <span className="mm-icon">💾</span>
+            <div><div className="mm-label">Guardar .flirengine</div></div>
+          </button>
+          <button className="mm-item" onClick={() => { actions.handleOpenFlirEngine(); onClose() }}>
+            <span className="mm-icon">📂</span>
+            <div><div className="mm-label">Abrir .flirengine</div></div>
+          </button>
+          <div className="mm-divider" />
+          <button className="mm-item" onClick={() => { actions.handleImportClick('glb'); onClose() }}>
+            <span className="mm-icon">📦</span>
+            <div><div className="mm-label">Importar GLB</div></div>
+          </button>
+          <button className="mm-item" onClick={() => { actions.handleImportClick('gltf'); onClose() }}>
+            <span className="mm-icon">📦</span>
+            <div><div className="mm-label">Importar GLTF</div></div>
+          </button>
+          <button className="mm-item" onClick={() => { actions.handleImportClick('obj'); onClose() }}>
+            <span className="mm-icon">📦</span>
+            <div><div className="mm-label">Importar OBJ</div></div>
+          </button>
+          <button className="mm-item" onClick={() => { actions.handleImportClick('json'); onClose() }}>
+            <span className="mm-icon">📦</span>
+            <div><div className="mm-label">Importar JSON</div></div>
+          </button>
+        </div>
+      </aside>
+    </>
   )
 }
 

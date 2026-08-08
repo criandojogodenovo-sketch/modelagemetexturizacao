@@ -275,6 +275,10 @@ export function createFlirCodeRuntime(source, gameContext) {
     onClick: 'onClick',
     onChange: 'onChange',
     onSubmit: 'onSubmit',
+    // Fase 5: Eventos de multiplayer
+    onPlayerJoin: 'onPlayerJoin',
+    onPlayerLeave: 'onPlayerLeave',
+    onMessage: 'onMessage',
   }
 
   // Avaliar um valor (número, string, variável, etc.)
@@ -463,6 +467,17 @@ export function createFlirCodeRuntime(source, gameContext) {
       case 'isTouching':
         // Verificar se o utilizador está a tocar no ecrã
         return gameContext.isTouching?.() || false
+      // Fase 5: Funções de multiplayer
+      case 'sendMessage':
+        // Envia dados customizados para outros jogadores
+        gameContext.sendMessage?.(evaluatedArgs[0])
+        break
+      case 'getPlayers':
+        // Retorna o número de jogadores ligados
+        return gameContext.getPlayers?.() || 1
+      case 'getPlayerState':
+        // Retorna o estado de um jogador específico
+        return gameContext.getPlayerState?.(evaluatedArgs[0]) || null
       default:
         debugLog(`Função desconhecida: ${name}`, 'warning', 'FlirCode')
     }
