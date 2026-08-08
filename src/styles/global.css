@@ -4172,3 +4172,32 @@ label {
     display: none;
   }
 }
+
+/* === Sistema 2: Classes Panel === */
+.classes-panel {
+  position: fixed;
+  top: var(--topbar-h);
+  right: 0;
+  bottom: 0;
+  width: 360px;
+  max-width: 90vw;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+  box-shadow: var(--shadow-panel);
+}
+
+.classes-panel.open {
+  transform: translateX(0);
+}
+
+@media (max-width: 600px) {
+  .classes-panel {
+    width: 100%;
+    max-width: 100%;
+  }
+}

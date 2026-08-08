@@ -38,6 +38,7 @@ import AnimationStudio from './components/panels/AnimationStudio'
 import AnimationControllerEditor from './components/panels/AnimationControllerEditor'
 import MultiplayerPanel from './components/panels/MultiplayerPanel'
 import PostProcessingPanel from './components/panels/PostProcessingPanel'
+import ClassesPanel from './components/panels/ClassesPanel'
 import PerformanceStatsOverlay from './components/ui/PerformanceStatsOverlay'
 import MainMenu from './components/ui/MainMenu'
 import HomePage from './components/home/HomePage'
@@ -80,6 +81,8 @@ export default function App() {
   const perfStatsVisible = useStore((s) => s.perfStatsVisible)
   const postProcessingOpen = useStore((s) => s.postProcessingOpen)
   const closePostProcessing = useStore((s) => s.closePostProcessing)
+  const classesPanelOpen = useStore((s) => s.classesPanelOpen)
+  const closeClassesPanel = useStore((s) => s.closeClassesPanel)
   const homeVisible = useStore((s) => s.homeVisible)
   const hideHome = useStore((s) => s.hideHome)
 
@@ -188,6 +191,7 @@ export default function App() {
       {animStudioOpen && <AnimationStudio onClose={closeAnimStudio} />}
       {multiplayerPanelOpen && <MultiplayerPanel onClose={closeMultiplayerPanel} />}
       {postProcessingOpen && <PostProcessingPanel onClose={closePostProcessing} />}
+      {classesPanelOpen && <ClassesPanel onClose={closeClassesPanel} />}
       {perfStatsVisible && <PerformanceStatsOverlay />}
       {animControllerTarget && (
         <div className="modal-backdrop" onClick={closeAnimController}>

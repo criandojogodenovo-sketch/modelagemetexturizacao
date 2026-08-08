@@ -18,6 +18,7 @@ import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-t
 import * as THREE from 'three'
 import SceneObject from './SceneObject'
 import ConectRenderer from '../panels/ConectRenderer'
+import ColliderGizmo from './ColliderGizmo'
 import { useStore } from '../../store/useStore'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
 import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
@@ -289,6 +290,13 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         const mp = window._multiplayer
         return mp && mp.connected ? mp.getPlayerState(playerId) : null
       },
+      // Sistema 3: Sinais — emite para todos os runtimes da cena
+      emitSignal: (name, data) => {
+        for (const rt of runtimesRef.current.values()) {
+          rt.triggerEvent('onSignal', { name, data })
+        }
+        debugLog(`Signal emitido: ${name}`, 'log', 'Signals')
+      },
     }
     window._flirGameContext = gameContext
 
@@ -325,21 +333,38 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     })
 
     // FlirCode/FlirScript runtimes
+    // Sistema 2: obter classes FlirCode do store
+    const flirCodeClasses = useStore.getState().flirCodeClasses || []
+
     const setupRuntime = (instance, scriptData) => {
-      if (!scriptData) return
       try {
-        if (typeof scriptData === 'string' && scriptData.startsWith('FLIRCODE:')) {
-          const source = scriptData.slice(9)
-          const rt = createFlirCodeRuntime(source, { ...gameContext, _instanceId: instance.instanceId, mesh: conectMeshRefs.current.get(instance.instanceId) || meshRefs.current.get(instance.instanceId) })
-          if (!rt.hasErrors) {
-            runtimesRef.current.set(instance.instanceId, rt)
-            rt.triggerEvent('beginPlay')
+        // Sistema 2: se o conect tem flirCodeClass definido, usar o código da classe
+        let source = null
+        let className = null
+
+        if (instance.flirCodeClass) {
+          const cls = flirCodeClasses.find((c) => c.name === instance.flirCodeClass)
+          if (cls) {
+            source = cls.source
+            className = cls.name
           }
-        } else if (typeof scriptData === 'object') {
-          const errors = validateGraph(scriptData)
-          if (errors.length > 0) return
-          const rt = createFlirScriptRuntime(scriptData, gameContext)
-          rt.graph.nodes.forEach((n) => { n._instanceId = instance.instanceId })
+        }
+
+        // Se há script próprio, concatenar com a classe (script próprio por cima)
+        if (scriptData && typeof scriptData === 'string' && scriptData.startsWith('FLIRCODE:')) {
+          const ownScript = scriptData.slice(9)
+          source = source ? source + '\n' + ownScript : ownScript
+        }
+
+        if (!source) return
+
+        const rt = createFlirCodeRuntime(source, {
+          ...gameContext,
+          _instanceId: instance.instanceId,
+          className, // Sistema 2: passar nome da classe para o runtime
+          mesh: conectMeshRefs.current.get(instance.instanceId) || meshRefs.current.get(instance.instanceId),
+        })
+        if (!rt.hasErrors) {
           runtimesRef.current.set(instance.instanceId, rt)
           rt.triggerEvent('beginPlay')
         }
@@ -728,6 +753,8 @@ function ConectSelectorWrapper({ conect, objects, isSelected, onSelect, setMeshR
   return (
     <group onPointerDown={handlePointerDown}>
       <ConectRenderer conect={conect} objects={objects} setMeshRef={setMeshRef} />
+      {/* Sistema 1: gizmo do colisor independente (só no editor) */}
+      {!isGameMode && <ColliderGizmo conect={conect} isSelected={isSelected} />}
     </group>
   )
 }

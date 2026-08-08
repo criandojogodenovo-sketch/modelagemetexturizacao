@@ -42,6 +42,7 @@ export function parseFlirCode(source) {
   const errors = []
   const lines = source.split('\n')
   const functions = {}
+  const classes = {} // Sistema 2: suporte a classes
 
   // Pré-processar: remover comentários e linhas vazias
   const cleanLines = []
@@ -51,10 +52,44 @@ export function parseFlirCode(source) {
     cleanLines.push({ text: trimmed, line: i + 1 })
   }
 
-  // Parser de funções
+  // Parser de funções e classes (top-level)
   let idx = 0
   while (idx < cleanLines.length) {
     const line = cleanLines[idx]
+
+    // Sistema 2: "class Nome begincode" ou "class Nome extends Base begincode"
+    const classMatch = line.text.match(/^class\s+(\w+)(?:\s+extends\s+(\w+))?\s*begincode$/)
+    if (classMatch) {
+      const className = classMatch[1]
+      const extendsName = classMatch[2] || null
+      const body = parseBlock(cleanLines, idx + 1, errors)
+      if (body.error) {
+        errors.push({ line: line.line, message: `Classe "${className}": ${body.error}` })
+        idx = body.nextIdx
+        continue
+      }
+      // Extrair variáveis e funções da classe
+      const classVars = {}
+      const classFuncs = {}
+      for (const stmt of body.statements) {
+        if (stmt.type === 'var' || stmt.type === 'assign') {
+          classVars[stmt.name] = stmt.value
+        } else if (stmt.type === 'function') {
+          classFuncs[stmt.name] = stmt
+        }
+      }
+      classes[className] = {
+        name: className,
+        extends: extendsName,
+        vars: classVars,
+        functions: classFuncs,
+        rawStatements: body.statements,
+        line: line.line,
+      }
+      idx = body.nextIdx
+      continue
+    }
+
     // Procurar "fun nome(params) begincode"
     const funMatch = line.text.match(/^fun\s+(\w+)\s*\(([^)]*)\)\s*begincode$/)
     if (funMatch) {
@@ -75,7 +110,7 @@ export function parseFlirCode(source) {
     }
   }
 
-  return { functions, errors }
+  return { functions, classes, errors }
 }
 
 // Parser de bloco begincode...endcode
@@ -95,6 +130,29 @@ function parseBlock(lines, startIdx, errors) {
       }
       statements.push({ type: 'endcode', line: line.line })
       idx++
+      continue
+    }
+
+    // Sistema 2: reconhecer "fun nome(params) begincode" dentro de classes
+    const funMatch = text.match(/^fun\s+(\w+)\s*\(([^)]*)\)\s*begincode$/)
+    if (funMatch) {
+      const funName = funMatch[1]
+      const params = funMatch[2].split(',').map((p) => p.trim()).filter((p) => p)
+      const body = parseBlock(lines, idx + 1, errors)
+      if (body.error) {
+        errors.push({ line: line.line, message: `Função "${funName}": ${body.error}` })
+        idx = body.nextIdx
+        continue
+      }
+      statements.push({
+        type: 'function',
+        name: funName,
+        params,
+        body: body.statements,
+        line: line.line,
+        nextIdx: body.nextIdx,
+      })
+      idx = body.nextIdx
       continue
     }
 
@@ -216,6 +274,8 @@ function parseValue(text) {
   // Booleano
   if (text === 'true') return { type: 'boolean', value: true }
   if (text === 'false') return { type: 'boolean', value: false }
+  // Sistema 2: 'this' refere-se ao próprio objeto (instanceId)
+  if (text === 'this') return { type: 'this' }
   // Chamada de função embutida como valor: identifier(args)
   // Ex: getVar("teste"), distanceTo("Cubo"), collidingWith("tipo"), isTouching(), getUIValue("nome")
   const callMatch = text.match(/^(\w+)\s*\(([^)]*)\)$/)
@@ -251,7 +311,7 @@ function splitPlus(text) {
 // Executa o AST compilado, chamando as funções embutidas do gameContext.
 
 export function createFlirCodeRuntime(source, gameContext) {
-  const { functions, errors } = parseFlirCode(source)
+  const { functions, classes, errors } = parseFlirCode(source)
 
   // Se há erros de sintaxe, reportar e não executar
   for (const err of errors) {
@@ -260,6 +320,38 @@ export function createFlirCodeRuntime(source, gameContext) {
 
   // Variáveis locais do script
   const localVars = {}
+
+  // Sistema 2: resolver hierarquia de classes e fundir funções/variáveis
+  // Se gameContext.className estiver definido, usar essa classe
+  const className = gameContext.className || null
+  if (className && classes[className]) {
+    // Construir cadeia de herança: [Base, ..., Sub]
+    const chain = []
+    let curr = classes[className]
+    while (curr) {
+      chain.unshift(curr) // adicionar no início para Base ficar primeiro
+      curr = curr.extends ? classes[curr.extends] : null
+    }
+    // Inicializar variáveis da classe (da base para a sub)
+    for (const cls of chain) {
+      for (const [varName, varValue] of Object.entries(cls.vars || {})) {
+        localVars[varName] = varValue ? (varValue.value !== undefined ? varValue.value : varValue) : 0
+      }
+    }
+    // Fundir funções (sub override base)
+    for (const cls of chain) {
+      for (const [fnName, fnDef] of Object.entries(cls.functions || {})) {
+        // Converter function statement para o formato esperado pelo runtime
+        functions[fnName] = {
+          name: fnName,
+          params: fnDef.params || [],
+          body: fnDef.body || [],
+          line: fnDef.line,
+        }
+      }
+    }
+    debugLog(`Classe "${className}" aplicada: ${Object.keys(localVars).length} vars, ${Object.keys(functions).length} funções`, 'log', 'FlirCode')
+  }
 
   // Mapear nomes de eventos PT → nome interno
   const eventMap = {
@@ -279,6 +371,8 @@ export function createFlirCodeRuntime(source, gameContext) {
     onPlayerJoin: 'onPlayerJoin',
     onPlayerLeave: 'onPlayerLeave',
     onMessage: 'onMessage',
+    // Sistema 3: Evento de sinais
+    onSignal: 'onSignal',
   }
 
   // Avaliar um valor (número, string, variável, etc.)
@@ -288,6 +382,7 @@ export function createFlirCodeRuntime(source, gameContext) {
       case 'number': return val.value
       case 'string': return val.value
       case 'boolean': return val.value
+      case 'this': return gameContext._instanceId // Sistema 2: this = próprio objeto
       case 'concat': return val.parts.map((p) => {
         const v = evalValue(p)
         return v === null || v === undefined ? '' : String(v)
@@ -478,6 +573,10 @@ export function createFlirCodeRuntime(source, gameContext) {
       case 'getPlayerState':
         // Retorna o estado de um jogador específico
         return gameContext.getPlayerState?.(evaluatedArgs[0]) || null
+      // Sistema 3: Sinais — emitSignal("nome", dados)
+      case 'emitSignal':
+        gameContext.emitSignal?.(evaluatedArgs[0], evaluatedArgs[1])
+        break
       default:
         debugLog(`Função desconhecida: ${name}`, 'warning', 'FlirCode')
     }
@@ -498,9 +597,22 @@ export function createFlirCodeRuntime(source, gameContext) {
       // Passar payload como parâmetros
       const params = {}
       if (fn.params.length > 0) {
-        params[fn.params[0]] = payload
+        // Sistema 3: para onSignal, passar name e data como parâmetros separados
+        if (funcName === 'onSignal' && fn.params.length >= 2) {
+          params[fn.params[0]] = payload.name
+          params[fn.params[1]] = payload.data
+        } else if (funcName === 'onMessage' && fn.params.length >= 2) {
+          params[fn.params[0]] = payload.playerId
+          params[fn.params[1]] = payload.data
+        } else {
+          params[fn.params[0]] = payload
+        }
       }
       gameContext._instanceId = gameContext._instanceId // já definido externamente
+      // Sistema 3: copiar params para localVars para ficarem acessíveis no script
+      for (const [k, v] of Object.entries(params)) {
+        localVars[k] = v
+      }
       execStatements(fn.body, params)
     },
 

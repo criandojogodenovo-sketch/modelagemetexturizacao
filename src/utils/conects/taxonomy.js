@@ -42,6 +42,24 @@ const prop = (key, label, type, defaultValue, extra = {}) => ({
   key, label, type, default: defaultValue, ...extra,
 })
 
+// Helper para gerar propriedades de colisor independente (Sistema 1)
+// Adicionado a todos os Conects com hasPhysics: true
+const colliderProps = () => [
+  prop('colliderShape', 'Forma do Colisor', 'select', 'model', {
+    options: ['model', 'box', 'sphere', 'capsule'],
+    descriptions: {
+      model: 'Usar forma do modelo (automático)',
+      box: 'Caixa',
+      sphere: 'Esfera',
+      capsule: 'Cápsula',
+    },
+  }),
+  prop('colliderSize', 'Tamanho do Colisor (X,Y,Z)', 'vec3', [1, 1, 1]),
+  prop('colliderOffset', 'Offset do Colisor (X,Y,Z)', 'vec3', [0, 0, 0]),
+  prop('colliderRadius', 'Raio (esfera/cápsula)', 'number', 0.5, { min: 0.05, max: 10, step: 0.05 }),
+  prop('colliderHeight', 'Altura (cápsula)', 'number', 1.5, { min: 0.1, max: 10, step: 0.1 }),
+]
+
 export const CONECT_TAXONOMY = [
   // ============ FÍSICA ============
   {
@@ -707,6 +725,23 @@ export function findConectDefinition(type) {
 export function conectsByCategory(category) {
   return CONECT_TAXONOMY.filter((c) => c.category === category)
 }
+
+// Sistema 1: injetar propriedades de colisor independente em todos os Conects
+// com hasPhysics: true. Garante que qualquer Conect de física tem as
+// propriedades colliderShape, colliderSize, colliderOffset, etc.
+CONECT_TAXONOMY.forEach((conect) => {
+  if (conect.hasPhysics) {
+    conect.properties = [...conect.properties, ...colliderProps()]
+    conect.defaults = {
+      ...conect.defaults,
+      colliderShape: 'model',
+      colliderSize: [1, 1, 1],
+      colliderOffset: [0, 0, 0],
+      colliderRadius: 0.5,
+      colliderHeight: 1.5,
+    }
+  }
+})
 
 // Cria uma instância com valores predefinidos sensatos
 export function createConectInstance(type, position = [0, 0.5, 0]) {

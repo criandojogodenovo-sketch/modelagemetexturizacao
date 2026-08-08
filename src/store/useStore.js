@@ -1377,6 +1377,32 @@ export const useStore = create(
       openPostProcessing: () => set({ postProcessingOpen: true }),
       closePostProcessing: () => set({ postProcessingOpen: false }),
 
+      // Sistema 2: Classes FlirCode (guardadas no projeto, reutilizáveis)
+      flirCodeClasses: [], // [{ id, name, source, extends }]
+      classesPanelOpen: false,
+      openClassesPanel: () => set({ classesPanelOpen: true }),
+      closeClassesPanel: () => set({ classesPanelOpen: false }),
+      createFlirCodeClass: (name, source, extendsName = null) => {
+        set((s) => ({
+          flirCodeClasses: [...s.flirCodeClasses, {
+            id: `class_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            name,
+            source,
+            extends: extendsName,
+          }],
+        }))
+      },
+      updateFlirCodeClass: (classId, patch) => {
+        set((s) => ({
+          flirCodeClasses: s.flirCodeClasses.map((c) => c.id === classId ? { ...c, ...patch } : c),
+        }))
+      },
+      deleteFlirCodeClass: (classId) => {
+        set((s) => ({
+          flirCodeClasses: s.flirCodeClasses.filter((c) => c.id !== classId),
+        }))
+      },
+
       animStudioOpen: false,
       openAnimStudio: () => set({ animStudioOpen: true }),
       closeAnimStudio: () => set({ animStudioOpen: false }),
@@ -1432,7 +1458,7 @@ export const useStore = create(
 
       // ---------- Projeto: guardar/carregar ----------
       exportProjectJSON: () => {
-        const { objects, background, grid, lights, scenes, activeSceneId, appMode, uiScreens, activeUIScreenId } = get()
+        const { objects, background, grid, lights, scenes, activeSceneId, appMode, uiScreens, activeUIScreenId, flirCodeClasses } = get()
         return JSON.stringify(
           {
             version: 3,
@@ -1443,6 +1469,7 @@ export const useStore = create(
             appMode,
             uiScreens,
             activeUIScreenId,
+            flirCodeClasses, // Sistema 2: exportar classes
           },
           null,
           2
@@ -1470,6 +1497,8 @@ export const useStore = create(
             // UI screens — só manter se o projeto exportar as suas
             uiScreens: data.uiScreens || [],
             activeUIScreenId: data.uiScreens?.[0]?.id || null,
+            // Sistema 2: carregar classes do projeto
+            flirCodeClasses: data.flirCodeClasses || [],
             // History — limpar (não desfazer para o projeto anterior)
             past: [],
             future: [],
@@ -1509,6 +1538,7 @@ export const useStore = create(
         appMode: state.appMode,
         uiScreens: state.uiScreens,
         activeUIScreenId: state.activeUIScreenId,
+        flirCodeClasses: state.flirCodeClasses, // Sistema 2: persistir classes
       }),
       version: 3,
     }

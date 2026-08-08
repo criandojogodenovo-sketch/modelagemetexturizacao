@@ -28,6 +28,8 @@ export default function ConectPropertiesPanel({ conectId }) {
   const removeConectFromScene = useStore((s) => s.removeConectFromScene)
   const setFlirScriptTarget = useStore((s) => s.setFlirScriptTarget)
   const _pushHistory = useStore((s) => s._pushHistory)
+  // Sistema 2: classes FlirCode disponíveis para atribuir ao Conect
+  const flirCodeClasses = useStore((s) => s.flirCodeClasses)
 
   const scene = scenes.find((s) => s.id === activeSceneId)
   const conect = scene?.conects?.find((c) => c.instanceId === conectId)
@@ -151,6 +153,25 @@ export default function ConectPropertiesPanel({ conectId }) {
       {def.flirScriptable && (
         <div className="panel-section">
           <h4>FlirScript (lógica)</h4>
+          {/* Sistema 2: seletor de Classe FlirCode */}
+          <div className="prop-row">
+            <label>Classe FlirCode</label>
+            <select
+              value={conect.flirCodeClass || ''}
+              onChange={(e) => updateConect(conect.instanceId, { flirCodeClass: e.target.value || null })}
+            >
+              <option value="">— Nenhuma (script próprio) —</option>
+              {flirCodeClasses.map((cls) => (
+                <option key={cls.id} value={cls.name}>
+                  {cls.name}{cls.extends ? ` (extends ${cls.extends})` : ''}
+                </option>
+              ))}
+            </select>
+            <div className="small muted mt-1">
+              Ao escolher uma classe, o Conect herda variáveis e funções dessa classe.
+              O script próprio (abaixo) é executado por cima.
+            </div>
+          </div>
           <button
             onClick={() => setFlirScriptTarget(activeSceneId, conect.instanceId)}
             className={conect.flirScript ? 'primary' : ''}
