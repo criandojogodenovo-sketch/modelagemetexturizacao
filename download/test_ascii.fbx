@@ -1,0 +1,43 @@
+; FBX 7.3.0 project file
+FBXHeader:  {
+    FBXHeaderVersion: 1003
+    FBXVersion: 7300
+    Creator: "Flir Engine Test"
+}
+GlobalSettings:  {
+    Version: 1000
+    Properties70:  {
+        P: "UpAxis", "int", "Integer", "",1
+        P: "UpAxisSign", "int", "Integer", "",1
+        P: "FrontAxis", "int", "Integer", "",2
+        P: "FrontAxisSign", "int", "Integer", "",1
+        P: "CoordAxis", "int", "Integer", "",0
+        P: "CoordAxisSign", "int", "Integer", "",1
+    }
+}
+Documents:  {
+    Count: 1
+    Document: 1000000000, "", "Scene" {
+        Properties70:  {
+        }
+        RootNode: 0
+    }
+}
+Definitions:  {
+    Count: 2
+    ObjectType: "GlobalSettings" {
+        Count: 1
+    }
+    ObjectType: "Model" {
+        Count: 1
+    }
+}
+Objects:  {
+    Model: 1000000001, "Model::TestCube", "Mesh" {
+        Properties70:  {
+        }
+    }
+}
+Connections:  {
+    C: "OO",1000000001,0
+}
