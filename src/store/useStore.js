@@ -1171,7 +1171,7 @@ export const useStore = create(
         }))
       },
 
-      openScenePreview: () => set({ scenePreviewOpen: true }),
+      openScenePreview: () => set({ scenePreviewOpen: true, ui: { ...get().ui, leftDrawerOpen: false, rightDrawerOpen: false } }),
       closeScenePreview: () => set({ scenePreviewOpen: false }),
 
       // ---------- Conects (Fase 3) ----------

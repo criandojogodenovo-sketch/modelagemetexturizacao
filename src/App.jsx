@@ -139,9 +139,9 @@ export default function App() {
   }, [undo, redo, setTransformMode, deleteObject, duplicateObject, selectedId, deselect, closeDrawers])
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${scenePreviewOpen ? 'game-mode' : ''}`}>
       {homeVisible && <HomePage onOpenProject={hideHome} />}
-      <TopBar />
+      {!scenePreviewOpen && <TopBar />}
       <OfflineIndicator />
 
       {appMode === 'flirscript' ? (
@@ -164,7 +164,7 @@ export default function App() {
       )}
 
       <Timeline />
-      <BottomBar />
+      {!scenePreviewOpen && <BottomBar />}
 
       {ui.moreToolsOpen && <MoreToolsGrid onClose={toggleMoreTools} />}
       {scenePreviewOpen && <ScenePreview />}

@@ -22,7 +22,7 @@ export default function ScenePreview() {
   const activeSceneId = useStore((s) => s.activeSceneId)
   const closeScenePreview = useStore((s) => s.closeScenePreview)
   const [showSplash, setShowSplash] = useState(true)
-  const [showDebug, setShowDebug] = useState(true)
+  const [showDebug, setShowDebug] = useState(false)
 
   const activeScene = scenes.find((s) => s.id === activeSceneId)
 
@@ -51,6 +51,17 @@ export default function ScenePreview() {
         <span>⏹ Parar</span>
       </button>
 
+      {/* Botão Debug (toggle) — canto inferior direito */}
+      {!showDebug && (
+        <button
+          className="preview-debug-toggle"
+          onClick={() => setShowDebug(true)}
+          title="Mostrar consola de debug"
+        >
+          🐛
+        </button>
+      )}
+
       {/* Info bar */}
       <div className="preview-info">
         <strong>{activeScene.name}</strong>
@@ -66,7 +77,7 @@ export default function ScenePreview() {
 
       {/* Consola de Debug */}
       {showDebug && (
-        <div style={{ position: 'fixed', bottom: 0, right: 0, width: 320, maxHeight: 200, zIndex: 90, opacity: 0.9 }}>
+        <div className="preview-debug-wrap">
           <DebugConsole onClose={() => setShowDebug(false)} />
         </div>
       )}

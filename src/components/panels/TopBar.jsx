@@ -189,6 +189,7 @@ export default function TopBar() {
         onClick={showHome}
         title="Página principal (projetos + ebook)"
         className="icon"
+        data-landscape="hide"
       >
         🏠
       </button>
@@ -196,6 +197,7 @@ export default function TopBar() {
         onClick={openTerrainEditor}
         title="Editor de Terrenos"
         className="icon"
+        data-landscape="hide"
       >
         ⛰️
       </button>
@@ -203,6 +205,7 @@ export default function TopBar() {
         onClick={openAnimStudio}
         title="Estúdio de Animação (keyframes, FBX, controlador)"
         className="icon"
+        data-landscape="hide"
       >
         🏃
       </button>
@@ -210,14 +213,14 @@ export default function TopBar() {
       {/* Seletor de modo: Modelagem vs Cena */}
       <AppModeSwitch />
 
-      <div className="group">
+      <div className="group" data-landscape="hide">
         <button onClick={newProject} title="Novo projeto" className="icon">
           <IconFile width={14} height={14} />
           <span className="hide-mobile">Novo</span>
         </button>
       </div>
 
-      <div className="group">
+      <div className="group" data-landscape="hide">
         <button
           onClick={() => handleImportClick('glb')}
           title="Importar GLB"
@@ -256,7 +259,7 @@ export default function TopBar() {
         </button>
       </div>
 
-      <div className="group">
+      <div className="group" data-landscape="hide">
         <button onClick={handleSave} title="Guardar no navegador" className="icon">
           <IconSave width={14} height={14} />
           <span className="hide-mobile">Guardar</span>
@@ -267,7 +270,7 @@ export default function TopBar() {
         </button>
       </div>
 
-      <div className="group">
+      <div className="group" data-landscape="hide">
         <button onClick={handleSaveFlirEngine} title="Guardar como .flirengine" className="icon">
           💾
           <span className="hide-mobile">.flirengine</span>
