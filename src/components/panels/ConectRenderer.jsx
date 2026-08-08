@@ -183,7 +183,6 @@ function TerrainMesh({ conect, setMeshRef }) {
     // Se há heightmap exportado do TerrainEditor, usá-lo
     if (conect.heightmap && conect.heightmap.length > 0) {
       const hm = conect.heightmap
-      // positions.count = (seg+1) * (seg+1) que deve bater com hm.length
       for (let i = 0; i < positions.count && i < hm.length; i++) {
         positions.setY(i, hm[i] * heightScale)
       }
@@ -200,8 +199,40 @@ function TerrainMesh({ conect, setMeshRef }) {
       }
     }
     g.computeVertexNormals()
+
+    // Vertex colors from splatmap (multi-layer blending) — P7
+    if (conect.splatmap && conect.textureLayers && conect.splatmap.length > 0) {
+      const maxLayers = conect.maxLayers || 4
+      const layers = conect.textureLayers
+      const colors = new Float32Array(positions.count * 3)
+      const sm = conect.splatmap
+      const hexToRgb = (hex) => {
+        const r = parseInt(hex.slice(1, 3), 16) / 255
+        const g = parseInt(hex.slice(3, 5), 16) / 255
+        const b = parseInt(hex.slice(5, 7), 16) / 255
+        return [r, g, b]
+      }
+      const layerRgb = layers.map((l) => hexToRgb(l.color || '#5a7d3a'))
+      for (let i = 0; i < positions.count; i++) {
+        let r = 0, g = 0, b = 0
+        for (let l = 0; l < maxLayers && l < layers.length; l++) {
+          const w = sm[i * maxLayers + l] || 0
+          const c = layerRgb[l] || [0.35, 0.49, 0.23]
+          r += c[0] * w
+          g += c[1] * w
+          b += c[2] * w
+        }
+        colors[i * 3] = r
+        colors[i * 3 + 1] = g
+        colors[i * 3 + 2] = b
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    }
+
     return g
-  }, [conect.width, conect.depth, conect.segments, conect.heightScale, conect.heightmapSeed, conect.heightmap])
+  }, [conect.width, conect.depth, conect.segments, conect.heightScale, conect.heightmapSeed, conect.heightmap, conect.splatmap, conect.textureLayers, conect.maxLayers])
+
+  const hasVertexColors = !!(conect.splatmap && conect.textureLayers && conect.splatmap.length > 0)
 
   return (
     <mesh
@@ -212,7 +243,8 @@ function TerrainMesh({ conect, setMeshRef }) {
       castShadow
     >
       <meshStandardMaterial
-        color={conect.textureColor || '#5a7d3a'}
+        color={hasVertexColors ? '#ffffff' : (conect.textureColor || '#5a7d3a')}
+        vertexColors={hasVertexColors}
         roughness={0.9}
         metalness={0}
       />

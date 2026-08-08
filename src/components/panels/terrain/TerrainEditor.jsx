@@ -1,71 +1,60 @@
 /**
- * TerrainEditor — editor de terrenos profissional (nível Unity/ItsMagic).
+ * TerrainEditor — Editor de Terrenos profissional (Unity-aligned).
  *
- * Funcionalidades:
- *  - Geração por ruído Perlin/Simplex com parâmetros: escala, oitavas, persistência, lacunaridade, seed
- *  - Pincéis: elevar, rebaixar, suavizar, achatar, rampa (entre 2 pontos)
- *  - Tamanho e força (opacidade) do pincel ajustáveis
- *  - Pintura de textura em camadas: relva, terra, pedra, neve — por altura/inclinação ou manual
- *  - Dispersão de objetos (foliage/scatter): espalhar VisualObject com densidade e regras
- *  - Resolução ajustável com aviso de impacto no desempenho
+ * **Reescrito em P7** para alinhar com o padrão Unity Terrain:
  *
- * Exporta para a cena como TerrainObject com heightmap + splatmap + scatter data.
+ *  Tabs separadas (estilo Unity Inspector):
+ *   1. Sculpt — pincéis de escultura (Elevar, Rebaixar, Suavizar, Achatar,
+ *               Definir Altura, Ruído, Rampa) + falloff types (Smooth/Linear/
+ *               Constant/Sharp) + spacing para drag contínuo
+ *   2. Paint Texture — 4 camadas com blending suave (Float32Array splatmap),
+ *               pintura manual + auto-splat por altura/inclinação, camadas
+ *               customizáveis (cor + nome)
+ *   3. Details — dispersão de objetos (foliage) com regras de altura/inclinação
+ *   4. Settings — dimensões, resolução, escala, import/export PNG heightmap,
+ *               seed, Perlin params, exportar para a cena
+ *
+ *  Pré-visualização 2D com brush cursor + drag painting contínuo.
+ *  Exporta para a cena como TerrainObject com heightmap + splatmap + layers.
  */
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useStore } from '../../../store/useStore'
 import { IconClose } from '../../ui/Icons'
+import HeightmapPreview from './HeightmapPreview'
+import {
+  SCULPT_BRUSHES,
+  DEFAULT_TEXTURE_LAYERS,
+  DEFAULT_TERRAIN_CONFIG,
+  DEFAULT_BRUSH,
+  DEFAULT_SCATTER,
+  MAX_LAYERS,
+} from '../../../utils/terrain/terrainPresets'
+import {
+  generateHeightmap,
+  applyBrush as applyBrushOp,
+  applyRamp,
+  falloff as falloffFn,
+  createSplatmap,
+  paintSplat,
+  autoSplatByHeight,
+  heightmapStats,
+  heightmapToPNG,
+  pngToHeightmap,
+  hexToRgb,
+} from '../../../utils/terrain/terrainMath'
 
-// Implementação simples de ruído Perlin (sem dependências externas)
-function perlinNoise2D(x, y, seed) {
-  // Hash function baseada em seed
-  const hash = (i) => {
-    let h = i * 374761393 + seed * 668265263
-    h = (h ^ (h >> 13)) * 1274126177
-    return ((h ^ (h >> 16)) & 0x7fffffff) / 0x7fffffff
-  }
-  const xi = Math.floor(x) & 255
-  const yi = Math.floor(y) & 255
-  const xf = x - Math.floor(x)
-  const yf = y - Math.floor(y)
-  const u = xf * xf * (3 - 2 * xf)
-  const v = yf * yf * (3 - 2 * yf)
-  const aa = hash(xi + yi * 57)
-  const ab = hash(xi + (yi + 1) * 57)
-  const ba = hash((xi + 1) + yi * 57)
-  const bb = hash((xi + 1) + (yi + 1) * 57)
-  const x1 = aa + u * (ba - aa)
-  const x2 = ab + u * (bb - ab)
-  return (x1 + v * (x2 - x1)) * 2 - 1
-}
-
-// Fractal Brownian Motion (fBm) com oitavas
-function fbm(x, y, seed, octaves, persistence, lacunarity, scale) {
-  let total = 0
-  let frequency = 1 / scale
-  let amplitude = 1
-  let maxValue = 0
-  for (let i = 0; i < octaves; i++) {
-    total += perlinNoise2D(x * frequency, y * frequency, seed + i * 1000) * amplitude
-    maxValue += amplitude
-    amplitude *= persistence
-    frequency *= lacunarity
-  }
-  return total / maxValue
-}
-
-const BRUSH_MODES = [
-  { id: 'raise', label: 'Elevar ⬆️', icon: '⬆️' },
-  { id: 'lower', label: 'Rebaixar ⬇️', icon: '⬇️' },
-  { id: 'smooth', label: 'Suavizar 🌊', icon: '🌊' },
-  { id: 'flatten', label: 'Achatar ➖', icon: '➖' },
-  { id: 'ramp', label: 'Rampa 📐', icon: '📐' },
+const FALLOFFS = [
+  { id: 'smooth',   label: 'Smooth'   },
+  { id: 'linear',   label: 'Linear'   },
+  { id: 'constant', label: 'Constant' },
+  { id: 'sharp',    label: 'Sharp'    },
 ]
 
-const TEXTURE_LAYERS = [
-  { id: 'grass', label: 'Relva', color: '#5a7d3a', heightRange: [0, 0.4] },
-  { id: 'dirt', label: 'Terra', color: '#8b5a2b', heightRange: [0.3, 0.6] },
-  { id: 'rock', label: 'Pedra', color: '#6e7681', heightRange: [0.5, 0.8] },
-  { id: 'snow', label: 'Neve', color: '#f0f0f0', heightRange: [0.7, 1.0] },
+const TABS = [
+  { id: 'sculpt',   label: 'Escultura',   icon: '⛏️' },
+  { id: 'paint',    label: 'Textura',     icon: '🎨' },
+  { id: 'details',  label: 'Detalhes',    icon: '🌳' },
+  { id: 'settings', label: 'Definições',  icon: '⚙️' },
 ]
 
 export default function TerrainEditor({ onClose }) {
@@ -75,226 +64,179 @@ export default function TerrainEditor({ onClose }) {
   const objects = useStore((s) => s.objects)
   const toast = useStore((s) => s.toast)
 
-  const [config, setConfig] = useState({
-    width: 50,
-    depth: 50,
-    segments: 64,
-    heightScale: 5,
-    seed: 12345,
-    noiseScale: 20,
-    octaves: 4,
-    persistence: 0.5,
-    lacunarity: 2,
-  })
-
-  const [brush, setBrush] = useState({
-    mode: 'raise',
-    size: 8,
-    strength: 0.5,
-    flattenHeight: 0,
-  })
-
-  const [rampPoints, setRampPoints] = useState([]) // 2 pontos para pincel rampa
+  const [activeTab, setActiveTab] = useState('sculpt')
+  const [config, setConfig] = useState(DEFAULT_TERRAIN_CONFIG)
+  const [brush, setBrush] = useState(DEFAULT_BRUSH)
+  const [rampPoints, setRampPoints] = useState([])
   const [heightmap, setHeightmap] = useState(null)
-  const [splatmap, setSplatmap] = useState(null) // textura em camadas
-  const [activeTextureLayer, setActiveTextureLayer] = useState('grass')
-  const [scatterConfig, setScatterConfig] = useState({
-    objectName: '',
-    density: 10,
-    minHeight: 0,
-    maxHeight: 0.6,
-    maxSlope: 0.3,
-  })
+  const [splatmap, setSplatmap] = useState(null)
+  const [textureLayers, setTextureLayers] = useState(DEFAULT_TEXTURE_LAYERS)
+  const [activeLayerIdx, setActiveLayerIdx] = useState(0)
+  const [scatter, setScatter] = useState(DEFAULT_SCATTER)
+  const [scatteredPoints, setScatteredPoints] = useState([])
 
-  // Gerar heightmap com Perlin/fBm
-  const generateHeightmap = () => {
-    const seg = config.segments
-    const hm = new Float32Array((seg + 1) * (seg + 1))
-    for (let z = 0; z <= seg; z++) {
-      for (let x = 0; x <= seg; x++) {
-        const nx = x / seg
-        const nz = z / seg
-        const h = fbm(nx, nz, config.seed, config.octaves, config.persistence, config.lacunarity, config.noiseScale)
-        hm[z * (seg + 1) + x] = h
-      }
+  // Gerar heightmap + splatmap iniciais
+  useEffect(() => {
+    if (!heightmap) {
+      const hm = generateHeightmap(config.segments, config)
+      setHeightmap(hm)
+      const sm = autoSplatByHeight(hm, config.segments, textureLayers, MAX_LAYERS)
+      setSplatmap(sm)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ===== Operações =====
+
+  const regenerate = useCallback(() => {
+    const hm = generateHeightmap(config.segments, config)
     setHeightmap(hm)
-    // Gerar splatmap automático baseado em altura
-    generateSplatmap(hm)
-    toast('Heightmap gerado com Perlin/fBm', 'success', 1200)
-  }
-
-  // Gerar splatmap (mapa de camadas de textura) baseado em altura
-  const generateSplatmap = (hm) => {
-    const seg = config.segments
-    const sm = new Uint8Array((seg + 1) * (seg + 1)) // índice da camada
-    for (let i = 0; i < hm.length; i++) {
-      const h = hm[i]
-      // Encontrar a camada cujo heightRange contém h
-      let layer = 0
-      for (let l = 0; l < TEXTURE_LAYERS.length; l++) {
-        const [min, max] = TEXTURE_LAYERS[l].heightRange
-        if (h >= min && h <= max) layer = l
-      }
-      sm[i] = layer
-    }
+    const sm = autoSplatByHeight(hm, config.segments, textureLayers, MAX_LAYERS)
     setSplatmap(sm)
-  }
+    toast('Heightmap gerado', 'success', 1200)
+  }, [config, textureLayers, toast])
 
-  // Aplicar pincel
-  const applyBrush = (centerX, centerZ) => {
+  // Aplicar pincel — chamado a cada stamp (do HeightmapPreview drag)
+  const handlePaint = useCallback((x, z, isStart) => {
     if (!heightmap) return
+    const seg = config.segments
+
     if (brush.mode === 'ramp') {
-      // Modo rampa: clicar define 2 pontos, depois aplica rampa entre eles
-      const newPoints = [...rampPoints, [centerX, centerZ]]
+      // Modo rampa: 2 cliques
+      if (!isStart) return
+      const newPoints = [...rampPoints, [x, z]]
       if (newPoints.length === 2) {
-        applyRamp(newPoints[0], newPoints[1])
+        const hm = new Float32Array(heightmap)
+        applyRamp(hm, seg, newPoints[0], newPoints[1], brush)
+        setHeightmap(hm)
+        // Auto-splat update
+        const sm = autoSplatByHeight(hm, seg, textureLayers, MAX_LAYERS)
+        setSplatmap(sm)
         setRampPoints([])
+        toast('Rampa aplicada', 'success', 1000)
       } else {
         setRampPoints(newPoints)
-        toast(`Ponto 1 definido. Clica no ponto 2 para a rampa.`, 'info', 1500)
       }
       return
     }
 
-    const seg = config.segments
-    const radius = brush.size
-    const strength = brush.strength
-    const hm = new Float32Array(heightmap)
-    for (let z = -radius; z <= radius; z++) {
-      for (let x = -radius; x <= radius; x++) {
-        const px = centerX + x
-        const pz = centerZ + z
-        if (px < 0 || px > seg || pz < 0 || pz > seg) continue
-        const dist = Math.sqrt(x * x + z * z)
-        if (dist > radius) continue
-        const falloff = 1 - dist / radius
-        const idx = pz * (seg + 1) + px
-        switch (brush.mode) {
-          case 'raise':
-            hm[idx] += strength * falloff * 0.1
-            break
-          case 'lower':
-            hm[idx] -= strength * falloff * 0.1
-            break
-          case 'smooth': {
-            let sum = 0, count = 0
-            for (let dz = -1; dz <= 1; dz++) {
-              for (let dx = -1; dx <= 1; dx++) {
-                const nx = px + dx, nz = pz + dz
-                if (nx >= 0 && nx <= seg && nz >= 0 && nz <= seg) {
-                  sum += hm[nz * (seg + 1) + nx]
-                  count++
-                }
-              }
-            }
-            hm[idx] += ((sum / count) - hm[idx]) * falloff * strength
-            break
-          }
-          case 'flatten':
-            hm[idx] += (brush.flattenHeight - hm[idx]) * falloff * strength
-            break
-        }
-      }
+    // Sculpt mode (raise/lower/smooth/flatten/setHeight/noise)
+    if (activeTab === 'sculpt') {
+      const hm = new Float32Array(heightmap)
+      applyBrushOp(hm, seg, x, z, { ...brush, deltaTime: isStart ? 1 : 0.4 })
+      setHeightmap(hm)
+      // Atualizar splatmap automaticamente? Em Unity, a pintura de textura
+      // é separada da escultura — NÃO recriar splatmap aqui.
+      // Mas se o utilizador quiser auto-update, pode clicar "Auto-textura".
+    } else if (activeTab === 'paint') {
+      // Paint texture mode
+      if (!splatmap) return
+      const sm = new Float32Array(splatmap)
+      paintSplat(sm, seg, x, z, activeLayerIdx, { ...brush, deltaTime: isStart ? 1 : 0.4, maxLayers: MAX_LAYERS })
+      setSplatmap(sm)
     }
-    setHeightmap(hm)
-    generateSplatmap(hm)
-  }
+  }, [heightmap, splatmap, brush, config.segments, textureLayers, rampPoints, activeTab, activeLayerIdx, toast])
 
-  // Aplicar rampa suave entre 2 pontos
-  const applyRamp = (p1, p2) => {
+  // Auto-splat update
+  const autoTexture = useCallback(() => {
     if (!heightmap) return
-    const seg = config.segments
-    const hm = new Float32Array(heightmap)
-    const dx = p2[0] - p1[0]
-    const dz = p2[1] - p1[1]
-    const dist = Math.sqrt(dx * dx + dz * dz)
-    const steps = Math.ceil(dist)
-    const h1 = hm[p1[1] * (seg + 1) + p1[0]]
-    const h2 = hm[p2[1] * (seg + 1) + p2[0]]
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps
-      const px = Math.round(p1[0] + dx * t)
-      const pz = Math.round(p1[1] + dz * t)
-      const targetH = h1 + (h2 - h1) * t
-      // Suavizar uma área ao redor do ponto
-      const radius = brush.size
-      for (let z = -radius; z <= radius; z++) {
-        for (let x = -radius; x <= radius; x++) {
-          const nx = px + x, nz = pz + z
-          if (nx < 0 || nx > seg || nz < 0 || nz > seg) continue
-          const dd = Math.sqrt(x * x + z * z)
-          if (dd > radius) continue
-          const falloff = 1 - dd / radius
-          const idx = nz * (seg + 1) + nx
-          hm[idx] += (targetH - hm[idx]) * falloff * brush.strength
-        }
-      }
-    }
-    setHeightmap(hm)
-    generateSplatmap(hm)
-    toast('Rampa aplicada', 'success', 1200)
-  }
-
-  // Pintar textura manualmente
-  const paintTexture = (centerX, centerZ) => {
-    if (!splatmap) return
-    const seg = config.segments
-    const radius = brush.size
-    const sm = new Uint8Array(splatmap)
-    const layerIdx = TEXTURE_LAYERS.findIndex((l) => l.id === activeTextureLayer)
-    for (let z = -radius; z <= radius; z++) {
-      for (let x = -radius; x <= radius; x++) {
-        const px = centerX + x
-        const pz = centerZ + z
-        if (px < 0 || px > seg || pz < 0 || pz > seg) continue
-        const dist = Math.sqrt(x * x + z * z)
-        if (dist > radius) continue
-        const falloff = 1 - dist / radius
-        if (falloff * brush.strength > Math.random()) {
-          sm[pz * (seg + 1) + px] = layerIdx
-        }
-      }
-    }
+    const sm = autoSplatByHeight(heightmap, config.segments, textureLayers, MAX_LAYERS)
     setSplatmap(sm)
+    toast('Texturas aplicadas por altura/inclinação', 'success', 1200)
+  }, [heightmap, config.segments, textureLayers, toast])
+
+  // Limpar textura (só camada 0)
+  const clearTexture = useCallback(() => {
+    if (!heightmap) return
+    const cellCount = (config.segments + 1) * (config.segments + 1)
+    setSplatmap(createSplatmap(cellCount, MAX_LAYERS))
+    toast('Textura limpa (camada 0 dominante)', 'info', 1000)
+  }, [heightmap, config.segments, toast])
+
+  // Adicionar camada
+  const addLayer = () => {
+    if (textureLayers.length >= MAX_LAYERS) {
+      toast(`Máximo de ${MAX_LAYERS} camadas`, 'error')
+      return
+    }
+    const colors = ['#a0522d', '#cd853f', '#778899', '#bdb76b', '#8fbc8f']
+    const newLayer = {
+      id: `layer${Date.now()}`,
+      label: `Camada ${textureLayers.length + 1}`,
+      color: colors[textureLayers.length % colors.length],
+      textureURL: null,
+    }
+    setTextureLayers([...textureLayers, newLayer])
   }
 
-  // Dispersar objetos (foliage)
+  // Remover camada
+  const removeLayer = (idx) => {
+    if (textureLayers.length <= 1) {
+      toast('Precisas de pelo menos 1 camada', 'error')
+      return
+    }
+    const next = textureLayers.filter((_, i) => i !== idx)
+    setTextureLayers(next)
+    if (activeLayerIdx >= next.length) setActiveLayerIdx(0)
+    // Recriar splatmap com novo nº de camadas — redistribuir pesos
+    if (heightmap && splatmap) {
+      const sm = autoSplatByHeight(heightmap, config.segments, next, MAX_LAYERS)
+      setSplatmap(sm)
+    }
+  }
+
+  // Editar camada
+  const updateLayer = (idx, patch) => {
+    setTextureLayers(textureLayers.map((l, i) => (i === idx ? { ...l, ...patch } : l)))
+  }
+
+  // Dispersar objetos
   const scatterObjects = () => {
     if (!heightmap || !activeSceneId) {
       toast('Gera um heightmap primeiro', 'error')
       return
     }
-    if (!scatterConfig.objectName) {
+    if (!scatter.objectName) {
       toast('Seleciona um objeto para dispersar', 'error')
       return
     }
-    const obj = objects.find((o) => o.name === scatterConfig.objectName)
+    const obj = objects.find((o) => o.name === scatter.objectName)
     if (!obj) {
       toast('Objeto não encontrado', 'error')
       return
     }
     const seg = config.segments
-    const count = scatterConfig.density
+    const count = scatter.density
     let placed = 0
-    for (let i = 0; i < count * 3 && placed < count; i++) {
-      const x = Math.floor(Math.random() * seg)
-      const z = Math.floor(Math.random() * seg)
+    const points = []
+    const rng = mulberry32(Date.now() & 0x7fffffff)
+    let min = Infinity, max = -Infinity
+    for (let i = 0; i < heightmap.length; i++) {
+      if (heightmap[i] < min) min = heightmap[i]
+      if (heightmap[i] > max) max = heightmap[i]
+    }
+    const range = max - min || 1
+    for (let i = 0; i < count * 5 && placed < count; i++) {
+      const x = Math.floor(rng() * seg)
+      const z = Math.floor(rng() * seg)
       const h = heightmap[z * (seg + 1) + x]
-      if (h < scatterConfig.minHeight || h > scatterConfig.maxHeight) continue
-      // Verificar inclinação (diferença de altura com vizinhos)
+      const normalized = (h - min) / range
+      if (normalized < scatter.minHeight || normalized > scatter.maxHeight) continue
       const hRight = heightmap[z * (seg + 1) + Math.min(seg, x + 1)]
       const hDown = heightmap[Math.min(seg, z + 1) * (seg + 1) + x]
-      const slope = Math.abs(hRight - h) + Math.abs(hDown - h)
-      if (slope > scatterConfig.maxSlope) continue
-      // Adicionar à cena
+      const slope = (Math.abs(hRight - h) + Math.abs(hDown - h)) / range
+      if (slope > scatter.maxSlope) continue
       const worldX = (x / seg - 0.5) * config.width
       const worldZ = (z / seg - 0.5) * config.depth
       const worldY = h * config.heightScale
-      useStore.getState().addObjectToScene(obj.id, [worldX, worldY, worldZ])
+      const rotY = scatter.randomRotation ? rng() * Math.PI * 2 : 0
+      const scale = 1 + (rng() - 0.5) * 2 * scatter.randomScale
+      useStore.getState().addObjectToScene(obj.id, [worldX, worldY, worldZ], [0, rotY, 0], [scale, scale, scale])
+      points.push([x, z])
       placed++
     }
-    toast(`${placed} objetos dispersos no terreno`, 'success')
+    setScatteredPoints(points)
+    toast(`${placed} objetos dispersos`, 'success')
   }
 
   // Exportar para a cena
@@ -313,17 +255,47 @@ export default function TerrainEditor({ onClose }) {
         heightmapSeed: config.seed,
         heightmap: heightmap ? Array.from(heightmap) : null,
         splatmap: splatmap ? Array.from(splatmap) : null,
-        textureLayers: TEXTURE_LAYERS,
+        textureLayers,
+        maxLayers: MAX_LAYERS,
       })
       toast('Terreno exportado para a cena!', 'success')
       if (onClose) onClose()
     }
   }
 
-  // Gerar heightmap inicial
-  useEffect(() => {
-    if (!heightmap) generateHeightmap()
-  }, [])
+  // Import heightmap PNG
+  const importInputRef = useRef(null)
+  const handleImportPNG = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const hm = await pngToHeightmap(file, config.segments)
+      setHeightmap(hm)
+      const sm = autoSplatByHeight(hm, config.segments, textureLayers, MAX_LAYERS)
+      setSplatmap(sm)
+      toast('Heightmap importado de PNG', 'success')
+    } catch (err) {
+      toast('Erro ao importar PNG: ' + err.message, 'error')
+    }
+    e.target.value = ''
+  }
+
+  // Export heightmap PNG
+  const handleExportPNG = () => {
+    if (!heightmap) {
+      toast('Sem heightmap para exportar', 'error')
+      return
+    }
+    const dataURL = heightmapToPNG(heightmap, config.segments)
+    const a = document.createElement('a')
+    a.href = dataURL
+    a.download = `heightmap-${config.segments}x${config.segments}.png`
+    a.click()
+    toast('Heightmap exportado como PNG', 'success')
+  }
+
+  // Stats do heightmap atual
+  const stats = heightmap ? heightmapStats(heightmap) : null
 
   return (
     <>
@@ -338,204 +310,308 @@ export default function TerrainEditor({ onClose }) {
           )}
         </div>
 
+        {/* Tabs principais — estilo Unity Inspector */}
+        <div className="terrain-tabs">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              className={`terrain-tab ${activeTab === t.id ? 'active' : ''}`}
+              onClick={() => setActiveTab(t.id)}
+              title={t.label}
+            >
+              <span style={{ fontSize: 14 }}>{t.icon}</span>
+              <span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+
         <div className="terrain-editor-body">
-          {/* Configuração do terreno */}
-          <div className="panel-section">
-            <h4>📏 Configuração</h4>
-            <div className="prop-row">
-              <label>Largura: {config.width}m</label>
-              <input type="range" min="10" max="200" step="5" value={config.width}
-                onChange={(e) => setConfig({ ...config, width: Number(e.target.value) })} />
-            </div>
-            <div className="prop-row">
-              <label>Profundidade: {config.depth}m</label>
-              <input type="range" min="10" max="200" step="5" value={config.depth}
-                onChange={(e) => setConfig({ ...config, depth: Number(e.target.value) })} />
-            </div>
-            <div className="prop-row">
-              <label>Resolução: {config.segments} {config.segments > 100 && <span style={{color: 'var(--warning)'}}>(⚠️ pesado)</span>}</label>
-              <input type="range" min="16" max="128" step="8" value={config.segments}
-                onChange={(e) => setConfig({ ...config, segments: Number(e.target.value) })} />
-            </div>
-            <div className="prop-row">
-              <label>Escala de altura: {config.heightScale}</label>
-              <input type="range" min="0" max="20" step="0.5" value={config.heightScale}
-                onChange={(e) => setConfig({ ...config, heightScale: Number(e.target.value) })} />
-            </div>
-            {config.segments > 100 && (
-              <div className="small" style={{ color: 'var(--warning)', marginBottom: 8 }}>
-                ⚠️ Resolução alta pode ser lenta em telemóveis.
+          {/* ============ TAB: SCULPT ============ */}
+          {activeTab === 'sculpt' && (
+            <>
+              <div className="panel-section">
+                <h4>⛏️ Pincel de Escultura</h4>
+                <div className="terrain-brush-grid">
+                  {SCULPT_BRUSHES.map((b) => (
+                    <button
+                      key={b.id}
+                      className={`terrain-brush-btn ${brush.mode === b.id ? 'active' : ''}`}
+                      onClick={() => {
+                        setBrush({ ...brush, mode: b.id })
+                        if (b.id === 'ramp') setRampPoints([])
+                      }}
+                      title={`${b.label}: ${b.desc}`}
+                    >
+                      <span style={{ fontSize: 16 }}>{b.icon}</span>
+                      <span>{b.label}</span>
+                    </button>
+                  ))}
+                </div>
+                {brush.mode === 'ramp' && (
+                  <div className="small" style={{ color: 'var(--accent)', marginBottom: 8, marginTop: 4 }}>
+                    {rampPoints.length === 0 ? '👆 Clica no ponto 1 no preview' : '👆 Clica no ponto 2 no preview'}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          {/* Geração Perlin */}
-          <div className="panel-section">
-            <h4>🎲 Geração Procedural (Perlin)</h4>
-            <div className="prop-row">
-              <label>Seed: {config.seed}</label>
-              <input type="number" value={config.seed}
-                onChange={(e) => setConfig({ ...config, seed: Number(e.target.value) })} />
-            </div>
-            <div className="prop-row">
-              <label>Escala do ruído: {config.noiseScale}</label>
-              <input type="range" min="5" max="50" step="1" value={config.noiseScale}
-                onChange={(e) => setConfig({ ...config, noiseScale: Number(e.target.value) })} />
-            </div>
-            <div className="prop-row">
-              <label>Oitavas: {config.octaves}</label>
-              <input type="range" min="1" max="8" step="1" value={config.octaves}
-                onChange={(e) => setConfig({ ...config, octaves: Number(e.target.value) })} />
-            </div>
-            <div className="prop-row">
-              <label>Persistência: {config.persistence.toFixed(2)}</label>
-              <input type="range" min="0.1" max="1" step="0.05" value={config.persistence}
-                onChange={(e) => setConfig({ ...config, persistence: Number(e.target.value) })} />
-            </div>
-            <div className="prop-row">
-              <label>Lacunaridade: {config.lacunarity.toFixed(2)}</label>
-              <input type="range" min="1.5" max="3" step="0.1" value={config.lacunarity}
-                onChange={(e) => setConfig({ ...config, lacunarity: Number(e.target.value) })} />
-            </div>
-            <button onClick={generateHeightmap} style={{ width: '100%', marginTop: 8 }}>
-              🎲 Gerar Heightmap
-            </button>
-          </div>
+              <BrushControls brush={brush} setBrush={setBrush} />
+            </>
+          )}
 
-          {/* Pincel */}
-          <div className="panel-section">
-            <h4>🖌️ Pincel de Escultura</h4>
-            <div className="prop-row">
-              <label>Modo</label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4 }}>
-                {BRUSH_MODES.map((b) => (
-                  <button
-                    key={b.id}
-                    className={brush.mode === b.id ? 'active' : ''}
-                    onClick={() => {
-                      setBrush({ ...brush, mode: b.id })
-                      if (b.id === 'ramp') setRampPoints([])
-                    }}
-                    style={{ fontSize: 10, padding: '6px 2px', flexDirection: 'column', gap: 2 }}
-                    title={b.label}
+          {/* ============ TAB: PAINT TEXTURE ============ */}
+          {activeTab === 'paint' && (
+            <>
+              <div className="panel-section">
+                <h4>🎨 Camadas de Textura</h4>
+                <div className="terrain-layers-list">
+                  {textureLayers.map((layer, idx) => (
+                    <div
+                      key={layer.id}
+                      className={`terrain-layer-row ${activeLayerIdx === idx ? 'active' : ''}`}
+                      onClick={() => setActiveLayerIdx(idx)}
+                    >
+                      <input
+                        type="color"
+                        value={layer.color}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => updateLayer(idx, { color: e.target.value })}
+                        style={{ width: 28, height: 28, padding: 0, cursor: 'pointer', flexShrink: 0 }}
+                      />
+                      <input
+                        type="text"
+                        value={layer.label}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => updateLayer(idx, { label: e.target.value })}
+                        style={{ flex: 1, minWidth: 0 }}
+                      />
+                      <button
+                        className="icon danger"
+                        onClick={(e) => { e.stopPropagation(); removeLayer(idx) }}
+                        title="Remover camada"
+                        style={{ padding: '4px 6px', minWidth: 'auto' }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={addLayer} style={{ width: '100%', marginTop: 6 }} disabled={textureLayers.length >= MAX_LAYERS}>
+                  + Adicionar Camada
+                </button>
+                <div className="small muted mt-2">
+                  Camada ativa: <strong style={{ color: textureLayers[activeLayerIdx]?.color }}>
+                    {textureLayers[activeLayerIdx]?.label}
+                  </strong>
+                </div>
+              </div>
+
+              <BrushControls brush={brush} setBrush={setBrush} hideMode />
+
+              <div className="panel-section">
+                <h4>🤖 Auto-Textura</h4>
+                <div className="small muted mb-2">
+                  Distribui automaticamente as camadas por altura e inclinação:
+                  baixa altitude → relva, alta inclinação → pedra, topo → neve.
+                </div>
+                <button onClick={autoTexture} style={{ width: '100%', marginBottom: 4 }}>
+                  🎨 Aplicar Auto-Textura
+                </button>
+                <button onClick={clearTexture} style={{ width: '100%' }}>
+                  🧹 Limpar Textura
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ============ TAB: DETAILS (foliage) ============ */}
+          {activeTab === 'details' && (
+            <>
+              <div className="panel-section">
+                <h4>🌳 Dispersão de Objetos</h4>
+                <div className="prop-row">
+                  <label>Objeto a dispersar</label>
+                  <select
+                    value={scatter.objectName}
+                    onChange={(e) => setScatter({ ...scatter, objectName: e.target.value })}
                   >
-                    <span style={{ fontSize: 14 }}>{b.icon}</span>
-                    <span>{b.label.split(' ')[0]}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            {brush.mode === 'ramp' && (
-              <div className="small" style={{ color: 'var(--accent)', marginBottom: 8 }}>
-                {rampPoints.length === 0 ? 'Clica no ponto 1 no preview' : 'Clica no ponto 2 no preview'}
-              </div>
-            )}
-            <div className="prop-row">
-              <label>Tamanho: {brush.size}</label>
-              <input type="range" min="1" max="20" step="1" value={brush.size}
-                onChange={(e) => setBrush({ ...brush, size: Number(e.target.value) })} />
-            </div>
-            <div className="prop-row">
-              <label>Força: {brush.strength.toFixed(2)}</label>
-              <input type="range" min="0.05" max="1" step="0.05" value={brush.strength}
-                onChange={(e) => setBrush({ ...brush, strength: Number(e.target.value) })} />
-            </div>
-            {brush.mode === 'flatten' && (
-              <div className="prop-row">
-                <label>Altura alvo: {brush.flattenHeight.toFixed(2)}</label>
-                <input type="range" min="-1" max="1" step="0.05" value={brush.flattenHeight}
-                  onChange={(e) => setBrush({ ...brush, flattenHeight: Number(e.target.value) })} />
-              </div>
-            )}
-          </div>
-
-          {/* Pintura de textura */}
-          <div className="panel-section">
-            <h4>🎨 Pintura de Textura</h4>
-            <div className="prop-row">
-              <label>Camada ativa</label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 4 }}>
-                {TEXTURE_LAYERS.map((l) => (
+                    <option value="">— Selecionar —</option>
+                    {objects.map((o) => (
+                      <option key={o.id} value={o.name}>{o.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="prop-row">
+                  <label>Densidade: {scatter.density}</label>
+                  <input type="range" min="1" max="200" step="1" value={scatter.density}
+                    onChange={(e) => setScatter({ ...scatter, density: Number(e.target.value) })} />
+                </div>
+                <div className="prop-row">
+                  <label>Altura mín: {scatter.minHeight.toFixed(2)}</label>
+                  <input type="range" min="0" max="1" step="0.05" value={scatter.minHeight}
+                    onChange={(e) => setScatter({ ...scatter, minHeight: Number(e.target.value) })} />
+                </div>
+                <div className="prop-row">
+                  <label>Altura máx: {scatter.maxHeight.toFixed(2)}</label>
+                  <input type="range" min="0" max="1" step="0.05" value={scatter.maxHeight}
+                    onChange={(e) => setScatter({ ...scatter, maxHeight: Number(e.target.value) })} />
+                </div>
+                <div className="prop-row">
+                  <label>Inclinação máx: {scatter.maxSlope.toFixed(2)}</label>
+                  <input type="range" min="0.05" max="1" step="0.05" value={scatter.maxSlope}
+                    onChange={(e) => setScatter({ ...scatter, maxSlope: Number(e.target.value) })} />
+                </div>
+                <div className="prop-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={scatter.randomRotation}
+                      onChange={(e) => setScatter({ ...scatter, randomRotation: e.target.checked })}
+                      style={{ width: 'auto', display: 'inline-block', marginRight: 6 }}
+                    />
+                    Rotação aleatória
+                  </label>
+                </div>
+                <div className="prop-row">
+                  <label>Variação de escala: ±{Math.round(scatter.randomScale * 100)}%</label>
+                  <input type="range" min="0" max="0.5" step="0.05" value={scatter.randomScale}
+                    onChange={(e) => setScatter({ ...scatter, randomScale: Number(e.target.value) })} />
+                </div>
+                <button onClick={scatterObjects} className="primary" style={{ width: '100%', marginTop: 8 }}>
+                  🌳 Dispersar no Terreno
+                </button>
+                {scatteredPoints.length > 0 && (
                   <button
-                    key={l.id}
-                    className={activeTextureLayer === l.id ? 'active' : ''}
-                    onClick={() => setActiveTextureLayer(l.id)}
-                    style={{ fontSize: 10, padding: '6px 4px', textAlign: 'left' }}
+                    onClick={() => setScatteredPoints([])}
+                    style={{ width: '100%', marginTop: 4 }}
                   >
-                    <span style={{ display: 'inline-block', width: 12, height: 12, background: l.color, borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }}></span>
-                    {l.label}
+                    🧹 Limpar markers (não remove objetos)
                   </button>
-                ))}
+                )}
               </div>
-            </div>
-            <div className="small muted mt-2">
-              Seleciona o modo "Achatar" no pincel e clica no preview para pintar a textura ativa.
-              Ou usa "Gerar Heightmap" para distribuição automática por altura.
-            </div>
-          </div>
+            </>
+          )}
 
-          {/* Dispersão de objetos */}
-          <div className="panel-section">
-            <h4>🌳 Dispersão de Objetos (Foliage)</h4>
-            <div className="prop-row">
-              <label>Objeto a dispersar</label>
-              <select
-                value={scatterConfig.objectName}
-                onChange={(e) => setScatterConfig({ ...scatterConfig, objectName: e.target.value })}
-              >
-                <option value="">— Selecionar —</option>
-                {objects.map((o) => (
-                  <option key={o.id} value={o.name}>{o.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="prop-row">
-              <label>Densidade: {scatterConfig.density} objetos</label>
-              <input type="range" min="1" max="100" step="1" value={scatterConfig.density}
-                onChange={(e) => setScatterConfig({ ...scatterConfig, density: Number(e.target.value) })} />
-            </div>
-            <div className="prop-row">
-              <label>Altura mínima: {scatterConfig.minHeight.toFixed(2)}</label>
-              <input type="range" min="0" max="1" step="0.05" value={scatterConfig.minHeight}
-                onChange={(e) => setScatterConfig({ ...scatterConfig, minHeight: Number(e.target.value) })} />
-            </div>
-            <div className="prop-row">
-              <label>Altura máxima: {scatterConfig.maxHeight.toFixed(2)}</label>
-              <input type="range" min="0" max="1" step="0.05" value={scatterConfig.maxHeight}
-                onChange={(e) => setScatterConfig({ ...scatterConfig, maxHeight: Number(e.target.value) })} />
-            </div>
-            <div className="prop-row">
-              <label>Inclinação máxima: {scatterConfig.maxSlope.toFixed(2)}</label>
-              <input type="range" min="0.05" max="1" step="0.05" value={scatterConfig.maxSlope}
-                onChange={(e) => setScatterConfig({ ...scatterConfig, maxSlope: Number(e.target.value) })} />
-            </div>
-            <button onClick={scatterObjects} style={{ width: '100%', marginTop: 8 }}>
-              🌳 Dispersar no Terreno
-            </button>
-          </div>
+          {/* ============ TAB: SETTINGS ============ */}
+          {activeTab === 'settings' && (
+            <>
+              <div className="panel-section">
+                <h4>📏 Dimensões</h4>
+                <div className="prop-row">
+                  <label>Largura: {config.width}m</label>
+                  <input type="range" min="10" max="200" step="5" value={config.width}
+                    onChange={(e) => setConfig({ ...config, width: Number(e.target.value) })} />
+                </div>
+                <div className="prop-row">
+                  <label>Profundidade: {config.depth}m</label>
+                  <input type="range" min="10" max="200" step="5" value={config.depth}
+                    onChange={(e) => setConfig({ ...config, depth: Number(e.target.value) })} />
+                </div>
+                <div className="prop-row">
+                  <label>
+                    Resolução: {config.segments}
+                    {config.segments > 100 && <span style={{ color: 'var(--warning)' }}> (⚠️ pesado)</span>}
+                  </label>
+                  <input type="range" min="16" max="128" step="8" value={config.segments}
+                    onChange={(e) => setConfig({ ...config, segments: Number(e.target.value) })} />
+                </div>
+                <div className="prop-row">
+                  <label>Escala de altura: {config.heightScale}</label>
+                  <input type="range" min="0" max="20" step="0.5" value={config.heightScale}
+                    onChange={(e) => setConfig({ ...config, heightScale: Number(e.target.value) })} />
+                </div>
+                {config.segments > 100 && (
+                  <div className="small" style={{ color: 'var(--warning)', marginBottom: 8 }}>
+                    ⚠️ Resolução alta pode ser lenta em telemóveis.
+                  </div>
+                )}
+              </div>
 
-          {/* Pré-visualização */}
+              <div className="panel-section">
+                <h4>🎲 Geração Procedural (Perlin)</h4>
+                <div className="prop-row">
+                  <label>Seed: {config.seed}</label>
+                  <input type="number" value={config.seed}
+                    onChange={(e) => setConfig({ ...config, seed: Number(e.target.value) })} />
+                </div>
+                <div className="prop-row">
+                  <label>Escala do ruído: {config.noiseScale}</label>
+                  <input type="range" min="5" max="50" step="1" value={config.noiseScale}
+                    onChange={(e) => setConfig({ ...config, noiseScale: Number(e.target.value) })} />
+                </div>
+                <div className="prop-row">
+                  <label>Oitavas: {config.octaves}</label>
+                  <input type="range" min="1" max="8" step="1" value={config.octaves}
+                    onChange={(e) => setConfig({ ...config, octaves: Number(e.target.value) })} />
+                </div>
+                <div className="prop-row">
+                  <label>Persistência: {config.persistence.toFixed(2)}</label>
+                  <input type="range" min="0.1" max="1" step="0.05" value={config.persistence}
+                    onChange={(e) => setConfig({ ...config, persistence: Number(e.target.value) })} />
+                </div>
+                <div className="prop-row">
+                  <label>Lacunaridade: {config.lacunarity.toFixed(2)}</label>
+                  <input type="range" min="1.5" max="3" step="0.1" value={config.lacunarity}
+                    onChange={(e) => setConfig({ ...config, lacunarity: Number(e.target.value) })} />
+                </div>
+                <button onClick={regenerate} style={{ width: '100%', marginTop: 8 }}>
+                  🎲 Regenerar Heightmap
+                </button>
+              </div>
+
+              <div className="panel-section">
+                <h4>💾 Import / Export Heightmap</h4>
+                <button onClick={() => importInputRef.current?.click()} style={{ width: '100%', marginBottom: 4 }}>
+                  📂 Importar PNG
+                </button>
+                <button onClick={handleExportPNG} style={{ width: '100%' }}>
+                  💾 Exportar PNG (8-bit grayscale)
+                </button>
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  style={{ display: 'none' }}
+                  onChange={handleImportPNG}
+                />
+                <div className="small muted mt-2">
+                  Importa/exporta o heightmap como imagem PNG grayscale.
+                  Útil para editar noutra ferramenta ou reutilizar noutros projetos.
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ===== Preview + Stats (sempre visível no fim) ===== */}
           {heightmap && (
             <div className="panel-section">
-              <h4>👁️ Pré-visualização (topo)</h4>
+              <h4>👁️ Pré-visualização</h4>
               <HeightmapPreview
                 heightmap={heightmap}
                 splatmap={splatmap}
                 segments={config.segments}
-                textureLayers={TEXTURE_LAYERS}
+                textureLayers={textureLayers}
                 rampPoints={rampPoints}
-                onPaint={(x, z) => {
-                  if (brush.mode === 'ramp') {
-                    applyBrush(x, z)
-                  } else {
-                    applyBrush(x, z)
-                  }
-                }}
+                scatteredPoints={scatteredPoints}
+                brush={brush}
+                onPaint={handlePaint}
+                size={240}
               />
+              {stats && (
+                <div className="small muted mt-2" style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span>Min: {stats.min.toFixed(2)}</span>
+                  <span>Max: {stats.max.toFixed(2)}</span>
+                  <span>Δ: {stats.range.toFixed(2)}</span>
+                </div>
+              )}
+              <div className="small muted mt-1">
+                {activeTab === 'sculpt' && brush.mode !== 'ramp' && '👆 Arrasta no preview para pintar continuamente'}
+                {brush.mode === 'ramp' && '👆 Clica 2 pontos para definir a rampa'}
+                {activeTab === 'paint' && '👆 Arrasta para pintar a textura ativa'}
+              </div>
             </div>
           )}
 
-          {/* Exportar */}
+          {/* ===== Exportar para a cena ===== */}
           <div className="panel-section">
             <button onClick={exportToScene} className="primary" style={{ width: '100%' }}>
               ⛰️ Exportar para a Cena
@@ -547,91 +623,106 @@ export default function TerrainEditor({ onClose }) {
   )
 }
 
-// Componente de pré-visualização 2D com texturas em camadas
-function HeightmapPreview({ heightmap, splatmap, segments, textureLayers, rampPoints, onPaint }) {
-  const canvasRef = useRef(null)
+// ============================================================
+//  Sub-componente: BrushControls (reutilizado entre tabs)
+// ============================================================
+function BrushControls({ brush, setBrush, hideMode = false }) {
+  return (
+    <div className="panel-section">
+      {!hideMode && <h4>⚙️ Parâmetros do Pincel</h4>}
+      <div className="prop-row">
+        <label>Tamanho: {brush.size}</label>
+        <input type="range" min="1" max="30" step="1" value={brush.size}
+          onChange={(e) => setBrush({ ...brush, size: Number(e.target.value) })} />
+      </div>
+      <div className="prop-row">
+        <label>Força: {brush.strength.toFixed(2)}</label>
+        <input type="range" min="0.05" max="1" step="0.05" value={brush.strength}
+          onChange={(e) => setBrush({ ...brush, strength: Number(e.target.value) })} />
+      </div>
+      <div className="prop-row">
+        <label>Falloff</label>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4 }}>
+          {FALLOFFS.map((f) => (
+            <button
+              key={f.id}
+              className={brush.falloff === f.id ? 'active' : ''}
+              onClick={() => setBrush({ ...brush, falloff: f.id })}
+              style={{ fontSize: 10, padding: '6px 2px' }}
+              title={f.label}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {(brush.mode === 'flatten' || brush.mode === 'setHeight') && (
+        <div className="prop-row">
+          <label>Altura alvo: {brush.targetHeight.toFixed(2)}</label>
+          <input type="range" min="-1" max="1" step="0.05" value={brush.targetHeight}
+            onChange={(e) => setBrush({ ...brush, targetHeight: Number(e.target.value) })} />
+        </div>
+      )}
+      <div className="prop-row">
+        <label>Spacing (drag): {brush.spacing.toFixed(2)}× size</label>
+        <input type="range" min="0.1" max="1" step="0.1" value={brush.spacing}
+          onChange={(e) => setBrush({ ...brush, spacing: Number(e.target.value) })} />
+        <div className="small muted">Distância mínima entre stamps ao arrastar</div>
+      </div>
+      {/* Visualização do falloff */}
+      <FalloffPreview brush={brush} />
+    </div>
+  )
+}
 
+// ============================================================
+//  Sub-componente: FalloffPreview (mini-gráfico)
+// ============================================================
+function FalloffPreview({ brush }) {
+  const canvasRef = useRef(null)
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
-    const size = 220
-    canvas.width = size
-    canvas.height = size
-    const cellSize = size / (segments + 1)
-
-    // Encontrar min/max
-    let min = Infinity, max = -Infinity
-    for (let i = 0; i < heightmap.length; i++) {
-      if (heightmap[i] < min) min = heightmap[i]
-      if (heightmap[i] > max) max = heightmap[i]
+    const w = canvas.width = canvas.clientWidth * 2
+    const h = canvas.height = 40 * 2
+    ctx.clearRect(0, 0, w, h)
+    // Desenhar perfil de falloff
+    ctx.strokeStyle = '#2f81f7'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    const radius = brush.size
+    for (let x = 0; x <= w; x++) {
+      const dist = (x / w) * radius * 2 - radius
+      const f = falloffFn(Math.abs(dist), radius, brush.falloff)
+      const y = h - f * h * 0.85 - h * 0.05
+      if (x === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
     }
-    const range = max - min || 1
-
-    for (let z = 0; z <= segments; z++) {
-      for (let x = 0; x <= segments; x++) {
-        const idx = z * (segments + 1) + x
-        const h = heightmap[idx]
-        const normalized = (h - min) / range
-        // Cor base: camada de textura
-        let color = '#5a7d3a'
-        if (splatmap) {
-          const layerIdx = splatmap[idx]
-          color = textureLayers[layerIdx]?.color || '#5a7d3a'
-        } else {
-          // Fallback: grayscale com verde
-          const v = Math.floor(normalized * 255)
-          color = `rgb(${v * 0.3}, ${v}, ${v * 0.3})`
-        }
-        // Aplicar sombra baseada em altura para relevo
-        const shade = 0.5 + normalized * 0.5
-        ctx.fillStyle = applyShade(color, shade)
-        ctx.fillRect(x * cellSize, z * cellSize, cellSize + 1, cellSize + 1)
-      }
-    }
-
-    // Desenhar pontos de rampa
-    if (rampPoints && rampPoints.length > 0) {
-      ctx.fillStyle = '#f4a261'
-      for (const p of rampPoints) {
-        ctx.beginPath()
-        ctx.arc(p[0] * cellSize, p[1] * cellSize, 5, 0, Math.PI * 2)
-        ctx.fill()
-      }
-    }
-  }, [heightmap, splatmap, segments, textureLayers, rampPoints])
-
-  const handleClick = (e) => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const rect = canvas.getBoundingClientRect()
-    const x = ((e.clientX - rect.left) / rect.width) * segments
-    const z = ((e.clientY - rect.top) / rect.height) * segments
-    onPaint(Math.round(x), Math.round(z))
-  }
-
+    ctx.stroke()
+    // Linha central
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)'
+    ctx.beginPath()
+    ctx.moveTo(w / 2, 0)
+    ctx.lineTo(w / 2, h)
+    ctx.stroke()
+  }, [brush.falloff, brush.size])
   return (
-    <canvas
-      ref={canvasRef}
-      onClick={handleClick}
-      style={{
-        width: '100%',
-        maxWidth: 220,
-        aspectRatio: '1',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-sm)',
-        cursor: 'crosshair',
-        display: 'block',
-        margin: '0 auto',
-      }}
-    />
+    <div style={{ marginTop: 8 }}>
+      <div className="small muted mb-1">Perfil do falloff:</div>
+      <canvas ref={canvasRef} style={{ width: '100%', height: 40, background: 'var(--bg-app)', borderRadius: 4, border: '1px solid var(--border-soft)' }} />
+    </div>
   )
 }
 
-// Aplica um fator de sombra a uma cor hex
-function applyShade(hex, factor) {
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  return `rgb(${Math.floor(r * factor)}, ${Math.floor(g * factor)}, ${Math.floor(b * factor)})`
+// PRNG local — não quero importar do terrainMath para evitar bundle duplo
+function mulberry32(seed) {
+  let s = seed >>> 0
+  return function () {
+    s = (s + 0x6D2B79F5) >>> 0
+    let t = s
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
 }
