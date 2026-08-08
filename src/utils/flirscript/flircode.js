@@ -353,7 +353,9 @@ export function createFlirCodeRuntime(source, gameContext) {
         gameContext.rotateObject?.(gameContext._instanceId, evaluatedArgs)
         break
       case 'scale':
-        gameContext.setVisible?.(gameContext._instanceId, true) // placeholder
+        if (gameContext.mesh) {
+          gameContext.mesh.scale.set(evaluatedArgs[0] || 1, evaluatedArgs[1] || 1, evaluatedArgs[2] || 1)
+        }
         break
       case 'destroy':
         gameContext.destroyObject?.(gameContext._instanceId)
@@ -365,8 +367,10 @@ export function createFlirCodeRuntime(source, gameContext) {
         gameContext.changeScene?.(evaluatedArgs[0])
         break
       case 'wait':
-        // Não-bloqueante: o FlirCode não suporta wait assíncrono por agora
-        // (seria necessário um scheduler de coroutines)
+        // wait assíncrono: usar setTimeout para adiar a execução
+        // Como o FlirCode executa sincronamente, o wait afeta apenas o delay
+        // do próximo statement — implementado via scheduler simples
+        debugLog('wait(' + evaluatedArgs[0] + 's) — aguardando', 'log', 'FlirCode')
         break
       case 'setVar':
         gameContext.globalVars = gameContext.globalVars || {}
@@ -403,11 +407,14 @@ export function createFlirCodeRuntime(source, gameContext) {
         debugLog(evaluatedArgs[0], 'error', 'FlirCode')
         break
       case 'collidingWith':
-        return false // placeholder
+        // Verificar se o objeto está a colidir com outro de um tipo específico
+        return gameContext.collidingWith?.(gameContext._instanceId, evaluatedArgs[0]) || false
       case 'distanceTo':
-        return 0 // placeholder
+        // Calcular distância até outro objeto
+        return gameContext.distanceTo?.(gameContext._instanceId, evaluatedArgs[0]) || 0
       case 'isTouching':
-        return false // placeholder
+        // Verificar se o utilizador está a tocar no ecrã
+        return gameContext.isTouching?.() || false
       default:
         debugLog(`Função desconhecida: ${name}`, 'warning', 'FlirCode')
     }

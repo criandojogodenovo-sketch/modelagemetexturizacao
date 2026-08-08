@@ -712,6 +712,10 @@ export function conectsByCategory(category) {
 export function createConectInstance(type, position = [0, 0.5, 0]) {
   const def = findConectDefinition(type)
   if (!def) throw new Error(`Conect desconhecido: ${type}`)
+  // ViewObject tem posição default diferente — deve estar afastada para ver a cena
+  if (type === 'ViewObject') {
+    position = [5, 4, 6]
+  }
   const defaults = {}
   for (const propDef of def.properties) {
     defaults[propDef.key] = JSON.parse(JSON.stringify(propDef.default))
@@ -721,7 +725,7 @@ export function createConectInstance(type, position = [0, 0.5, 0]) {
     type,
     name: `${def.label}`,
     position: [...position],
-    rotation: [0, 0, 0],
+    rotation: type === 'ViewObject' ? [-0.5, 0.7, 0] : [0, 0, 0],
     scale: [1, 1, 1],
     visible: def.hasVisual !== false,
     flirScript: null, // grafo FlirScript opcional

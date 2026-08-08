@@ -21,6 +21,7 @@ import GameUIOverlay from './GameUIOverlay'
 import { useStore } from '../../store/useStore'
 import { IconClose, IconPlay } from '../ui/Icons'
 import GameSplash from '../ui/GameSplash'
+import DebugConsole from './debug/DebugConsole'
 import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
 import { createFlirCodeRuntime } from '../../utils/flirscript/flircode'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
@@ -197,6 +198,49 @@ function GameRunner({ activeScene, meshRefs, conectMeshRefs, objects }) {
         for (const rt of runtimesRef.current.values()) {
           rt.triggerEvent(eventName, payload)
         }
+      },
+      // ===== Funções de query (collidingWith, distanceTo, isTouching) =====
+      collidingWith: (instanceId, type) => {
+        // Verificar contacts do cannon-es
+        if (!physicsRef.current) return false
+        const entry = physicsRef.current.bodies.get(instanceId)
+        if (!entry) return false
+        for (const [otherId, otherEntry] of physicsRef.current.bodies) {
+          if (otherId === instanceId) continue
+          if (otherEntry.conect.type === type || otherEntry.conect.name === type) {
+            // Verificar se há contacto
+            const dist = entry.body.position.distanceTo(otherEntry.body.position)
+            if (dist < 1.5) return true
+          }
+        }
+        return false
+      },
+      distanceTo: (instanceId, targetName) => {
+        const scenes = useStore.getState().scenes
+        const activeScene = scenes.find((s) => s.id === useStore.getState().activeSceneId)
+        // Procurar o objeto alvo pelo nome
+        let targetMesh = null
+        for (const inst of activeScene.objects || []) {
+          const obj = objects.find((o) => o.id === inst.objectId)
+          if (obj && obj.name === targetName) {
+            targetMesh = meshRefs.current.get(inst.instanceId)
+            break
+          }
+        }
+        if (!targetMesh) {
+          for (const conect of activeScene.conects || []) {
+            if (conect.name === targetName) {
+              targetMesh = conectMeshRefs.current.get(conect.instanceId)
+              break
+            }
+          }
+        }
+        const sourceMesh = meshRefs.current.get(instanceId) || conectMeshRefs.current.get(instanceId)
+        if (!sourceMesh || !targetMesh) return 0
+        return sourceMesh.position.distanceTo(targetMesh.position)
+      },
+      isTouching: () => {
+        return joystickRef.current.active || false
       },
     }
     // Expor globalmente para o GameUIOverlay
@@ -585,6 +629,7 @@ export default function ScenePreview() {
   const closeScenePreview = useStore((s) => s.closeScenePreview)
   const [useGameCam, setUseGameCam] = useState(true) // default: usar ViewObject ativa
   const [showSplash, setShowSplash] = useState(true)
+  const [showDebug, setShowDebug] = useState(true) // Consola visível por defeito durante o jogo
   const orbitRef = useRef(null)
   const meshRefs = useRef(new Map())
   const conectMeshRefs = useRef(new Map())
@@ -652,10 +697,16 @@ export default function ScenePreview() {
       </div>
 
       <Canvas
+        key="scene-preview-canvas"
         shadows
         dpr={[1, 2]}
         camera={cameraProps}
-        gl={{ antialias: true, alpha: false }}
+        gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
+        onCreated={({ gl }) => {
+          // Forçar clear depois de criar
+          gl.clearColor(0.05, 0.07, 0.09, 1)
+          gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+        }}
       >
         <Suspense fallback={null}>
           <PreviewBackground background={background} />
@@ -737,11 +788,42 @@ export default function ScenePreview() {
               }}
             />
           )}
+          {/* Aplicar rotação da ViewObject à câmara quando não há follow */}
+          {activeViewConect && useGameCam && !activeViewConect.followTarget && (
+            <ViewCameraRig viewConect={activeViewConect} />
+          )}
         </Suspense>
       </Canvas>
 
       {/* UI Overlay: usa o mesmo UIElementRenderer do editor */}
       <GameUIOverlay />
+
+      {/* Consola de Debug visível durante o jogo */}
+      {showDebug && (
+        <div style={{ position: 'fixed', bottom: 0, right: 0, width: 320, maxHeight: 200, zIndex: 90, opacity: 0.9 }}>
+          <DebugConsole onClose={() => setShowDebug(false)} />
+        </div>
+      )}
     </div>
   )
+}
+
+// Aplica a rotação da ViewObject à câmara do canvas
+function ViewCameraRig({ viewConect }) {
+  const { camera } = useThree()
+  useEffect(() => {
+    if (!viewConect || !camera) return
+    camera.position.set(...(viewConect.position || [5, 4, 6]))
+    if (viewConect.rotation) {
+      camera.rotation.set(...viewConect.rotation)
+    } else {
+      // Sem rotação definida — olhar para a origem
+      camera.lookAt(0, 0, 0)
+    }
+    if (viewConect.fov && camera.fov !== undefined) {
+      camera.fov = viewConect.fov
+      camera.updateProjectionMatrix()
+    }
+  }, [viewConect.position, viewConect.rotation, viewConect.fov, camera])
+  return null
 }

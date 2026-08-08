@@ -60,6 +60,26 @@ export default function TopBar() {
     toast('Projeto guardado no navegador', 'success')
   }
 
+  // Guardar como ficheiro .flirengine
+  const handleSaveFlirEngine = () => {
+    const json = exportProjectJSON()
+    const blob = new Blob([json], { type: 'application/octet-stream' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `projeto-${Date.now()}.flirengine`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast('Projeto guardado como .flirengine', 'success')
+  }
+
+  // Abrir ficheiro .flirengine
+  const handleOpenFlirEngine = () => {
+    fileInputRef.current.setAttribute('accept', '.flirengine,.json')
+    setImportType('flirengine')
+    setTimeout(() => fileInputRef.current?.click(), 0)
+  }
+
   const handleLoadSnapshot = () => {
     const json = localStorage.getItem('me3d.project.snapshot')
     if (!json) {
@@ -125,9 +145,10 @@ export default function TopBar() {
         importedObjects = await importGLTF(file)
       } else if (importType === 'obj') {
         importedObjects = await importOBJ(file)
-      } else if (importType === 'json') {
+      } else if (importType === 'json' || importType === 'flirengine') {
         const text = await file.text()
         loadProjectJSON(text)
+        toast('Projeto .flirengine carregado', 'success')
         setUI({ loading: false })
         e.target.value = ''
         return
@@ -243,6 +264,17 @@ export default function TopBar() {
         <button onClick={handleLoadSnapshot} title="Carregar do navegador" className="icon">
           <IconImport width={14} height={14} />
           <span className="hide-mobile">Carregar</span>
+        </button>
+      </div>
+
+      <div className="group">
+        <button onClick={handleSaveFlirEngine} title="Guardar como .flirengine" className="icon">
+          💾
+          <span className="hide-mobile">.flirengine</span>
+        </button>
+        <button onClick={handleOpenFlirEngine} title="Abrir .flirengine" className="icon">
+          📂
+          <span className="hide-mobile">Abrir</span>
         </button>
       </div>
 

@@ -145,24 +145,20 @@ export default function App() {
       <OfflineIndicator />
 
       {appMode === 'flirscript' ? (
-        // Modo FlirCode: editor de texto ocupa todo o ecrã (abaixo da topbar)
         <FlirCodeEditor />
       ) : appMode === 'ui' ? (
-        // Modo UI: editor de interface ocupa todo o ecrã (abaixo da topbar)
         <UIEditor />
       ) : (
-        <div className="app-body">
+        // app-body: sempre montado, SEMPRE renderiza o viewport
+        // O ScenePreview é um overlay que cobre tudo quando o jogo corre
+        <div className="app-body" style={scenePreviewOpen ? { visibility: 'hidden' } : undefined}>
           {appMode === 'scene' ? (
             <SceneEditorPanel onClose={ui.leftDrawerOpen ? closeDrawers : null} />
           ) : (
             <LeftPanel open={ui.leftDrawerOpen} onClose={closeDrawers} />
           )}
 
-          {appMode === 'scene' ? (
-            <SceneLevel3D />
-          ) : (
-            <Viewport />
-          )}
+          {appMode === 'scene' ? <SceneLevel3D /> : <Viewport />}
 
           <RightPanel open={ui.rightDrawerOpen} onClose={closeDrawers} />
         </div>
