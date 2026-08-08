@@ -698,6 +698,65 @@ export const CONECT_TAXONOMY = [
     ],
   },
 
+  // ============ SISTEMA 2: ARMAS E COMBATE ============
+  {
+    type: 'WeaponObject',
+    label: 'Weapon Object',
+    category: 'gameplay',
+    icon: '🔫',
+    description: 'Arma equipável — dispara raycast ou projétil, com munição e recarga',
+    hasPhysics: false,
+    hasVisual: true,
+    flirScriptable: true,
+    defaults: {
+      damage: 25,
+      fireRate: 0.3,        // segundos entre tiros
+      range: 50,            // alcance do raycast
+      fireType: 'raycast',  // raycast | projectile
+      maxAmmo: 30,
+      reloadTime: 2,        // segundos
+      equipped: false,
+      showCrosshair: true,
+    },
+    properties: [
+      prop('damage', 'Dano', 'number', 25, { min: 1, max: 500, step: 1 }),
+      prop('fireRate', 'Cadência (s)', 'number', 0.3, { min: 0.05, max: 5, step: 0.05 }),
+      prop('range', 'Alcance', 'number', 50, { min: 1, max: 200, step: 1 }),
+      prop('fireType', 'Tipo de disparo', 'select', 'raycast', { options: ['raycast', 'projectile'] }),
+      prop('maxAmmo', 'Munição máxima', 'number', 30, { min: 1, max: 999, step: 1 }),
+      prop('reloadTime', 'Tempo recarga (s)', 'number', 2, { min: 0.5, max: 10, step: 0.5 }),
+      prop('showCrosshair', 'Mira no ecrã', 'boolean', true),
+    ],
+  },
+
+  // ============ SISTEMA 3: INVENTÁRIO ============
+  {
+    type: 'ItemObject',
+    label: 'Item Object',
+    category: 'gameplay',
+    icon: '🎁',
+    description: 'Item apanhável no mundo — adiciona ao inventário ao tocar',
+    hasPhysics: false,
+    hasVisual: true,
+    flirScriptable: true,
+    defaults: {
+      itemName: 'Item',
+      itemType: 'generic',    // generic | weapon | consumable | material
+      quantity: 1,
+      icon: '📦',
+      pickupRadius: 2,
+      autoPickup: true,
+    },
+    properties: [
+      prop('itemName', 'Nome do item', 'text', 'Item'),
+      prop('itemType', 'Tipo', 'select', 'generic', { options: ['generic', 'weapon', 'consumable', 'material'] }),
+      prop('quantity', 'Quantidade', 'number', 1, { min: 1, max: 999, step: 1 }),
+      prop('icon', 'Ícone (emoji)', 'text', '📦'),
+      prop('pickupRadius', 'Raio de apanha', 'number', 2, { min: 0.5, max: 10, step: 0.5 }),
+      prop('autoPickup', 'Apanhar automático', 'boolean', true),
+    ],
+  },
+
   // ============ ORGANIZAÇÃO ============
   {
     type: 'GroupObject',

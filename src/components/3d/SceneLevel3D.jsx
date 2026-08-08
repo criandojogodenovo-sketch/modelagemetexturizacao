@@ -86,6 +86,8 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   const npcAIsRef = useRef(new Map())
   const timerStatesRef = useRef(new Map())
   const joystickRef = useRef({ x: 0, z: 0, active: false })
+  const weaponStateRef = useRef({ equipped: false, ammo: 0, maxAmmo: 0, damage: 0, fireRate: 0.3, range: 50, reloadTime: 2, lastShot: 0 })
+  const inventoryRef = useRef({})
 
   // P2.5 fix: armazenar a cena ativa num ref para que modificações feitas pelo
   // FlirCode (createObject, etc.) NÃO reiniciem o jogo (evita loop infinito).
@@ -98,7 +100,8 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   // Expor joystickRef globalmente para o GameUIOverlay poder atualizá-lo
   useEffect(() => {
     window._flirJoystick = joystickRef.current
-    return () => { window._flirJoystick = null }
+    window._flirInventory = inventoryRef.current
+    return () => { window._flirJoystick = null; window._flirInventory = null }
   }, [])
 
   // Use o ref para o setup
@@ -297,6 +300,130 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         }
         debugLog(`Signal emitido: ${name}`, 'log', 'Signals')
       },
+      // Sistema 2: Armas e combate
+      shoot: () => {
+        const weaponState = weaponStateRef.current
+        if (!weaponState || !weaponState.equipped) {
+          debugLog('shoot() sem arma equipada', 'warning', 'Weapon')
+          return
+        }
+        const now = performance.now() / 1000
+        if (now - weaponState.lastShot < weaponState.fireRate) return
+        if (weaponState.ammo <= 0) {
+          debugLog('Sem munição — pressiona reload()', 'warning', 'Weapon')
+          return
+        }
+        weaponState.lastShot = now
+        weaponState.ammo--
+        debugLog(`Disparo! Munição restante: ${weaponState.ammo}`, 'log', 'Weapon')
+        // Raycast do centro do ecrã (câmara) ou da posição do jogador
+        const player = (setupScene?.conects || []).find((c) => c.type === 'PersonalObject')
+        if (player) {
+          const playerMesh = conectMeshRefs.current.get(player.instanceId)
+          if (playerMesh) {
+            const origin = new THREE.Vector3(playerMesh.position.x, playerMesh.position.y + 1, playerMesh.position.z)
+            const dir = new THREE.Vector3(0, 0, -1)
+            dir.applyQuaternion(playerMesh.quaternion)
+            const ray = new THREE.Raycaster(origin, dir, 0, weaponState.range)
+            // Verificar colisão com outros conects
+            let hit = false
+            for (const [id, entry] of physicsRef.current?.bodies || []) {
+              if (id === player.instanceId) continue
+              const targetMesh = meshRefs.current.get(id) || conectMeshRefs.current.get(id)
+              if (targetMesh) {
+                const intersects = ray.intersectObject(targetMesh, true)
+                if (intersects.length > 0) {
+                  // Aplicar dano
+                  gameContext.takeDamage(id, weaponState.damage)
+                  debugLog(`Alvo atingido: ${entry.conect.name} (-${weaponState.damage} HP)`, 'log', 'Weapon')
+                  hit = true
+                  break
+                }
+              }
+            }
+            if (!hit) debugLog('Disparo falhou (sem alvo)', 'log', 'Weapon')
+          }
+        }
+      },
+      reload: () => {
+        const ws = weaponStateRef.current
+        if (!ws || !ws.equipped) return
+        if (ws.ammo >= ws.maxAmmo) return
+        debugLog(`A recarregar... (${ws.reloadTime}s)`, 'log', 'Weapon')
+        setTimeout(() => {
+          ws.ammo = ws.maxAmmo
+          debugLog(`Recarregado! Munição: ${ws.ammo}`, 'log', 'Weapon')
+        }, ws.reloadTime * 1000)
+      },
+      equipWeapon: (weaponName) => {
+        const weapon = (setupScene?.conects || []).find((c) => c.type === 'WeaponObject' && (c.name === weaponName || c.instanceId === weaponName))
+        if (!weapon) {
+          debugLog(`Arma "${weaponName}" não encontrada`, 'warning', 'Weapon')
+          return
+        }
+        weaponStateRef.current = {
+          equipped: true,
+          damage: weapon.damage || 25,
+          fireRate: weapon.fireRate || 0.3,
+          range: weapon.range || 50,
+          maxAmmo: weapon.maxAmmo || 30,
+          ammo: weapon.maxAmmo || 30,
+          reloadTime: weapon.reloadTime || 2,
+          lastShot: 0,
+          weaponId: weapon.instanceId,
+        }
+        // Mostrar mira se necessário
+        if (weapon.showCrosshair) {
+          window._flirCrosshair = true
+        }
+        debugLog(`Arma "${weapon.name}" equipada (${weaponStateRef.current.ammo} balas)`, 'log', 'Weapon')
+      },
+      getAmmo: () => weaponStateRef.current?.ammo ?? 0,
+      takeDamage: (instanceId, amount) => {
+        // Reduzir vida do alvo
+        for (const conect of setupScene?.conects || []) {
+          if (conect.instanceId === instanceId) {
+            const currentHealth = conect.health ?? 100
+            const newHealth = Math.max(0, currentHealth - amount)
+            useStore.getState().updateConect(instanceId, { health: newHealth })
+            debugLog(`${conect.name} recebeu ${amount} de dano (vida: ${newHealth})`, 'log', 'Combat')
+            // Disparar onDamage no runtime do alvo
+            const rt = runtimesRef.current.get(instanceId)
+            if (rt) rt.triggerEvent('onDamage', { amount, source: 'weapon' })
+            if (newHealth <= 0) {
+              debugLog(`${conect.name} foi destruído`, 'log', 'Combat')
+              const mesh = meshRefs.current.get(instanceId) || conectMeshRefs.current.get(instanceId)
+              if (mesh) mesh.visible = false
+            }
+            break
+          }
+        }
+      },
+      getHealth: (instanceId) => {
+        for (const conect of setupScene?.conects || []) {
+          if (conect.instanceId === instanceId) return conect.health ?? 100
+        }
+        return 100
+      },
+      // Sistema 3: Inventário
+      addToInventory: (itemName, quantity = 1) => {
+        const inv = inventoryRef.current
+        inv[itemName] = (inv[itemName] || 0) + quantity
+        debugLog(`Item "${itemName}" adicionado (${quantity}). Total: ${inv[itemName]}`, 'log', 'Inventory')
+        // Trigger onPickup em todos os runtimes
+        for (const rt of runtimesRef.current.values()) {
+          rt.triggerEvent('onPickup', { itemName, quantity })
+        }
+      },
+      removeFromInventory: (itemName, quantity = 1) => {
+        const inv = inventoryRef.current
+        if (!inv[itemName]) return
+        inv[itemName] = Math.max(0, inv[itemName] - quantity)
+        if (inv[itemName] === 0) delete inv[itemName]
+        debugLog(`Item "${itemName}" removido (${quantity}). Restante: ${inv[itemName] || 0}`, 'log', 'Inventory')
+      },
+      getInventoryCount: (itemName) => inventoryRef.current[itemName] || 0,
+      hasItem: (itemName) => (inventoryRef.current[itemName] || 0) > 0,
     }
     window._flirGameContext = gameContext
 
@@ -517,6 +644,28 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           physicsRef.current?.movePersonal(conect.instanceId, [mx, 0, mz], 1)
           if ((keys[' '] || keys['space']) && conect.canJump) {
             physicsRef.current?.jumpPersonal(conect.instanceId)
+          }
+        }
+      }
+    }
+
+    // Sistema 3: Auto-pickup de ItemObjects
+    const player2 = (setupScene?.conects || []).find((c) => c.type === 'PersonalObject')
+    if (player2) {
+      const playerMesh = conectMeshRefs.current.get(player2.instanceId)
+      if (playerMesh) {
+        for (const item of setupScene?.conects || []) {
+          if (item.type === 'ItemObject' && item.autoPickup !== false) {
+            const itemMesh = conectMeshRefs.current.get(item.instanceId)
+            if (itemMesh && itemMesh.visible !== false) {
+              const dist = playerMesh.position.distanceTo(itemMesh.position)
+              if (dist <= (item.pickupRadius || 2)) {
+                // Apanhar item
+                gameContext.addToInventory(item.itemName || 'Item', item.quantity || 1)
+                itemMesh.visible = false
+                debugLog(`Item "${item.itemName}" apanhado!`, 'log', 'Inventory')
+              }
+            }
           }
         }
       }

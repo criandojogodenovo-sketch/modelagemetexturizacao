@@ -193,6 +193,53 @@ export default function GameUIOverlay() {
           onEnd={handleJoystickEnd}
         />
       ))}
+
+      {/* Sistema 2: Crosshair (mira) quando arma equipada */}
+      {window._flirCrosshair && (
+        <div style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: 24,
+          height: 24,
+          pointerEvents: 'none',
+          zIndex: 90,
+        }}>
+          <div style={{ position: 'absolute', top: '50%', left: 0, width: 8, height: 2, background: '#fff', transform: 'translateY(-50%)' }} />
+          <div style={{ position: 'absolute', top: '50%', right: 0, width: 8, height: 2, background: '#fff', transform: 'translateY(-50%)' }} />
+          <div style={{ position: 'absolute', top: 0, left: '50%', width: 2, height: 8, background: '#fff', transform: 'translateX(-50%)' }} />
+          <div style={{ position: 'absolute', bottom: 0, left: '50%', width: 2, height: 8, background: '#fff', transform: 'translateX(-50%)' }} />
+          <div style={{ position: 'absolute', top: '50%', left: '50%', width: 2, height: 2, background: '#f85149', borderRadius: '50%', transform: 'translate(-50%, -50%)' }} />
+        </div>
+      )}
+
+      {/* Sistema 3: Painel de inventário (canto superior direito) */}
+      {window._flirInventory && Object.keys(window._flirInventory).length > 0 && (
+        <div style={{
+          position: 'fixed',
+          top: 8,
+          right: 8,
+          background: 'rgba(13, 17, 23, 0.85)',
+          border: '1px solid #30363d',
+          borderRadius: 6,
+          padding: '6px 10px',
+          fontSize: 11,
+          color: '#e6edf3',
+          fontFamily: 'monospace',
+          zIndex: 90,
+          pointerEvents: 'none',
+          minWidth: 120,
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 4, color: '#3fb950' }}>🎒 Inventário</div>
+          {Object.entries(window._flirInventory).map(([name, qty]) => (
+            <div key={name} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <span>{name}</span>
+              <span style={{ color: '#8b949e' }}>x{qty}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

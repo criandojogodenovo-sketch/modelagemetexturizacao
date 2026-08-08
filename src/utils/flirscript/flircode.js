@@ -373,6 +373,10 @@ export function createFlirCodeRuntime(source, gameContext) {
     onMessage: 'onMessage',
     // Sistema 3: Evento de sinais
     onSignal: 'onSignal',
+    // Sistema 2: Evento de dano
+    onDamage: 'onDamage',
+    // Sistema 3: Evento de apanhar item
+    onPickup: 'onPickup',
   }
 
   // Avaliar um valor (número, string, variável, etc.)
@@ -577,6 +581,34 @@ export function createFlirCodeRuntime(source, gameContext) {
       case 'emitSignal':
         gameContext.emitSignal?.(evaluatedArgs[0], evaluatedArgs[1])
         break
+      // Sistema 2: Armas e combate
+      case 'shoot':
+        gameContext.shoot?.()
+        break
+      case 'reload':
+        gameContext.reload?.()
+        break
+      case 'equipWeapon':
+        gameContext.equipWeapon?.(evaluatedArgs[0])
+        break
+      case 'getAmmo':
+        return gameContext.getAmmo?.() ?? 0
+      case 'takeDamage':
+        gameContext.takeDamage?.(gameContext._instanceId, evaluatedArgs[0])
+        break
+      case 'getHealth':
+        return gameContext.getHealth?.(gameContext._instanceId) ?? 100
+      // Sistema 3: Inventário
+      case 'addToInventory':
+        gameContext.addToInventory?.(evaluatedArgs[0], evaluatedArgs[1])
+        break
+      case 'removeFromInventory':
+        gameContext.removeFromInventory?.(evaluatedArgs[0], evaluatedArgs[1])
+        break
+      case 'getInventoryCount':
+        return gameContext.getInventoryCount?.(evaluatedArgs[0]) ?? 0
+      case 'hasItem':
+        return gameContext.hasItem?.(evaluatedArgs[0]) ?? false
       default:
         debugLog(`Função desconhecida: ${name}`, 'warning', 'FlirCode')
     }

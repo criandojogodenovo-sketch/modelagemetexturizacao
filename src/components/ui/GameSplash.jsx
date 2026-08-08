@@ -1,22 +1,30 @@
 /**
- * GameSplash — ecrã splash inicial mostrado ao executar o jogo.
+ * GameSplash — ecrã splash oficial da Flir Engine.
  *
- * Mostra "Feito com Flir Engine" durante 2 segundos antes de o jogo começar.
+ * Mostra o logo SVG centrado no ecrã com fundo escuro (#0a0e1a),
+ * animação de entrada (fade in + pop) e fade out antes do jogo começar.
+ * Duração: ~2 segundos.
+ *
+ * Usado tanto no editor como no jogo exportado (HTML standalone).
  */
 import { useState, useEffect } from 'react'
+import FlirEngineLogo from './FlirEngineLogo'
 
 export default function GameSplash({ onDone }) {
-  const [opacity, setOpacity] = useState(0)
+  const [phase, setPhase] = useState('enter') // enter | hold | exit
 
   useEffect(() => {
-    // Fade in
-    const t1 = setTimeout(() => setOpacity(1), 50)
-    // Fade out após 1.5s
-    const t2 = setTimeout(() => setOpacity(0), 1500)
-    // Done após 2s
+    // Fade in (200ms)
+    const t1 = setTimeout(() => setPhase('hold'), 200)
+    // Manter (1.3s)
+    const t2 = setTimeout(() => setPhase('exit'), 1500)
+    // Fade out + done (500ms)
     const t3 = setTimeout(() => onDone?.(), 2000)
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
   }, [onDone])
+
+  const opacity = phase === 'enter' ? 0 : phase === 'exit' ? 0 : 1
+  const scale = phase === 'enter' ? 0.85 : phase === 'exit' ? 1.05 : 1
 
   return (
     <div
@@ -25,47 +33,18 @@ export default function GameSplash({ onDone }) {
         position: 'fixed',
         inset: 0,
         zIndex: 1000,
-        background: '#0d1117',
+        background: '#0a0e1a',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         flexDirection: 'column',
-        gap: 20,
+        gap: 0,
         opacity,
-        transition: 'opacity 0.4s ease',
+        transform: `scale(${scale})`,
+        transition: 'opacity 0.4s ease, transform 0.4s ease',
       }}
     >
-      <div style={{ fontSize: 64, animation: 'pulse 1.5s ease-in-out infinite' }}>
-        🎮
-      </div>
-      <div style={{ textAlign: 'center' }}>
-        <h1 style={{
-          margin: 0,
-          fontSize: 32,
-          fontWeight: 700,
-          background: 'linear-gradient(135deg, #2f81f7, #8957e5)',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          backgroundClip: 'text',
-        }}>
-          Flir Engine
-        </h1>
-        <p style={{
-          margin: '8px 0 0 0',
-          fontSize: 14,
-          color: '#8b949e',
-          letterSpacing: 2,
-          textTransform: 'uppercase',
-        }}>
-          Feito com Flir Engine
-        </p>
-      </div>
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { transform: scale(1); opacity: 0.8; }
-          50% { transform: scale(1.1); opacity: 1; }
-        }
-      `}</style>
+      <FlirEngineLogo size={220} showText={true} />
     </div>
   )
 }
