@@ -1363,6 +1363,25 @@ label {
   background: var(--bg-app);
 }
 
+.scene-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.scene-preview-overlay > * {
+  pointer-events: auto;
+}
+
+.scene-preview-overlay .preview-exit-btn {
+  pointer-events: auto;
+}
+
+.scene-preview-overlay .preview-info {
+  pointer-events: none;
+}
+
 .scene-preview-fullscreen canvas {
   width: 100% !important;
   height: 100% !important;

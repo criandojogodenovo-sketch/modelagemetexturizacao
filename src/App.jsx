@@ -149,9 +149,8 @@ export default function App() {
       ) : appMode === 'ui' ? (
         <UIEditor />
       ) : (
-        // app-body: sempre montado, SEMPRE renderiza o viewport
-        // O ScenePreview é um overlay que cobre tudo quando o jogo corre
-        <div className="app-body" style={scenePreviewOpen ? { visibility: 'hidden' } : undefined}>
+        // app-body: SEMPRE montado (o SceneLevel3D funciona em modo editor ou jogo)
+        <div className="app-body">
           {appMode === 'scene' ? (
             <SceneEditorPanel onClose={ui.leftDrawerOpen ? closeDrawers : null} />
           ) : (
