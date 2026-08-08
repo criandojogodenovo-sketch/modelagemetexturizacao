@@ -69,7 +69,8 @@ export default function UIEditor() {
   const [isPanning, setIsPanning] = useState(false)
   const [panStart, setPanStart] = useState({ x: 0, y: 0 })
   const [selectedIds, setSelectedIds] = useState(new Set())
-  const [dragInfo, setDragInfo] = useState(null) // { type: 'move'|'resize', startX, startY, elements, handle }
+  // Use window._dragState for synchronous drag state (avoids React stale closures)
+  const [dragInfo, setDragInfo] = useState(null) // state para re-render
   const [snapLines, setSnapLines] = useState({ vertical: [], horizontal: [] })
   const [leftPanelOpen, setLeftPanelOpen] = useState(false)
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
@@ -128,15 +129,14 @@ export default function UIEditor() {
 
   const handleMouseUp = () => {
     setIsPanning(false)
-    if (dragInfo) {
-      setDragInfo(null)
-      setSnapLines({ vertical: [], horizontal: [] })
-    }
+    window._dragState = null
+    setDragInfo(null)
+    setSnapLines({ vertical: [], horizontal: [] })
   }
 
   // Drag de elementos
   const startDrag = (e, element, type = 'move', handle = null) => {
-    e.stopPropagation()
+    if (e.stopPropagation) e.stopPropagation()
     if (!selectedIds.has(element.id)) {
       setSelectedIds(new Set([element.id]))
     }
@@ -144,25 +144,33 @@ export default function UIEditor() {
       ? Array.from(selectedIds)
       : [element.id]
 
-    setDragInfo({
+    // Set window._dragState synchronously with ALL data the mousemove handler needs
+    window._dragState = {
       type,
       handle,
       startX: e.clientX,
       startY: e.clientY,
       elements,
       initialPositions: elements.map((id) => {
-        const el = activeScreen?.elements.find((e) => e.id === id)
+        const el = activeScreen?.elements.find((ex) => ex.id === id)
         return el ? { id, pos: [...(el.position || [50, 50])], size: [...(el.size || [120, 40])] } : null
       }).filter(Boolean),
-    })
+      activeScreen: activeScreen,
+      zoom: zoom,
+      resW: res.w,
+      resH: res.h,
+      updateUIElement: updateUIElement,
+    }
+    setDragInfo(window._dragState)
   }
 
   const handleDragMove = (e) => {
-    if (!dragInfo || !activeScreen) return
-    const dx = (e.clientX - dragInfo.startX) / zoom
-    const dy = (e.clientY - dragInfo.startY) / zoom
+    const di = window._dragState
+    if (!di || !activeScreen) return
+    const dx = (e.clientX - di.startX) / zoom
+    const dy = (e.clientY - di.startY) / zoom
 
-    dragInfo.initialPositions.forEach((init) => {
+    di.initialPositions.forEach((init) => {
       const el = activeScreen.elements.find((e) => e.id === init.id)
       if (!el) return
 
@@ -190,7 +198,7 @@ export default function UIEditor() {
         }
 
         updateUIElement(init.id, { position: [snappedX, snappedY] })
-      } else if (dragInfo.type === 'resize') {
+      } else if (di.type === 'resize') {
         const newW = Math.max(20, init.size[0] + dx)
         const newH = Math.max(20, init.size[1] + dy)
         const keepAspect = e.shiftKey
@@ -288,6 +296,56 @@ export default function UIEditor() {
       ),
     }))
   }
+
+  // Window-level listeners for drag — registered once, use window._dragState
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!window._dragState) return
+      const di = window._dragState
+      if (!di || !di.activeScreen) return
+      const dx = (e.clientX - di.startX) / di.zoom
+      const dy = (e.clientY - di.startY) / di.zoom
+      di.initialPositions.forEach(function(init) {
+        var el = di.activeScreen.elements.find(function(e2) { return e2.id === init.id })
+        if (!el) return
+        if (di.type === 'move') {
+          var newPosX = init.pos[0] + (dx / di.resW) * 100
+          var newPosY = init.pos[1] + (dy / di.resH) * 100
+          // Snapping
+          var snapTargets = [0, 50, 100]
+          for (var i = 0; i < snapTargets.length; i++) {
+            if (Math.abs(newPosX - snapTargets[i]) < 5) { newPosX = snapTargets[i]; break }
+          }
+          for (var i = 0; i < snapTargets.length; i++) {
+            if (Math.abs(newPosY - snapTargets[i]) < 5) { newPosY = snapTargets[i]; break }
+          }
+          di.updateUIElement(init.id, { position: [newPosX, newPosY] })
+        } else if (di.type === 'resize') {
+          var newW = Math.max(20, init.size[0] + dx)
+          var newH = Math.max(20, init.size[1] + dy)
+          di.updateUIElement(init.id, { size: [newW, newH] })
+        }
+      })
+    }
+    const onUp = () => { window._dragState = null }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    const onTouchMove = (e) => {
+      if (window._dragState && e.touches.length > 0) {
+        e.preventDefault()
+        onMove({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY, shiftKey: false })
+      }
+    }
+    const onTouchEnd = () => { window._dragState = null }
+    window.addEventListener('touchmove', onTouchMove, { passive: false })
+    window.addEventListener('touchend', onTouchEnd)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onTouchEnd)
+    }
+  }, [])
 
   // Atalhos de teclado
   useEffect(() => {
@@ -550,6 +608,7 @@ function UIElementEditorView({ element, isSelected, onSelect, onDragStart, zoom 
     <div
       style={baseStyle}
       onMouseDown={(e) => { e.stopPropagation(); onSelect(e); onDragStart(e, 'move') }}
+      onTouchStart={(e) => { e.stopPropagation(); onSelect(e); if (e.touches.length > 0) { const t = e.touches[0]; onDragStart({ clientX: t.clientX, clientY: t.clientY, stopPropagation: () => {} }, 'move') } }}
     >
       {/* Conteúdo do elemento */}
       {element.type === 'Button' && (element.label || 'Botão')}
