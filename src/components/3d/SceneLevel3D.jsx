@@ -424,6 +424,34 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       },
       getInventoryCount: (itemName) => inventoryRef.current[itemName] || 0,
       hasItem: (itemName) => (inventoryRef.current[itemName] || 0) > 0,
+      // Sistema: Links — navegar para cena ou tela de UI
+      linkTo: (target, subTarget) => {
+        if (target === 'scene') {
+          // Mudar de cena
+          const scenes = useStore.getState().scenes
+          const targetScene = scenes.find((s) => s.name === subTarget || s.id === subTarget)
+          if (targetScene) {
+            useStore.getState().setActiveScene(targetScene.id)
+            debugLog(`Link: mudou para cena "${targetScene.name}"`, 'log', 'Links')
+          } else {
+            debugLog(`Link: cena "${subTarget}" não encontrada`, 'warning', 'Links')
+          }
+        } else if (target === 'screen') {
+          // Mostrar tela de UI e esconder as outras
+          const screens = useStore.getState().uiScreens
+          const targetScreen = screens.find((s) => s.name === subTarget || s.id === subTarget)
+          if (targetScreen) {
+            screens.forEach((s) => useStore.getState().setUIScreenVisible(s.id, s.id === targetScreen.id))
+            debugLog(`Link: mudou para tela "${targetScreen.name}"`, 'log', 'Links')
+          } else {
+            debugLog(`Link: tela "${subTarget}" não encontrada`, 'warning', 'Links')
+          }
+        } else if (target === 'url') {
+          // Abrir URL externa
+          window.open(subTarget, '_blank')
+          debugLog(`Link: abriu URL "${subTarget}"`, 'log', 'Links')
+        }
+      },
     }
     window._flirGameContext = gameContext
 

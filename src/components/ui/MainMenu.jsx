@@ -26,6 +26,7 @@ export default function MainMenu({ onClose }) {
   const togglePerfStats = useStore((s) => s.togglePerfStats)
   const openPostProcessing = useStore((s) => s.openPostProcessing)
   const openClassesPanel = useStore((s) => s.openClassesPanel)
+  const openTexturingPanel = useStore((s) => s.openTexturingPanel)
 
   const handle = (fn) => () => {
     fn()
@@ -108,6 +109,13 @@ export default function MainMenu({ onClose }) {
             <div>
               <div className="mm-label">Classes FlirCode</div>
               <div className="mm-desc small muted">Classes reutilizáveis com herança</div>
+            </div>
+          </button>
+          <button className="mm-item" onClick={handle(openTexturingPanel)}>
+            <span className="mm-icon">🎨</span>
+            <div>
+              <div className="mm-label">Texturização</div>
+              <div className="mm-desc small muted">Material PBR, texturas, UV tiling, presets</div>
             </div>
           </button>
           <div className="mm-divider" />

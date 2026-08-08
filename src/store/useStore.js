@@ -1382,6 +1382,10 @@ export const useStore = create(
       classesPanelOpen: false,
       openClassesPanel: () => set({ classesPanelOpen: true }),
       closeClassesPanel: () => set({ classesPanelOpen: false }),
+      // Aba de Texturização profissional
+      texturingPanelOpen: false,
+      openTexturingPanel: () => set({ texturingPanelOpen: true }),
+      closeTexturingPanel: () => set({ texturingPanelOpen: false }),
       createFlirCodeClass: (name, source, extendsName = null) => {
         set((s) => ({
           flirCodeClasses: [...s.flirCodeClasses, {

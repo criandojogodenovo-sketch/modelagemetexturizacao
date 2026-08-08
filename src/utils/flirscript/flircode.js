@@ -609,6 +609,10 @@ export function createFlirCodeRuntime(source, gameContext) {
         return gameContext.getInventoryCount?.(evaluatedArgs[0]) ?? 0
       case 'hasItem':
         return gameContext.hasItem?.(evaluatedArgs[0]) ?? false
+      // Sistema: Links — navegar para cena ou tela de UI
+      case 'linkTo':
+        gameContext.linkTo?.(evaluatedArgs[0], evaluatedArgs[1])
+        break
       default:
         debugLog(`Função desconhecida: ${name}`, 'warning', 'FlirCode')
     }

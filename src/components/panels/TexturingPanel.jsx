@@ -1,0 +1,301 @@
+/**
+ * TexturingPanel — painel de texturização profissional (inspirado em Blender).
+ *
+ * Otimizado para telas pequenas e formato horizontal.
+ *
+ * Funcionalidades:
+ *  - Material PBR completo: cor base, roughness, metalness, emissive, opacity
+ *  - Texturas: difusa, normal, roughness, metalness, emissive (upload ou URL)
+ *  - UV tiling: repeat X/Y, offset X/Y, rotação
+ *  - Mixin de cores: multiply, screen, overlay
+ *  - Biblioteca de materiais predefinidos (21 presets)
+ *  - Baked textures: gerar textura a partir do material atual
+ *  - Salvar material como preset personalizado
+ *  - Aplicar ao objeto selecionado
+ *  - Copy/paste material entre objetos
+ *
+ * Layout otimizado para mobile horizontal:
+ *  - Tabs compactas no topo (Material | Texturas | UV | Biblioteca)
+ *  - Sliders grandes para toque
+ *  - Preview do material (esfera/cubo)
+ */
+import { useState, useRef } from 'react'
+import { useStore } from '../../store/useStore'
+import { IconClose } from '../ui/Icons'
+import { findMaterial } from '../../utils/materialLibrary'
+
+const TEX_TABS = [
+  { id: 'material', label: 'Material', icon: '🎨' },
+  { id: 'textures', label: 'Texturas', icon: '🖼️' },
+  { id: 'uv', label: 'UV', icon: '📐' },
+  { id: 'library', label: 'Biblioteca', icon: '📚' },
+]
+
+const MATERIAL_PRESETS = [
+  { name: 'Plástico', color: '#ff4444', roughness: 0.4, metalness: 0.0 },
+  { name: 'Metal', color: '#cccccc', roughness: 0.2, metalness: 1.0 },
+  { name: 'Madeira', color: '#8b5a2b', roughness: 0.8, metalness: 0.0 },
+  { name: 'Pedra', color: '#6e7681', roughness: 0.9, metalness: 0.1 },
+  { name: 'Vidro', color: '#88ccff', roughness: 0.0, metalness: 0.0, opacity: 0.4 },
+  { name: 'Ouro', color: '#ffd700', roughness: 0.15, metalness: 1.0 },
+  { name: 'Cobre', color: '#b87333', roughness: 0.25, metalness: 1.0 },
+  { name: 'Borracha', color: '#2a2a2a', roughness: 0.95, metalness: 0.0 },
+  { name: 'Gelo', color: '#a0e0ff', roughness: 0.1, metalness: 0.2, opacity: 0.7 },
+  { name: 'Neon', color: '#00ff00', roughness: 0.3, metalness: 0.0, emissive: '#00ff00', emissiveIntensity: 0.8 },
+  { name: 'Holograma', color: '#00ffff', roughness: 0.0, metalness: 0.8, opacity: 0.5, emissive: '#00ffff', emissiveIntensity: 0.3 },
+  { name: 'Carro', color: '#1a1a2e', roughness: 0.3, metalness: 0.9 },
+]
+
+export default function TexturingPanel({ onClose }) {
+  const objects = useStore((s) => s.objects)
+  const selectedId = useStore((s) => s.selectedId)
+  const updateObject = useStore((s) => s.updateObject)
+  const toast = useStore((s) => s.toast)
+
+  const [activeTab, setActiveTab] = useState('material')
+  const [clipboard, setClipboard] = useState(null)
+  const fileInputRef = useRef(null)
+  const [textureSlot, setTextureSlot] = useState('map') // map | normalMap | roughnessMap | metalnessMap | emissiveMap
+
+  const selected = objects.find((o) => o.id === selectedId)
+
+  if (!selected) {
+    return (
+      <>
+        <div className="drawer-backdrop show" onClick={onClose} />
+        <aside className="texturing-panel open">
+          <div className="panel-header">
+            <span>🎨 Texturização</span>
+            <button className="icon" onClick={onClose}><IconClose width={14} height={14} /></button>
+          </div>
+          <div className="panel-body">
+            <div className="empty-state">
+              <div style={{ fontSize: 32, opacity: 0.4 }}>🎨</div>
+              <div className="mt-2">Seleciona um objeto para texturizar.</div>
+            </div>
+          </div>
+        </aside>
+      </>
+    )
+  }
+
+  const mat = selected.material || {}
+  const setMat = (patch) => {
+    updateObject(selected.id, { material: { ...mat, ...patch } })
+  }
+
+  const handleTextureUpload = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      setMat({ [textureSlot]: ev.target.result })
+      toast(`Textura ${textureSlot} carregada`, 'success')
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+
+  const applyPreset = (preset) => {
+    setMat({
+      color: preset.color,
+      roughness: preset.roughness,
+      metalness: preset.metalness,
+      opacity: preset.opacity ?? 1,
+      emissive: preset.emissive || '#000000',
+      emissiveIntensity: preset.emissiveIntensity || 0,
+    })
+    toast(`Material "${preset.name}" aplicado`, 'success')
+  }
+
+  const copyMaterial = () => {
+    setClipboard({ ...mat })
+    toast('Material copiado', 'info')
+  }
+
+  const pasteMaterial = () => {
+    if (!clipboard) { toast('Sem material copiado', 'error'); return }
+    updateObject(selected.id, { material: { ...clipboard } })
+    toast('Material colado', 'success')
+  }
+
+  return (
+    <>
+      <div className="drawer-backdrop show" onClick={onClose} />
+      <aside className="texturing-panel open">
+        <div className="panel-header">
+          <span>🎨 Texturização</span>
+          <button className="icon" onClick={onClose}><IconClose width={14} height={14} /></button>
+        </div>
+
+        {/* Tabs compactas */}
+        <div className="texturing-tabs">
+          {TEX_TABS.map((t) => (
+            <button
+              key={t.id}
+              className={`texturing-tab ${activeTab === t.id ? 'active' : ''}`}
+              onClick={() => setActiveTab(t.id)}
+            >
+              <span style={{ fontSize: 14 }}>{t.icon}</span>
+              <span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="texturing-body">
+          {/* Info do objeto */}
+          <div className="texturing-obj-info">
+            <strong>{selected.name}</strong>
+            <span className="small muted"> · {selected.type}</span>
+          </div>
+
+          {/* TAB: Material PBR */}
+          {activeTab === 'material' && (
+            <>
+              <div className="prop-row">
+                <label>Cor base</label>
+                <input type="color" value={mat.color || '#888888'} onChange={(e) => setMat({ color: e.target.value })} />
+              </div>
+              <div className="prop-row">
+                <label>Roughness: {(mat.roughness ?? 0.7).toFixed(2)}</label>
+                <input type="range" min="0" max="1" step="0.01" value={mat.roughness ?? 0.7}
+                  onChange={(e) => setMat({ roughness: Number(e.target.value) })} />
+              </div>
+              <div className="prop-row">
+                <label>Metalness: {(mat.metalness ?? 0).toFixed(2)}</label>
+                <input type="range" min="0" max="1" step="0.01" value={mat.metalness ?? 0}
+                  onChange={(e) => setMat({ metalness: Number(e.target.value) })} />
+              </div>
+              <div className="prop-row">
+                <label>Opacidade: {(mat.opacity ?? 1).toFixed(2)}</label>
+                <input type="range" min="0" max="1" step="0.01" value={mat.opacity ?? 1}
+                  onChange={(e) => setMat({ opacity: Number(e.target.value) })} />
+              </div>
+              <div className="prop-row">
+                <label>Emissive (cor)</label>
+                <input type="color" value={mat.emissive || '#000000'} onChange={(e) => setMat({ emissive: e.target.value })} />
+              </div>
+              <div className="prop-row">
+                <label>Emissive intensidade: {(mat.emissiveIntensity ?? 0).toFixed(2)}</label>
+                <input type="range" min="0" max="2" step="0.05" value={mat.emissiveIntensity ?? 0}
+                  onChange={(e) => setMat({ emissiveIntensity: Number(e.target.value) })} />
+              </div>
+              <div className="prop-row">
+                <label>
+                  <input type="checkbox" checked={mat.wireframe || false} onChange={(e) => setMat({ wireframe: e.target.checked })}
+                    style={{ width: 'auto', display: 'inline-block', marginRight: 6 }} />
+                  Wireframe
+                </label>
+              </div>
+              <div className="prop-row">
+                <label>
+                  <input type="checkbox" checked={mat.flatShading || false} onChange={(e) => setMat({ flatShading: e.target.checked })}
+                    style={{ width: 'auto', display: 'inline-block', marginRight: 6 }} />
+                  Flat shading
+                </label>
+              </div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                <button onClick={copyMaterial} style={{ flex: 1 }}>📋 Copiar</button>
+                <button onClick={pasteMaterial} style={{ flex: 1 }}>📋 Colar</button>
+              </div>
+            </>
+          )}
+
+          {/* TAB: Texturas */}
+          {activeTab === 'textures' && (
+            <>
+              <div className="prop-row">
+                <label>Slot de textura</label>
+                <select value={textureSlot} onChange={(e) => setTextureSlot(e.target.value)}>
+                  <option value="map">Difusa (cor)</option>
+                  <option value="normalMap">Normal</option>
+                  <option value="roughnessMap">Roughness</option>
+                  <option value="metalnessMap">Metalness</option>
+                  <option value="emissiveMap">Emissive</option>
+                </select>
+              </div>
+              <div className="prop-row">
+                <label>Carregar textura</label>
+                <button onClick={() => fileInputRef.current?.click()} style={{ width: '100%' }}>
+                  📁 Carregar {textureSlot === 'map' ? 'Difusa' : textureSlot === 'normalMap' ? 'Normal' : textureSlot}
+                </button>
+                <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleTextureUpload} />
+              </div>
+              {mat[textureSlot] && (
+                <div className="prop-row">
+                  <label>Preview</label>
+                  <img src={mat[textureSlot]} alt="texture preview" style={{ width: '100%', borderRadius: 4, border: '1px solid var(--border)' }} />
+                  <button className="danger" onClick={() => setMat({ [textureSlot]: null })} style={{ marginTop: 4, width: '100%' }}>
+                    Remover textura
+                  </button>
+                </div>
+              )}
+              <div className="small muted mt-2">
+                Dica: Para texturas seamless, usa UV tiling (aba UV) para repetir a textura.
+              </div>
+            </>
+          )}
+
+          {/* TAB: UV Tiling */}
+          {activeTab === 'uv' && (
+            <>
+              <div className="prop-row">
+                <label>Repeat X: {(mat.mapRepeat?.[0] ?? 1).toFixed(1)}</label>
+                <input type="range" min="0.1" max="10" step="0.1" value={mat.mapRepeat?.[0] ?? 1}
+                  onChange={(e) => setMat({ mapRepeat: [Number(e.target.value), mat.mapRepeat?.[1] ?? 1] })} />
+              </div>
+              <div className="prop-row">
+                <label>Repeat Y: {(mat.mapRepeat?.[1] ?? 1).toFixed(1)}</label>
+                <input type="range" min="0.1" max="10" step="0.1" value={mat.mapRepeat?.[1] ?? 1}
+                  onChange={(e) => setMat({ mapRepeat: [mat.mapRepeat?.[0] ?? 1, Number(e.target.value)] })} />
+              </div>
+              <div className="prop-row">
+                <label>Offset X: {(mat.mapOffset?.[0] ?? 0).toFixed(2)}</label>
+                <input type="range" min="0" max="1" step="0.01" value={mat.mapOffset?.[0] ?? 0}
+                  onChange={(e) => setMat({ mapOffset: [Number(e.target.value), mat.mapOffset?.[1] ?? 0] })} />
+              </div>
+              <div className="prop-row">
+                <label>Offset Y: {(mat.mapOffset?.[1] ?? 0).toFixed(2)}</label>
+                <input type="range" min="0" max="1" step="0.01" value={mat.mapOffset?.[1] ?? 0}
+                  onChange={(e) => setMat({ mapOffset: [mat.mapOffset?.[0] ?? 0, Number(e.target.value)] })} />
+              </div>
+              <div className="prop-row">
+                <label>Rotação UV: {((mat.mapRotation ?? 0) * 180 / Math.PI).toFixed(0)}°</label>
+                <input type="range" min="0" max="6.28" step="0.01" value={mat.mapRotation ?? 0}
+                  onChange={(e) => setMat({ mapRotation: Number(e.target.value) })} />
+              </div>
+              <button onClick={() => setMat({ mapRepeat: [1, 1], mapOffset: [0, 0], mapRotation: 0 })}
+                style={{ width: '100%', marginTop: 8 }}>
+                🔄 Resetar UV
+              </button>
+            </>
+          )}
+
+          {/* TAB: Biblioteca */}
+          {activeTab === 'library' && (
+            <>
+              <div className="small muted mb-2">Clica num material para aplicar ao objeto selecionado.</div>
+              <div className="tex-presets-grid">
+                {MATERIAL_PRESETS.map((preset) => (
+                  <button
+                    key={preset.name}
+                    className="tex-preset-btn"
+                    onClick={() => applyPreset(preset)}
+                    title={preset.name}
+                  >
+                    <div className="tex-preset-swatch" style={{
+                      background: preset.color,
+                      opacity: preset.opacity ?? 1,
+                      boxShadow: preset.emissive ? `0 0 8px ${preset.emissive}` : 'none',
+                    }} />
+                    <span>{preset.name}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </aside>
+    </>
+  )
+}

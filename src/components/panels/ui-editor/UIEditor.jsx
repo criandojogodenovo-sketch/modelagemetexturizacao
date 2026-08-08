@@ -831,6 +831,47 @@ function PropertiesPanel({ selectedIds, activeScreen, updateUIElement }) {
             placeholder="onClick, onChange, onSubmit..." />
         </div>
       </div>
+
+      {/* Sistema: Links — navegar entre cenas/telas ao clicar */}
+      <div className="panel-section">
+        <h4>🔗 Link (navegação)</h4>
+        <div className="prop-row">
+          <label>Tipo de link</label>
+          <select value={el.linkType || 'none'} onChange={(e) => set({ linkType: e.target.value })}>
+            <option value="none">— Nenhum —</option>
+            <option value="scene">Ir para cena</option>
+            <option value="screen">Mostrar tela de UI</option>
+            <option value="url">Abrir URL</option>
+          </select>
+        </div>
+        {el.linkType && el.linkType !== 'none' && (
+          <div className="prop-row">
+            <label>Destino</label>
+            {el.linkType === 'scene' ? (
+              <select value={el.linkTarget || ''} onChange={(e) => set({ linkTarget: e.target.value })}>
+                <option value="">— Selecionar cena —</option>
+                {scenes.map((sc) => (
+                  <option key={sc.id} value={sc.name}>{sc.name}</option>
+                ))}
+              </select>
+            ) : el.linkType === 'screen' ? (
+              <select value={el.linkTarget || ''} onChange={(e) => set({ linkTarget: e.target.value })}>
+                <option value="">— Selecionar tela —</option>
+                {uiScreens.map((sc) => (
+                  <option key={sc.id} value={sc.name}>{sc.name}</option>
+                ))}
+              </select>
+            ) : (
+              <input type="text" value={el.linkTarget || ''} onChange={(e) => set({ linkTarget: e.target.value })}
+                placeholder="https://..." />
+            )}
+          </div>
+        )}
+        <div className="small muted mt-1">
+          Ao clicar no botão durante o jogo, navega automaticamente.
+          Não precisa de FlirCode — é automático!
+        </div>
+      </div>
     </div>
   )
 }

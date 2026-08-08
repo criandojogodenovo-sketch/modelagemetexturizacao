@@ -26,6 +26,14 @@ export default function GameUIOverlay() {
 
   const handleEvent = (element, eventType, value) => {
     debugLog(`UI Event: ${element.name}.${eventType}`, 'log', 'UI')
+    // Sistema: Links — navegação automática sem precisar de FlirCode
+    if (element.linkType && element.linkType !== 'none' && eventType === 'onClick') {
+      const ctx = window._flirGameContext
+      if (ctx && ctx.linkTo) {
+        ctx.linkTo(element.linkType, element.linkTarget)
+        return // Link processa a navegação, não precisa de evento FlirCode
+      }
+    }
     const eventName = element.eventName || eventType
     if (window._flirGameContext?.triggerUIEvent) {
       window._flirGameContext.triggerUIEvent(eventName, { element, value })
