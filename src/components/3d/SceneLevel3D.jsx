@@ -88,6 +88,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   const joystickRef = useRef({ x: 0, z: 0, active: false })
   const weaponStateRef = useRef({ equipped: false, ammo: 0, maxAmmo: 0, damage: 0, fireRate: 0.3, range: 50, reloadTime: 2, lastShot: 0 })
   const inventoryRef = useRef({})
+  const gameStateRef = useRef('menu')
 
   // P2.5 fix: armazenar a cena ativa num ref para que modificações feitas pelo
   // FlirCode (createObject, etc.) NÃO reiniciem o jogo (evita loop infinito).
@@ -451,6 +452,34 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           window.open(subTarget, '_blank')
           debugLog(`Link: abriu URL "${subTarget}"`, 'log', 'Links')
         }
+      },
+      // Sistema: Game State
+      setGameState: (newState) => {
+        gameStateRef.current = newState
+        debugLog(`Game State: ${newState}`, 'log', 'GameState')
+        for (const rt of runtimesRef.current.values()) {
+          rt.triggerEvent('onGameStateChange', { state: newState })
+        }
+      },
+      getGameState: () => gameStateRef.current,
+      // Sistema: Save/Load Progress (localStorage do jogador)
+      saveProgress: (key, value) => {
+        try {
+          localStorage.setItem(`flir_progress_${key}`, JSON.stringify(value))
+          debugLog(`Progresso guardado: ${key}`, 'log', 'Save')
+        } catch (e) {
+          debugLog(`Erro ao guardar: ${e.message}`, 'error', 'Save')
+        }
+      },
+      loadProgress: (key) => {
+        try {
+          const val = localStorage.getItem(`flir_progress_${key}`)
+          return val ? JSON.parse(val) : null
+        } catch (e) { return null }
+      },
+      // Sistema: Sequenciador (básico)
+      playSequence: (name) => {
+        debugLog(`Sequência "${name}" iniciada`, 'log', 'Sequence')
       },
     }
     window._flirGameContext = gameContext

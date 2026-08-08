@@ -140,6 +140,14 @@ function createFlirCodeRuntime(src, gc) {
       case 'getPlayerState': return gc.getPlayerState ? gc.getPlayerState(args[0]) : null
       // Sistema: Links — navegar para cena ou tela
       case 'linkTo': gc.linkTo && gc.linkTo(args[0], args[1]); break
+      // Sistema: Game State
+      case 'setGameState': gc.setGameState && gc.setGameState(args[0]); break
+      case 'getGameState': return gc.getGameState ? gc.getGameState() : 'menu'
+      // Sistema: Save/Load Progress
+      case 'saveProgress': gc.saveProgress && gc.saveProgress(args[0], args[1]); break
+      case 'loadProgress': return gc.loadProgress ? gc.loadProgress(args[0]) : null
+      // Sistema: Sequenciador
+      case 'playSequence': gc.playSequence && gc.playSequence(args[0]); break
       // changeScene real
       case 'changeScene':
         if (gc.changeScene) { gc.changeScene(args[0]); break }
@@ -294,6 +302,15 @@ function startGame() {
       var sc = (data.scenes || []).find(function (s) { return s.name === name || s.id === name })
       if (sc) { data.activeSceneId = sc.id; dbg('Cena mudou para "' + sc.name + '"', 'log', 'Game') }
     },
+    // Sistema: Game State (exportado)
+    _gameState: 'menu',
+    setGameState: function (s) { gc._gameState = s; dbg('Game State: ' + s, 'log', 'GameState'); for (var k in runtimes) { runtimes[k].triggerEvent('onGameStateChange', { state: s }) } },
+    getGameState: function () { return gc._gameState },
+    // Sistema: Save/Load Progress (exportado — localStorage do jogador)
+    saveProgress: function (key, val) { try { localStorage.setItem('flir_progress_' + key, JSON.stringify(val)); dbg('Progresso guardado: ' + key, 'log', 'Save') } catch (e) {} },
+    loadProgress: function (key) { try { var v = localStorage.getItem('flir_progress_' + key); return v ? JSON.parse(v) : null } catch (e) { return null } },
+    // Sistema: Sequenciador (exportado — básico)
+    playSequence: function (name) { dbg('Sequência "' + name + '" iniciada', 'log', 'Sequence') },
   }
   window._flirGameContext = gc
 

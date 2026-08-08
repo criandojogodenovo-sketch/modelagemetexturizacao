@@ -40,6 +40,7 @@ import MultiplayerPanel from './components/panels/MultiplayerPanel'
 import PostProcessingPanel from './components/panels/PostProcessingPanel'
 import ClassesPanel from './components/panels/ClassesPanel'
 import TexturingPanel from './components/panels/TexturingPanel'
+import SettingsPanel from './components/panels/SettingsPanel'
 import PerformanceStatsOverlay from './components/ui/PerformanceStatsOverlay'
 import MainMenu from './components/ui/MainMenu'
 import HomePage from './components/home/HomePage'
@@ -86,6 +87,8 @@ export default function App() {
   const closeClassesPanel = useStore((s) => s.closeClassesPanel)
   const texturingPanelOpen = useStore((s) => s.texturingPanelOpen)
   const closeTexturingPanel = useStore((s) => s.closeTexturingPanel)
+  const settingsPanelOpen = useStore((s) => s.settingsPanelOpen)
+  const closeSettingsPanel = useStore((s) => s.closeSettingsPanel)
   const homeVisible = useStore((s) => s.homeVisible)
   const hideHome = useStore((s) => s.hideHome)
 
@@ -196,6 +199,7 @@ export default function App() {
       {postProcessingOpen && <PostProcessingPanel onClose={closePostProcessing} />}
       {classesPanelOpen && <ClassesPanel onClose={closeClassesPanel} />}
       {texturingPanelOpen && <TexturingPanel onClose={closeTexturingPanel} />}
+      {settingsPanelOpen && <SettingsPanel onClose={closeSettingsPanel} />}
       {perfStatsVisible && <PerformanceStatsOverlay />}
       {animControllerTarget && (
         <div className="modal-backdrop" onClick={closeAnimController}>

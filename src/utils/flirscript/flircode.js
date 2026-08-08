@@ -377,6 +377,8 @@ export function createFlirCodeRuntime(source, gameContext) {
     onDamage: 'onDamage',
     // Sistema 3: Evento de apanhar item
     onPickup: 'onPickup',
+    // Sistema: Game State
+    onGameStateChange: 'onGameStateChange',
   }
 
   // Avaliar um valor (número, string, variável, etc.)
@@ -612,6 +614,22 @@ export function createFlirCodeRuntime(source, gameContext) {
       // Sistema: Links — navegar para cena ou tela de UI
       case 'linkTo':
         gameContext.linkTo?.(evaluatedArgs[0], evaluatedArgs[1])
+        break
+      // Sistema: Game State
+      case 'setGameState':
+        gameContext.setGameState?.(evaluatedArgs[0])
+        break
+      case 'getGameState':
+        return gameContext.getGameState?.() || 'menu'
+      // Sistema: Save/Load Progress (localStorage do jogador)
+      case 'saveProgress':
+        gameContext.saveProgress?.(evaluatedArgs[0], evaluatedArgs[1])
+        break
+      case 'loadProgress':
+        return gameContext.loadProgress?.(evaluatedArgs[0])
+      // Sistema: Sequenciador
+      case 'playSequence':
+        gameContext.playSequence?.(evaluatedArgs[0])
         break
       default:
         debugLog(`Função desconhecida: ${name}`, 'warning', 'FlirCode')

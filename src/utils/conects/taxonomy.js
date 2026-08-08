@@ -757,6 +757,43 @@ export const CONECT_TAXONOMY = [
     ],
   },
 
+  // ============ SISTEMA: GAME STATE ============
+  {
+    type: 'GameStateObject',
+    label: 'Game State Object',
+    category: 'gameplay',
+    icon: '🎮',
+    description: 'Gere o estado global do jogo (Menu, A Jogar, Pausado, Game Over)',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      currentState: 'menu',
+    },
+    properties: [
+      prop('currentState', 'Estado inicial', 'select', 'menu', { options: ['menu', 'playing', 'paused', 'gameover', 'custom'] }),
+    ],
+  },
+
+  // ============ SISTEMA: PREFAB ============
+  {
+    type: 'PrefabObject',
+    label: 'Prefab Object (Pacote)',
+    category: 'organization',
+    icon: '📦',
+    description: 'Pacote reutilizável de Conects — arrastar para a cena cria uma instância',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: false,
+    defaults: {
+      prefabData: null, // array de conects serializados
+      sourcePrefabId: null, // se é instância, ID do prefab original
+    },
+    properties: [
+      prop('prefabData', 'Dados do prefab', 'text', ''),
+    ],
+  },
+
   // ============ ORGANIZAÇÃO ============
   {
     type: 'GroupObject',

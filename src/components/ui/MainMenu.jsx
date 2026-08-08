@@ -27,6 +27,7 @@ export default function MainMenu({ onClose }) {
   const openPostProcessing = useStore((s) => s.openPostProcessing)
   const openClassesPanel = useStore((s) => s.openClassesPanel)
   const openTexturingPanel = useStore((s) => s.openTexturingPanel)
+  const openSettingsPanel = useStore((s) => s.openSettingsPanel)
 
   const handle = (fn) => () => {
     fn()
@@ -116,6 +117,13 @@ export default function MainMenu({ onClose }) {
             <div>
               <div className="mm-label">Texturização</div>
               <div className="mm-desc small muted">Material PBR, texturas, UV tiling, presets</div>
+            </div>
+          </button>
+          <button className="mm-item" onClick={handle(openSettingsPanel)}>
+            <span className="mm-icon">⚙️</span>
+            <div>
+              <div className="mm-label">Configurações</div>
+              <div className="mm-desc small muted">Projeto, editor, atalhos, guardar .flirengine</div>
             </div>
           </button>
           <div className="mm-divider" />
