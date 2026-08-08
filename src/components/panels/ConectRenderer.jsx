@@ -107,13 +107,26 @@ export default ConectRenderer
 
 // ===== Placeholder para conects com física =====
 const PlaceholderMesh = forwardRef(function PlaceholderMesh({ conect }, ref) {
-  const color = conect.type === 'PersonalObject' ? '#3fb950'
-                : conect.type === 'StaticObject' ? '#6e7681'
-                : conect.type === 'StopObject' ? '#d29922'
-                : '#888888'
-  const geometry = conect.type === 'PersonalObject'
-    ? <capsuleGeometry args={[0.4, 1, 8, 16]} />
-    : <boxGeometry args={[1, 1, 1]} />
+  var color = '#888888'
+  if (conect.type === 'PersonalObject') color = '#3fb950'
+  else if (conect.type === 'StaticObject') color = '#6e7681'
+  else if (conect.type === 'StopObject') color = '#d29922'
+  else if (conect.type === 'RigidObject') color = '#f4a261'
+  else if (conect.type === 'NpcObject') color = '#f85149'
+  else if (conect.type === 'WeaponObject') color = '#8957e5'
+  else if (conect.type === 'ItemObject') color = '#3fb950'
+  var geometry
+  if (conect.type === 'PersonalObject') {
+    geometry = <capsuleGeometry args={[0.4, 1, 8, 16]} />
+  } else if (conect.type === 'WeaponObject') {
+    // Arma: caixa alongada
+    geometry = <boxGeometry args={[0.15, 0.2, 0.8]} />
+  } else if (conect.type === 'ItemObject') {
+    // Item: esfera pequena
+    geometry = <sphereGeometry args={[0.3, 16, 12]} />
+  } else {
+    geometry = <boxGeometry args={[1, 1, 1]} />
+  }
   return (
     <mesh
       ref={ref}
@@ -126,7 +139,10 @@ const PlaceholderMesh = forwardRef(function PlaceholderMesh({ conect }, ref) {
       userData={{ conectInstanceId: conect.instanceId }}
     >
       {geometry}
-      <meshStandardMaterial color={color} roughness={0.6} metalness={0.1} />
+      <meshStandardMaterial color={color} roughness={0.6} metalness={0.1}
+        emissive={conect.type === 'ItemObject' ? color : '#000'}
+        emissiveIntensity={conect.type === 'ItemObject' ? 0.3 : 0}
+      />
     </mesh>
   )
 })

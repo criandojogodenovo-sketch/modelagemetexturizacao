@@ -117,6 +117,20 @@ function createFlirCodeRuntime(src, gc) {
       case 'collidingWith': return gc.collidingWith ? gc.collidingWith(gc._instanceId, args[0]) : false
       case 'distanceTo': return gc.distanceTo ? gc.distanceTo(gc._instanceId, args[0]) : 0
       case 'isTouching': return gc.isTouching ? gc.isTouching() : false
+      // Sistema 2: Armas
+      case 'shoot': gc.shoot && gc.shoot(); break
+      case 'reload': gc.reload && gc.reload(); break
+      case 'equipWeapon': gc.equipWeapon && gc.equipWeapon(args[0]); break
+      case 'getAmmo': return gc.getAmmo ? gc.getAmmo() : 0
+      case 'takeDamage': gc.takeDamage && gc.takeDamage(gc._instanceId, args[0]); break
+      case 'getHealth': return gc.getHealth ? gc.getHealth(gc._instanceId) : 100
+      // Sistema 3: Inventário
+      case 'addToInventory': gc.addToInventory && gc.addToInventory(args[0], args[1]); break
+      case 'removeFromInventory': gc.removeFromInventory && gc.removeFromInventory(args[0], args[1]); break
+      case 'getInventoryCount': return gc.getInventoryCount ? gc.getInventoryCount(args[0]) : 0
+      case 'hasItem': return gc.hasItem ? gc.hasItem(args[0]) : false
+      // Sistema 3: Sinais
+      case 'emitSignal': gc.emitSignal && gc.emitSignal(args[0], args[1]); break
       default: dbg('Função desconhecida: ' + name, 'warn')
     }
   }
@@ -211,6 +225,47 @@ function startGame() {
     collidingWith: function (id, type) { for (var k in bodies) { if (k === id) continue; if (bodies[k]._conect.type === type || bodies[k]._conect.name === type) { if (bodies[id].position.distanceTo(bodies[k].position) < 1.5) return true } } return false },
     distanceTo: function (id, name) { for (var k in meshMap) { if (meshMap[k]._name === name) { return meshMap[id].position.distanceTo(meshMap[k].position) } } return 0 },
     isTouching: function () { return joystick.active },
+    // Sistema 2: Armas e combate (exportado)
+    shoot: function () { dbg('shoot() — sem implementação no export', 'log', 'Weapon') },
+    reload: function () { dbg('reload()', 'log', 'Weapon') },
+    equipWeapon: function (name) { dbg('equipWeapon: ' + name, 'log', 'Weapon') },
+    getAmmo: function () { return gc._weaponAmmo || 0 },
+    takeDamage: function (id, amount) {
+      for (var i = 0; i < scene.conects.length; i++) {
+        if (scene.conects[i].instanceId === id) {
+          var c = scene.conects[i]
+          c.health = Math.max(0, (c.health || 100) - amount)
+          dbg(c.name + ' recebeu ' + amount + ' dano (vida: ' + c.health + ')', 'log', 'Combat')
+          var rt = runtimes[id]; if (rt) rt.triggerEvent('onDamage', { amount: amount, source: 'weapon' })
+          if (c.health <= 0 && meshMap[id]) meshMap[id].visible = false
+          break
+        }
+      }
+    },
+    getHealth: function (id) {
+      for (var i = 0; i < scene.conects.length; i++) { if (scene.conects[i].instanceId === id) return scene.conects[i].health || 100 }
+      return 100
+    },
+    // Sistema 3: Inventário (exportado)
+    addToInventory: function (name, qty) {
+      gc._inventory = gc._inventory || {}
+      gc._inventory[name] = (gc._inventory[name] || 0) + (qty || 1)
+      dbg('Item "' + name + '" adicionado (' + qty + '). Total: ' + gc._inventory[name], 'log', 'Inventory')
+      for (var k in runtimes) { runtimes[k].triggerEvent('onPickup', { itemName: name, quantity: qty }) }
+    },
+    removeFromInventory: function (name, qty) {
+      gc._inventory = gc._inventory || {}
+      if (!gc._inventory[name]) return
+      gc._inventory[name] = Math.max(0, gc._inventory[name] - (qty || 1))
+      if (gc._inventory[name] === 0) delete gc._inventory[name]
+    },
+    getInventoryCount: function (name) { return (gc._inventory || {})[name] || 0 },
+    hasItem: function (name) { return ((gc._inventory || {})[name] || 0) > 0 },
+    // Sistema 3: Sinais (exportado)
+    emitSignal: function (name, sigData) {
+      for (var k in runtimes) { runtimes[k].triggerEvent('onSignal', { name: name, data: sigData }) }
+      dbg('Signal emitido: ' + name, 'log', 'Signals')
+    },
   }
   window._flirGameContext = gc
 
