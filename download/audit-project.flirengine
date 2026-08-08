@@ -1,0 +1,210 @@
+{
+  "version": 3,
+  "createdAt": "2026-08-08T18:24:47.857Z",
+  "scene": {
+    "objects": [
+      {
+        "id": "obj_5yxoja5w",
+        "type": "cube",
+        "name": "Cubo",
+        "position": [
+          -1.8,
+          0.5,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "args": {
+          "size": 1
+        },
+        "material": {
+          "color": "#cccccc",
+          "roughness": 0.7,
+          "metalness": 0,
+          "map": null,
+          "normalMap": null,
+          "repeat": [
+            1,
+            1
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "opacity": 1,
+          "transparent": false,
+          "wireframe": false,
+          "flatShading": false,
+          "emissive": "#000000",
+          "emissiveIntensity": 0,
+          "layers": []
+        },
+        "visible": true,
+        "imported": false,
+        "modifiers": [],
+        "parentId": null,
+        "customGeometry": null,
+        "skeleton": null,
+        "animations": {}
+      }
+    ],
+    "background": {
+      "type": "solid",
+      "color": "#0d1117",
+      "gradientTop": "#1a2332",
+      "gradientBottom": "#0a0d12"
+    },
+    "grid": {
+      "visible": true,
+      "size": 20,
+      "divisions": 20,
+      "color": "#30363d"
+    },
+    "lights": {
+      "ambient": {
+        "intensity": 0.6,
+        "color": "#ffffff"
+      },
+      "directional": {
+        "intensity": 1.2,
+        "color": "#ffffff",
+        "position": [
+          5,
+          8,
+          5
+        ]
+      },
+      "hdri": null
+    }
+  },
+  "scenes": [
+    {
+      "id": "scene_c3p5c0pk",
+      "name": "Nível 1",
+      "objects": [
+        {
+          "instanceId": "inst_4iyd14lk",
+          "objectId": "obj_5yxoja5w",
+          "position": [
+            0,
+            0.5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "playerObjectId": null,
+      "gameCamera": {
+        "type": "perspective",
+        "position": [
+          5,
+          4,
+          6
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "fov": 50,
+        "near": 0.1,
+        "far": 200,
+        "orthoSize": 5
+      },
+      "background": null,
+      "grid": null,
+      "lights": null,
+      "conects": [
+        {
+          "instanceId": "conect_am1lfvxo",
+          "type": "StopObject",
+          "name": "Stop Object (Kinematic)",
+          "position": [
+            0,
+            0.5,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "visible": true,
+          "flirScript": "FLIRCODE:fun onStart() begincode\nprint(\"TEST START\")\nsetVar(\"x\", 42)\nvar v = getVar(\"x\")\nprint(\"x=\" + v)\nvar d = distanceTo(\"Cubo\")\nprint(\"dist=\" + d)\nwait(1)\nprint(\"wait done\")\nrotate(0, 90, 0)\nscale(2, 2, 2)\nemitSignal(\"test\", \"hello\")\nprint(\"ALL OK\")\nendcode\n\nfun onSignal(nome, dados) begincode\nprint(\"signal: \" + nome + \" \" + dados)\nendcode",
+          "friction": 0.4,
+          "restitution": 0.2,
+          "colliderShape": "model",
+          "colliderSize": [
+            1,
+            1,
+            1
+          ],
+          "colliderOffset": [
+            0,
+            0,
+            0
+          ],
+          "colliderRadius": 0.5,
+          "colliderHeight": 1.5
+        }
+      ]
+    }
+  ],
+  "activeSceneId": "scene_c3p5c0pk",
+  "appMode": "ui",
+  "uiScreens": [
+    {
+      "id": "uiscreen_hevu0mec",
+      "name": "HUD",
+      "elements": [
+        {
+          "id": "uiel_oeaxtl63",
+          "type": "Button",
+          "name": "Button",
+          "position": [
+            50,
+            50
+          ],
+          "size": [
+            120,
+            40
+          ],
+          "color": "#2f81f7",
+          "textColor": "#e6edf3",
+          "fontSize": 14,
+          "borderColor": "#30363d",
+          "borderWidth": 1,
+          "borderRadius": 6,
+          "padding": 8,
+          "label": "Botão",
+          "eventName": "onClick"
+        }
+      ],
+      "visible": true
+    }
+  ],
+  "activeUIScreenId": "uiscreen_hevu0mec",
+  "flirCodeClasses": []
+}
