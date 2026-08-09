@@ -23,7 +23,7 @@ import { useStore } from '../../store/useStore'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
 import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
 import { createFlirCodeRuntime } from '../../utils/flirscript/flircode'
-import { createAnimationPlayer } from '../../utils/animationPlayer'
+import { createAnimationPlayer, clearPoseCache } from '../../utils/animationPlayer'
 import { createNPCAI } from '../../utils/conects/npcAI'
 import { debugLog } from '../../utils/debug/debugStore'
 
@@ -619,6 +619,10 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   // Loop do jogo
   useFrame((_, delta) => {
     if (!isGameMode) return
+
+    // OTIMIZAÇÃO: limpar cache de poses no início de cada frame
+    // (permite que 200 NPCs partilhem a mesma pose calculada)
+    clearPoseCache()
 
     // Física
     if (physicsRef.current) {

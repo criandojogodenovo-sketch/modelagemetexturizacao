@@ -20,6 +20,7 @@
  * Para animar o objeto inteiro (sem bones), usamos keyframes com boneId = 'object'.
  */
 import * as THREE from 'three'
+import { getCachedPose, applyPose, clearPoseCache } from './sharedAnimationCache'
 
 // Funções de interpolação
 function interpolate(a, b, t, type = 'ease') {
@@ -106,37 +107,25 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
       }
     }
 
-    // Aplicar transform aos bones ou ao objeto
+    // OTIMIZAÇÃO: usar cache partilhado de poses
+    // Se 200 NPCs tocam o mesmo clip no mesmo tempo, a interpolação
+    // é calculada UMA VEZ e reutilizada para todos
     const mesh = getMesh?.()
     const bones = getBones?.()
 
-    // Coletar todos os boneIds únicos
-    const boneIds = [...new Set(keyframes.map((k) => k.boneId))]
+    const pose = getCachedPose(currentClip, keyframes, currentTime)
 
-    for (const boneId of boneIds) {
-      const pair = findKeyframePair(keyframes, currentTime, boneId)
-      if (!pair) continue
-      const { prev, next, t } = pair
-      const interp = next.interpolation || 'ease'
+    // Aplicar 'object' (transform do mesh inteiro)
+    const objTransform = pose.get('object')
+    if (objTransform && mesh) {
+      mesh.position.set(...objTransform.position)
+      mesh.rotation.set(...objTransform.rotation)
+      mesh.scale.set(...objTransform.scale)
+    }
 
-      const position = interpolateVec3(prev.position || [0,0,0], next.position || [0,0,0], t, interp)
-      const rotation = interpolateVec3(prev.rotation || [0,0,0], next.rotation || [0,0,0], t, interp)
-      const scale = interpolateVec3(prev.scale || [1,1,1], next.scale || [1,1,1], t, interp)
-
-      if (boneId === 'object' && mesh) {
-        // Animar o objeto inteiro
-        mesh.position.set(...position)
-        mesh.rotation.set(...rotation)
-        mesh.scale.set(...scale)
-      } else if (bones) {
-        // Animar um osso específico
-        const bone = bones.find((b) => b.id === boneId || b.name === boneId)
-        if (bone) {
-          bone.position.set(...position)
-          bone.rotation.set(...rotation)
-          bone.scale.set(...scale)
-        }
-      }
+    // Aplicar aos bones (apenas copiar valores — sem recalcular)
+    if (bones) {
+      applyPose(pose, bones)
     }
   }
 
@@ -145,3 +134,6 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
     getCurrentClip, isPlaying, getCurrentTime,
   }
 }
+
+// Exportar para que SceneLevel3D chame no início de cada frame
+export { clearPoseCache }
