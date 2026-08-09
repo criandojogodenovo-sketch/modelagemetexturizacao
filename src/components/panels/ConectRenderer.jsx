@@ -441,19 +441,66 @@ function AmbientLightMesh({ conect, setMeshRef }) {
 }
 
 // ===== SkyObject (solid, gradient, hdri, procedural) =====
+// Céu procedural usando THREE.Sky com tone mapping correto e luz do sol.
 function SkyMesh({ conect, setMeshRef }) {
   const { scene, gl } = useThree()
+  const sunLightRef = useRef()
 
-  // Criar o objeto Sky uma vez (não recriar a cada render)
-  // Scale 100 = raio 50, dentro do far plane (200) da câmara
+  // 1. Configurar tone mapping para o Sky procedural
+  //    Usar NoToneMapping para que as cores HDR do shader não sejam comprimidas
+  useEffect(() => {
+    if (conect.skyType !== 'procedural') return
+    const prevToneMapping = gl.toneMapping
+    const prevExposure = gl.toneMappingExposure
+    gl.toneMapping = THREE.ACESFilmicToneMapping
+    gl.toneMappingExposure = 0.2
+    // Forçar recompilação de todos os materiais com o novo tone mapping
+    scene.traverse(obj => {
+      if (obj.material) obj.material.needsUpdate = true
+    })
+    return () => {
+      gl.toneMapping = prevToneMapping
+      gl.toneMappingExposure = prevExposure
+      scene.traverse(obj => {
+        if (obj.material) obj.material.needsUpdate = true
+      })
+    }
+  }, [conect.skyType, gl, scene])
+
+  // 2. Criar o objeto Sky uma vez com shader patchado
   const skyObj = useMemo(() => {
     if (conect.skyType !== 'procedural') return null
     const sky = new Sky()
     sky.scale.setScalar(100)
+    sky.frustumCulled = false
+    // Patchear o fragment shader para adicionar tons de pôr do sol
+    // Usar regex para corresponder com tabs/espaços variáveis
+    const origFrag = sky.material.fragmentShader
+    const patchedFrag = origFrag.replace(
+      /gl_FragColor\s*=\s*vec4\(\s*texColor\s*,\s*1\.0\s*\)\s*;/,
+      `// === Sunset enhancement ===
+        float _sunH = vSunDirection.y;
+        float _sunsetF = 1.0 - smoothstep(0.0, 0.4, _sunH);
+        vec3 _sunsetC = vec3(1.0, 0.4, 0.1);
+        float _horizG = pow(1.0 - max(0.0, direction.y), 2.0) * _sunsetF;
+        texColor = mix(texColor, _sunsetC * 3.0, _horizG * 0.6);
+        gl_FragColor = vec4( texColor, 1.0 );`
+    )
+    sky.material.fragmentShader = patchedFrag
+    sky.material.needsUpdate = true
     return sky
   }, [conect.skyType])
 
-  // Atualizar uniforms do Sky quando parâmetros mudam
+  // Forçar recompilação do material do Sky quando tone mapping muda
+  useEffect(() => {
+    if (!skyObj) return
+    skyObj.material.needsUpdate = true
+  }, [skyObj, gl.toneMapping])
+
+  // 3. Atualizar uniforms do Sky quando parâmetros mudam
+  //    Ajustar rayleigh automaticamente consoante elevação do sol:
+  //    - Sol baixo: rayleigh maior → mais scattering → tons alaranjados
+  //    - Sol alto: rayleigh menor → céu azul mais saturado
   useEffect(() => {
     if (!skyObj) return
     const sun = new THREE.Vector3()
@@ -462,26 +509,52 @@ function SkyMesh({ conect, setMeshRef }) {
     sun.setFromSphericalCoords(1, elev, azim)
     skyObj.material.uniforms['sunPosition'].value.copy(sun)
     skyObj.material.uniforms['turbidity'].value = conect.turbidity ?? 10
-    skyObj.material.uniforms['rayleigh'].value = conect.rayleigh ?? 1
+    // Rayleigh automático: aumentar quando sol está baixo para intensificar tons quentes
+    const userRayleigh = conect.rayleigh ?? 1
+    const elevDeg = conect.sunElevation ?? 25
+    const autoRayleigh = userRayleigh * (1 + Math.max(0, (30 - elevDeg) / 30) * 2)
+    skyObj.material.uniforms['rayleigh'].value = autoRayleigh
     skyObj.material.uniforms['mieCoefficient'].value = conect.mieCoefficient ?? 0.005
     skyObj.material.uniforms['mieDirectionalG'].value = 0.8
   }, [skyObj, conect.sunElevation, conect.sunAzimuth, conect.turbidity, conect.rayleigh, conect.mieCoefficient])
 
-  // Configurar tone mapping do renderer para o Sky procedural
-  // (Sky shader calcula cores em HDR; sem tone mapping correto fica branco)
+  // 4. Adicionar/remover Sky à cena
   useEffect(() => {
-    if (conect.skyType !== 'procedural') return
-    const prevToneMapping = gl.toneMapping
-    const prevExposure = gl.toneMappingExposure
-    gl.toneMapping = THREE.ACESFilmicToneMapping
-    gl.toneMappingExposure = 1.0
-    return () => {
-      gl.toneMapping = prevToneMapping
-      gl.toneMappingExposure = prevExposure
+    if (conect.skyType === 'procedural' && skyObj) {
+      scene.add(skyObj)
+      return () => { scene.remove(skyObj) }
     }
-  }, [conect.skyType, gl])
+  }, [skyObj, scene, conect.skyType])
 
-  // Aplicar background consoante o tipo
+  // 5. Calcular direção do sol para a luz direcional
+  const sunDirection = useMemo(() => {
+    const elev = THREE.MathUtils.degToRad(conect.sunElevation ?? 25)
+    const azim = THREE.MathUtils.degToRad(conect.sunAzimuth ?? 180)
+    const dir = new THREE.Vector3()
+    dir.setFromSphericalCoords(1, elev, azim)
+    return dir
+  }, [conect.sunElevation, conect.sunAzimuth])
+
+  // 6. Cor da luz do sol baseada na elevação (warm at sunset, white at noon)
+  const sunLightColor = useMemo(() => {
+    const elev = conect.sunElevation ?? 25
+    // Abaixo de 10 graus: laranja avermelhado (pôr/nascer do sol)
+    // 10-30 graus: amarelo quente
+    // 30+ graus: branco neutro
+    if (elev < 5) return new THREE.Color(0xff6600) // pôr do sol profundo
+    if (elev < 15) return new THREE.Color(0xffaa44) // pôr do sol
+    if (elev < 30) return new THREE.Color(0xffddaa) // manhã/tarde
+    return new THREE.Color(0xffffff) // meio-dia
+  }, [conect.sunElevation])
+
+  // 7. Intensidade da luz do sol (diminui com a elevação baixa)
+  const sunLightIntensity = useMemo(() => {
+    const elev = conect.sunElevation ?? 25
+    // Mapear elevação 0-90 para intensidade 0.3-2.5
+    return Math.max(0.3, (elev / 90) * 2.5)
+  }, [conect.sunElevation])
+
+  // 8. Aplicar background consoante o tipo
   useEffect(() => {
     if (conect.skyType === 'solid') {
       scene.background = new THREE.Color(conect.solidColor || '#87ceeb')
@@ -508,25 +581,24 @@ function SkyMesh({ conect, setMeshRef }) {
         pmrem.dispose()
       })
     } else if (conect.skyType === 'procedural') {
-      // Para procedural, limpar scene.background para que o Sky mesh seja visível
-      // (o Sky é um mesh 3D que renderiza o céu)
       scene.background = null
     }
   }, [conect.skyType, conect.solidColor, conect.topColor, conect.bottomColor, conect.hdriUrl, scene, gl])
 
-  // Adicionar Sky diretamente à cena se for procedural
-  useEffect(() => {
-    if (conect.skyType === 'procedural' && skyObj) {
-      scene.add(skyObj)
-      return () => { scene.remove(skyObj) }
-    }
-  }, [skyObj, scene, conect.skyType])
-
-  if (conect.skyType === 'procedural' && skyObj) {
+  if (conect.skyType === 'procedural') {
     return (
       <group ref={setMeshRef} userData={{ conectInstanceId: conect.instanceId }}>
+        {/* Luz direcional que simula o sol — ilumina os objetos da cena */}
+        <directionalLight
+          ref={sunLightRef}
+          position={[sunDirection.x * 50, sunDirection.y * 50, sunDirection.z * 50]}
+          intensity={sunLightIntensity}
+          color={sunLightColor}
+          castShadow
+        />
         {conect.starsEnabled && <StarsMesh />}
         {/* Sky é adicionado diretamente à cena via useEffect acima */}
+        {/* Gizmo invisível para seleção */}
         <mesh visible={false}>
           <sphereGeometry args={[0.1, 8, 8]} />
           <meshBasicMaterial />
