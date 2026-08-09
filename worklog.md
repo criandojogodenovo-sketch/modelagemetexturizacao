@@ -331,3 +331,53 @@ Stage Summary:
 - 3 passos concluídos com testes ativos
 - Honestidade: GI não tem impacto mensurável (bottleneck é rendering, não luzes)
 - Curve Deform agora suave graças a Catmull-Rom
+
+---
+Task ID: P10
+Agent: main
+Task: Shadow Optimization Combo + Vertex AO pré-calculado
+
+Work Log:
+1. Shadow Optimization Combo
+   - renderSettings: shadowOptimizations, shadowDistance (default 20), shadowMapSize (default 1024)
+   - SceneSettings: UI com toggle, slider de distância, dropdown de resolução
+   - ShadowOptimizer: desliga castShadow em meshes além da distância (meshRefs, não scene.traverse)
+   - Otimização: só reavalia quando câmara se move >5 unidades ou nº meshes muda
+   - directionalLight: shadow-mapSize agora lê de renderSettings (era hardcoded 2048)
+   
+   TESTE FPS (100-400 cubos):
+   - Sem otim, 2048: 38 FPS
+   - Com culling, 1024: 38 FPS
+   - Resultado: browser limitado a 38 FPS (vsync), não foi possível medir diferença
+   - O culling não piora o FPS (otimizado)
+
+2. Vertex AO pré-calculado
+   - vertexAO.js: computeVertexAO (16 amostras hemisféricas por vértice, raycast)
+   - applyVertexAO: aplica como vertex colors (multiplica cor existente por factor AO)
+   - SceneObject: aplica quando vertexAOEnabled e vertCount > 50
+   - Material: vertexColors: true quando AO ativo
+   
+   TESTE (cubo com subdivision, 561 vértices):
+   - Sem AO: cor uniforme
+   - Com AO: VLM confirma 'darker in crevices, corners' 
+   - FPS: 16 com AO vs 17 sem AO (sem impacto, dentro margem erro)
+   
+   Limitação: geometrias convexas (esfera) calculam AO ~1.0 (sem oclusão)
+   Efeito visível em modelos com cantos/concavidades
+
+3. Fix MaterialEditor crash
+   - Guarda: if (!obj || !obj.material) return null
+   - RightPanel: só renderiza se obj?.material existir
+
+4. Conflito entre as duas
+   - Verificado: não há conflito
+   - ShadowOptimizer: opera em castShadow (runtime)
+   - Vertex AO: opera em vertex colors (setup)
+   - Podem ser usados em simultâneo
+
+Stage Summary:
+- Commit: e297aef
+- Push: sucesso (origin/main)
+- Build: ✓ (2580 KiB)
+- Honestidade: não foi possível medir ganho de FPS do shadow combo (browser limitado a 38 FPS)
+- Vertex AO funciona mas efeito é subtil em geometrias convexas
