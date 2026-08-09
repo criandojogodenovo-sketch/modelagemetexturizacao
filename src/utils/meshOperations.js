@@ -479,3 +479,114 @@ export function findClosestFace(geometry, raycaster, mesh) {
   if (intersects.length === 0) return null
   return intersects[0]
 }
+
+// ---------- Curve Deform ----------
+/**
+ * Deforma uma geometria ao longo de uma curva (array de pontos [x,y,z]).
+ *
+ * Como funciona:
+ *  1. Calcula o bounding box da geometria original
+ *  2. Para cada vértice, mapeia a sua posição X (ao longo do eixo principal)
+ *     para um parâmetro t ∈ [0, 1] ao longo da curva
+ *  3. Obtém a posição na curva correspondente a t (com interpolação)
+ *  4. Translada o vértice para essa posição, mantendo Y/Z relativos
+ *  5. Aplica rotação para alinhar com a tangente da curva
+ *
+ * @param {THREE.BufferGeometry} geometry - geometria a deformar
+ * @param {Array} pathPoints - array de [x,y,z] pontos da curva
+ * @param {Object} options - { twist: 0, stretch: 1 }
+ * @returns {THREE.BufferGeometry} - nova geometria deformada
+ */
+export function curveDeform(geometry, pathPoints, options = {}) {
+  if (!pathPoints || pathPoints.length < 2) return geometry
+
+  const { twist = 0, stretch = 1 } = options
+
+  // Clonar geometria para não mutar a original
+  const result = geometry.clone()
+
+  // Calcular bounding box para mapear X → t
+  result.computeBoundingBox()
+  const bbox = result.boundingBox
+  const minX = bbox.min.x
+  const maxX = bbox.max.x
+  const rangeX = maxX - minX || 1
+
+  // Normalizar pathPoints para THREE.Vector3
+  const points = pathPoints.map(p => new THREE.Vector3(p[0], p[1], p[2]))
+
+  // Calcular comprimento total da curva
+  let totalLength = 0
+  const segmentLengths = []
+  for (let i = 0; i < points.length - 1; i++) {
+    const len = points[i].distanceTo(points[i + 1])
+    segmentLengths.push(len)
+    totalLength += len
+  }
+  if (totalLength === 0) return geometry
+
+  // Função para obter ponto e tangente na curva em t ∈ [0, 1]
+  function getPointOnCurve(t) {
+    t = Math.max(0, Math.min(1, t))
+    const targetDist = t * totalLength
+    let accumDist = 0
+    for (let i = 0; i < segmentLengths.length; i++) {
+      if (accumDist + segmentLengths[i] >= targetDist) {
+        const localT = (targetDist - accumDist) / segmentLengths[i]
+        const p1 = points[i]
+        const p2 = points[i + 1]
+        const point = new THREE.Vector3().lerpVectors(p1, p2, localT)
+        const tangent = new THREE.Vector3().subVectors(p2, p1).normalize()
+        return { point, tangent }
+      }
+      accumDist += segmentLengths[i]
+    }
+    // Fallback: último ponto
+    const lastIdx = points.length - 1
+    const tangent = new THREE.Vector3().subVectors(points[lastIdx], points[lastIdx - 1]).normalize()
+    return { point: points[lastIdx].clone(), tangent }
+  }
+
+  // Para cada vértice, deformar
+  const pos = result.attributes.position
+  const v = new THREE.Vector3()
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i)
+
+    // Mapear X → t (0 no minX, 1 no maxX)
+    const t = (v.x - minX) / rangeX
+
+    // Obter ponto na curva
+    const { point, tangent } = getPointOnCurve(t * stretch)
+
+    // Offset relativo (Y e Z do vértice original)
+    const offsetY = v.y
+    const offsetZ = v.z
+
+    // Calcular rotação para alinhar X com a tangente
+    // Tangente padrão é (1,0,0); queremos rodar para `tangent`
+    const defaultDir = new THREE.Vector3(1, 0, 0)
+    const quat = new THREE.Quaternion().setFromUnitVectors(defaultDir, tangent)
+
+    // Aplicar rotação ao offset (Y,Z)
+    const offset = new THREE.Vector3(0, offsetY, offsetZ)
+    offset.applyQuaternion(quat)
+
+    // Aplicar twist (rotação incremental ao longo da curva)
+    if (twist !== 0) {
+      const twistAngle = t * twist * Math.PI * 2
+      const twistQuat = new THREE.Quaternion().setFromAxisAngle(tangent, twistAngle)
+      offset.applyQuaternion(twistQuat)
+    }
+
+    // Posição final = ponto na curva + offset rotacionado
+    v.copy(point).add(offset)
+    pos.setXYZ(i, v.x, v.y, v.z)
+  }
+
+  pos.needsUpdate = true
+  result.computeVertexNormals()
+  result.computeBoundingBox()
+  result.computeBoundingSphere()
+  return result
+}

@@ -10,6 +10,7 @@ import {
   IconMirror,
   IconArray,
   IconSolidify,
+  IconCurve,
   IconTrash,
 } from '../ui/Icons'
 
@@ -18,6 +19,7 @@ const MODIFIER_ICONS = {
   mirror: IconMirror,
   array: IconArray,
   solidify: IconSolidify,
+  curve: IconCurve,
 }
 
 export default function ModifiersPanel() {
@@ -195,6 +197,64 @@ function ModifierParams({ mod, onChange }) {
           />
         </div>
       )
+    case 'curve': {
+      // Listar PathObjects disponíveis em todas as cenas
+      const scenes = useStore.getState().scenes || []
+      const pathOptions = []
+      for (const scene of scenes) {
+        for (const conect of scene.conects || []) {
+          if (conect.type === 'PathObject' && conect.points?.length >= 2) {
+            pathOptions.push({
+              id: conect.instanceId,
+              label: `${conect.name || 'Path'} (${conect.points.length} pts)`,
+            })
+          }
+        }
+      }
+      return (
+        <>
+          <div className="prop-row">
+            <label>Path (curva)</label>
+            <select
+              value={params.pathId || ''}
+              onChange={(e) => onChange({ pathId: e.target.value || null })}
+            >
+              <option value="">— Selecionar Path —</option>
+              {pathOptions.map((opt) => (
+                <option key={opt.id} value={opt.id}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          {pathOptions.length === 0 && (
+            <div className="small muted">
+              💡 Cria um PathObject numa cena primeiro (Conects → Path Object).
+            </div>
+          )}
+          <div className="prop-row">
+            <label>Twist (rotações): {params.twist}</label>
+            <input
+              type="range"
+              min="-3"
+              max="3"
+              step="0.1"
+              value={params.twist || 0}
+              onChange={(e) => onChange({ twist: Number(e.target.value) })}
+            />
+          </div>
+          <div className="prop-row">
+            <label>Stretch: {params.stretch}</label>
+            <input
+              type="range"
+              min="0.1"
+              max="3"
+              step="0.1"
+              value={params.stretch || 1}
+              onChange={(e) => onChange({ stretch: Number(e.target.value) })}
+            />
+          </div>
+        </>
+      )
+    }
     default:
       return null
   }

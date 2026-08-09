@@ -78,6 +78,11 @@ const initialScene = {
     },
     hdri: null, // dataURL do HDRI ou null
   },
+  // Renderização avançada (recursos pesados — off por defeito)
+  renderSettings: {
+    flirGI: false,        // Iluminação global em tempo real (aproximação)
+    flirAdaptiveMesh: false, // Geometria adaptativa (LOD automático por distância)
+  },
 }
 
 // Modos da aplicação
@@ -111,6 +116,12 @@ export const MODIFIER_TYPES = {
     icon: 'solidify',
     defaultParams: { thickness: 0.1 },
     description: 'Dá espessura a uma superfície',
+  },
+  curve: {
+    label: 'Curva (Deformar ao longo de Path)',
+    icon: 'curve',
+    defaultParams: { pathId: null, twist: 0, stretch: 1 },
+    description: 'Deforma a geometria ao longo de um PathObject (curva)',
   },
 }
 
@@ -147,6 +158,8 @@ function newProjectState() {
       activeClip: 'idle',
       loop: true,
     },
+    // Bone selecionado no editor (para rigging/animacao)
+    selectedBoneId: null,
     // Edit mode
     editSelectionMode: 'face',
     selectedVertices: [],
@@ -801,6 +814,9 @@ export const useStore = create(
       },
 
       // ---------- Animação / Keyframes ----------
+      selectBone: (boneId) => set({ selectedBoneId: boneId }),
+      clearBoneSelection: () => set({ selectedBoneId: null }),
+
       addKeyframe: (objId, clipName, boneId, frame, transform) => {
         get()._pushHistory()
         const kf = {
@@ -863,6 +879,9 @@ export const useStore = create(
           },
         }))
       },
+      setRenderSettings: (patch) => set((s) => ({
+        renderSettings: { ...s.renderSettings, ...patch },
+      })),
 
       // ---------- UI Editor (Fase 6) ----------
       // Múltiplas telas de UI: Main Menu, HUD, Game Over, etc.
@@ -1539,6 +1558,7 @@ export const useStore = create(
         background: state.background,
         grid: state.grid,
         lights: state.lights,
+        renderSettings: state.renderSettings,
         transformMode: state.transformMode,
         mode: state.mode,
         scenes: state.scenes,

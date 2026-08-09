@@ -19,6 +19,9 @@ import * as THREE from 'three'
 import SceneObject from './SceneObject'
 import SkeletonGizmo from './SkeletonGizmo'
 import { useStore } from '../../store/useStore'
+import { getCachedPose, applyPose, clearPoseCache } from '../../utils/sharedAnimationCache'
+import { applyFlirGI, removeFlirGI } from '../../utils/flirGI'
+import { updateAdaptiveLODs } from '../../utils/flirAdaptiveMesh'
 
 // ----- Componente interno: aplica o fundo da cena -----
 function SceneBackground({ background }) {
@@ -240,6 +243,94 @@ function SelectedTransformControls({ selectedMesh, orbitRef }) {
   )
 }
 
+// ----- Componente: TransformControls para bones (modo rig/animate) -----
+function BoneTransformControls({ boneObj, orbitRef, objId, boneId }) {
+  const transformMode = useStore((s) => s.transformMode)
+  const updateBone = useStore((s) => s.updateBone)
+  const mode = useStore((s) => s.mode)
+
+  // Só mostra em modo rig ou weight ou animate (não em object/edit/sculpt)
+  if (!boneObj || !objId || !boneId) return null
+  if (mode !== 'rig' && mode !== 'weight' && mode !== 'animate') return null
+
+  return (
+    <TransformControls
+      object={boneObj}
+      mode={transformMode}
+      size={0.6}
+      onMouseDown={() => {
+        if (orbitRef.current) orbitRef.current.enabled = false
+      }}
+      onMouseUp={() => {
+        if (orbitRef.current) orbitRef.current.enabled = true
+        updateBone(objId, boneId, {
+          position: [boneObj.position.x, boneObj.position.y, boneObj.position.z],
+          rotation: [boneObj.rotation.x, boneObj.rotation.y, boneObj.rotation.z],
+          scale: [boneObj.scale.x, boneObj.scale.y, boneObj.scale.z],
+        })
+      }}
+      onObjectChange={() => {
+        updateBone(objId, boneId, {
+          position: [boneObj.position.x, boneObj.position.y, boneObj.position.z],
+          rotation: [boneObj.rotation.x, boneObj.rotation.y, boneObj.rotation.z],
+          scale: [boneObj.scale.x, boneObj.scale.y, boneObj.scale.z],
+        })
+      }}
+    />
+  )
+}
+
+// ----- Componente: aplica animação de keyframes aos bones no editor -----
+function EditorAnimationPlayer({ meshRefs }) {
+  const animation = useStore((s) => s.animation)
+  const selectedId = useStore((s) => s.selectedId)
+  const objects = useStore((s) => s.objects)
+
+  useFrame(() => {
+    clearPoseCache()
+    if (!animation.playing || !selectedId) return
+    const obj = objects.find(o => o.id === selectedId)
+    if (!obj || !obj.animations) return
+    const clip = obj.animations[animation.activeClip]
+    if (!clip || clip.length === 0) return
+
+    const mesh = meshRefs.current.get(selectedId)
+    if (!mesh || !mesh.isSkinnedMesh || !mesh.skeleton) return
+    const bones = mesh.skeleton.bones
+
+    // Calcular pose no tempo atual e aplicar aos bones
+    const pose = getCachedPose(animation.activeClip, clip, animation.currentTime)
+    applyPose(pose, bones)
+    mesh.skeleton.update()
+  })
+
+  return null
+}
+
+// ----- Componente: aplica/remove Flir GI (iluminação global) -----
+function FlirGIHelper({ enabled }) {
+  const { scene } = useThree()
+  useEffect(() => {
+    if (enabled) {
+      const gi = applyFlirGI(scene)
+      return () => gi.dispose()
+    } else {
+      removeFlirGI(scene)
+    }
+  }, [enabled, scene])
+  return null
+}
+
+// ----- Componente: atualiza LODs adaptativos a cada frame -----
+function FlirAdaptiveMeshHelper({ enabled }) {
+  const { camera, scene } = useThree()
+  useFrame(() => {
+    if (!enabled) return
+    updateAdaptiveLODs(scene, camera)
+  })
+  return null
+}
+
 // ----- Componente principal -----
 export default function Scene3D() {
   const objects = useStore((s) => s.objects)
@@ -249,11 +340,16 @@ export default function Scene3D() {
   const background = useStore((s) => s.background)
   const grid = useStore((s) => s.grid)
   const lights = useStore((s) => s.lights)
+  const renderSettings = useStore((s) => s.renderSettings)
   const mode = useStore((s) => s.mode)
+  const selectedBoneId = useStore((s) => s.selectedBoneId)
+  const selectBone = useStore((s) => s.selectBone)
+  const updateBone = useStore((s) => s.updateBone)
 
   const orbitRef = useRef(null)
   const meshRefs = useRef(new Map())
   const [selectedMesh, setSelectedMesh] = useState(null)
+  const [selectedBoneObj, setSelectedBoneObj] = useState(null)
 
   useEffect(() => {
     if (selectedId && meshRefs.current.has(selectedId)) {
@@ -271,6 +367,21 @@ export default function Scene3D() {
       }
     }
   }, [selectedId, objects])
+
+  // Resolver THREE.Bone a partir do selectedBoneId (para TransformControls)
+  useEffect(() => {
+    if (!selectedBoneId || !selectedId) {
+      setSelectedBoneObj(null)
+      return
+    }
+    const mesh = meshRefs.current.get(selectedId)
+    if (mesh && mesh.isSkinnedMesh && mesh.skeleton) {
+      const bone = mesh.skeleton.bones.find(b => b.userData?.boneId === selectedBoneId)
+      setSelectedBoneObj(bone || null)
+    } else {
+      setSelectedBoneObj(null)
+    }
+  }, [selectedBoneId, selectedId, selectedMesh])
 
   const setMeshRef = useCallback((id, node) => {
     if (node) {
@@ -352,7 +463,7 @@ export default function Scene3D() {
             />
             {/* SkeletonGizmo — visualização do esqueleto sobreposta ao modelo */}
             {obj.id === selectedId && obj.skeleton && obj.skeleton.bones?.length > 0 && (
-              <SkeletonGizmo skeleton={obj.skeleton} selectedBoneId={null} onSelectBone={() => {}} />
+              <SkeletonGizmo skeleton={obj.skeleton} selectedBoneId={selectedBoneId} onSelectBone={selectBone} />
             )}
           </group>
         ))}
@@ -360,9 +471,26 @@ export default function Scene3D() {
         {/* Gizmo de transformação no objeto selecionado (só em modo object) */}
         <SelectedTransformControls selectedMesh={selectedMesh} orbitRef={orbitRef} />
 
+        {/* Gizmo de transformação no osso selecionado (só em modo rig/weight/animate) */}
+        <BoneTransformControls
+          boneObj={selectedBoneObj}
+          orbitRef={orbitRef}
+          objId={selectedId}
+          boneId={selectedBoneId}
+        />
+
         {/* Raycast para sculpt */}
         <SculptRaycaster meshRefs={meshRefs} orbitRef={orbitRef} />
         <WeightPaintRaycaster meshRefs={meshRefs} orbitRef={orbitRef} />
+
+        {/* Player de animação no editor (aplica keyframes aos bones) */}
+        <EditorAnimationPlayer meshRefs={meshRefs} />
+
+        {/* Flir GI — iluminação global (recurso pesado) */}
+        <FlirGIHelper enabled={renderSettings?.flirGI || false} />
+
+        {/* Flir Adaptive Mesh — LOD adaptativo (recurso pesado) */}
+        <FlirAdaptiveMeshHelper enabled={renderSettings?.flirAdaptiveMesh || false} />
 
         {/* Câmara orbital — desativada em modo sculpt durante o arraste */}
         <OrbitControls

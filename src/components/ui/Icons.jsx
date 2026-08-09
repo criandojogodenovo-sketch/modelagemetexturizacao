@@ -325,6 +325,14 @@ export const IconSolidify = (p) => (
   </svg>
 )
 
+export const IconCurve = (p) => (
+  <svg {...base(p)}>
+    <path d="M3 18 C 3 8, 21 16, 21 6" fill="none" />
+    <circle cx="3" cy="18" r="1.5" fill="currentColor" />
+    <circle cx="21" cy="6" r="1.5" fill="currentColor" />
+  </svg>
+)
+
 export const IconBoolean = (p) => (
   <svg {...base(p)}>
     <circle cx="9" cy="12" r="6" />

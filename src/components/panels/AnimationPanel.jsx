@@ -3,12 +3,11 @@
  *
  * Permite:
  *  - Ver e gerir clips de animação (idle, walk, run, jump)
- *  - Adicionar keyframes para o osso selecionado
+ *  - Selecionar um osso específico para animar
+ *  - Adicionar keyframes para o osso selecionado (ou todos)
+ *  - Ver keyframes por osso na timeline
  *  - Reproduzir/pausar animação
  *  - Configurar FPS, duração, loop
- *
- * A timeline é uma barra fixa em baixo do ecrã (renderizada em App.jsx).
- * Este painel mostra os controlos detalhados.
  */
 import { useStore, useSelectedObject } from '../../store/useStore'
 import { IconPlay, IconPause, IconKey, IconBone, IconTrash } from '../ui/Icons'
@@ -25,6 +24,10 @@ export default function AnimationPanel() {
   const addKeyframe = useStore((s) => s.addKeyframe)
   const removeKeyframe = useStore((s) => s.removeKeyframe)
   const toast = useStore((s) => s.toast)
+  const selectedBoneId = useStore((s) => s.selectedBoneId)
+  const selectBone = useStore((s) => s.selectBone)
+  const clearBoneSelection = useStore((s) => s.clearBoneSelection)
+  const setMode = useStore((s) => s.setMode)
 
   if (!selected) {
     return (
@@ -39,21 +42,39 @@ export default function AnimationPanel() {
   const activeClip = animation.activeClip
   const keyframes = animations[activeClip] || []
 
+  // Osso selecionado (do store global)
+  const selectedBone = skeleton?.bones?.find(b => b.id === selectedBoneId) || null
+
   const handleAddKeyframe = () => {
     if (!skeleton || skeleton.bones.length === 0) {
       toast('Adicione um osso primeiro', 'error')
       return
     }
-    // Adicionar keyframe para TODOS os ossos no tempo atual
-    for (const bone of skeleton.bones) {
-      addKeyframe(selected.id, activeClip, bone.id, animation.currentTime, {
-        position: [...bone.position],
-        rotation: [...bone.rotation],
-        scale: [...bone.scale],
+    if (selectedBone) {
+      // Gravar keyframe SÓ para o osso selecionado
+      addKeyframe(selected.id, activeClip, selectedBone.id, animation.currentTime, {
+        position: [...selectedBone.position],
+        rotation: [...selectedBone.rotation],
+        scale: [...selectedBone.scale],
       })
+      toast(`Keyframe gravado para "${selectedBone.name || selectedBone.id.slice(-6)}" no tempo ${animation.currentTime.toFixed(1)}`, 'success')
+    } else {
+      // Sem osso selecionado — gravar para todos
+      for (const bone of skeleton.bones) {
+        addKeyframe(selected.id, activeClip, bone.id, animation.currentTime, {
+          position: [...bone.position],
+          rotation: [...bone.rotation],
+          scale: [...bone.scale],
+        })
+      }
+      toast(`${skeleton.bones.length} keyframes adicionados (todos os ossos) no tempo ${animation.currentTime.toFixed(1)}`, 'success')
     }
-    toast(`${skeleton.bones.length} keyframes adicionados (todos os ossos) no tempo ${animation.currentTime.toFixed(1)}`, 'success')
   }
+
+  // Ativar modo animate quando o painel abre
+  // (apenas se não estiver já em modo animate/rig/weight)
+  // — feito via setMode no useEffect abaixo seria melhor, mas para simplicidade
+  //   deixamos o utilizador ativar manualmente via botão "Animar"
 
   return (
     <>
@@ -74,32 +95,65 @@ export default function AnimationPanel() {
         >
           <IconBone width={14} height={14} /> Adicionar Osso
         </button>
+
+        {/* Botão para ativar modo de animação (permite mover osso com gizmo) */}
+        {skeleton && skeleton.bones.length > 0 && (
+          <button
+            onClick={() => setMode('animate')}
+            style={{ width: '100%', marginTop: 4 }}
+            className={useStore.getState().mode === 'animate' ? 'active' : ''}
+            title="Ativa o gizmo de transformação nos ossos. Clica num osso no viewport ou na lista abaixo para o selecionar."
+          >
+            🎬 Modo Animar
+          </button>
+        )}
+
         {skeleton && skeleton.bones.length > 0 && (
           <div className="mt-2" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {skeleton.bones.map((bone, i) => (
-              <div
-                key={bone.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '4px 8px',
-                  background: 'var(--bg-panel-2)',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: 11,
-                }}
-              >
-                <span style={{ color: 'var(--accent)' }}>●</span>
-                <span style={{ flex: 1 }}>{bone.name || `Osso ${i + 1}`}</span>
-                <button
-                  className="danger"
-                  style={{ padding: '2px 4px' }}
-                  onClick={() => useStore.getState().removeBone(selected.id, bone.id)}
+            {skeleton.bones.map((bone, i) => {
+              const isSelected = bone.id === selectedBoneId
+              const boneKfs = keyframes.filter(k => k.boneId === bone.id)
+              return (
+                <div
+                  key={bone.id}
+                  onClick={() => selectBone(isSelected ? null : bone.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 8px',
+                    background: isSelected ? 'var(--accent-soft)' : 'var(--bg-panel-2)',
+                    border: isSelected ? '1px solid var(--accent)' : '1px solid transparent',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: 11,
+                    cursor: 'pointer',
+                  }}
                 >
-                  <IconTrash width={11} height={11} />
-                </button>
-              </div>
-            ))}
+                  <span style={{ color: isSelected ? 'var(--accent)' : '#f4a261' }}>
+                    {isSelected ? '▶' : '●'}
+                  </span>
+                  <span style={{ flex: 1 }}>
+                    {bone.name || `Osso ${i + 1}`}
+                    {boneKfs.length > 0 && (
+                      <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>
+                        ({boneKfs.length} kf)
+                      </span>
+                    )}
+                  </span>
+                  <button
+                    className="danger"
+                    style={{ padding: '2px 4px' }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      useStore.getState().removeBone(selected.id, bone.id)
+                      if (isSelected) clearBoneSelection()
+                    }}
+                  >
+                    <IconTrash width={11} height={11} />
+                  </button>
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
@@ -149,6 +203,33 @@ export default function AnimationPanel() {
 
       <div className="panel-section">
         <h4>Reprodução</h4>
+
+        {/* Info do osso selecionado */}
+        {selectedBone ? (
+          <div className="small muted mb-2" style={{
+            padding: '6px 8px',
+            background: 'var(--accent-soft)',
+            border: '1px solid var(--accent)',
+            borderRadius: 'var(--radius-sm)',
+          }}>
+            <strong style={{ color: 'var(--accent)' }}>▶ {selectedBone.name || selectedBone.id.slice(-6)}</strong>
+            <div style={{ fontSize: 10, marginTop: 2 }}>
+              Pos: [{selectedBone.position.map(v => v.toFixed(2)).join(', ')}]
+            </div>
+            <div style={{ fontSize: 10 }}>
+              Rot: [{selectedBone.rotation.map(v => (v * 180 / Math.PI).toFixed(0) + '°').join(', ')}]
+            </div>
+            <div style={{ fontSize: 10, marginTop: 2, color: 'var(--text-muted)' }}>
+              💡 Move o osso com o gizmo e depois carrega em "Gravar Keyframe"
+            </div>
+          </div>
+        ) : (
+          <div className="small muted mb-2">
+            💡 Seleciona um osso (na lista acima ou no viewport) para gravar keyframes individuais.
+            Sem osso selecionado, grava para todos.
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
           {animation.playing ? (
             <button onClick={pauseAnimation} className="primary" style={{ flex: 1 }}>
@@ -161,9 +242,10 @@ export default function AnimationPanel() {
           )}
           <button
             onClick={handleAddKeyframe}
-            title="Adicionar keyframe no tempo atual"
+            title={selectedBone ? `Gravar keyframe para ${selectedBone.name} no tempo ${animation.currentTime.toFixed(1)}` : 'Gravar keyframe para todos os ossos'}
+            style={{ flex: 1 }}
           >
-            <IconKey width={14} height={14} /> Key
+            <IconKey width={14} height={14} /> Gravar Keyframe
           </button>
         </div>
 

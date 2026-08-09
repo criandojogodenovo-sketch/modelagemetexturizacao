@@ -15,6 +15,8 @@ export default function SceneSettings() {
   const setGrid = useStore((s) => s.setGrid)
   const lights = useStore((s) => s.lights)
   const setLights = useStore((s) => s.setLights)
+  const renderSettings = useStore((s) => s.renderSettings)
+  const setRenderSettings = useStore((s) => s.setRenderSettings)
 
   return (
     <>
@@ -199,6 +201,45 @@ export default function SceneSettings() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Renderização Avançada — recursos pesados, off por defeito */}
+      <div className="panel-section">
+        <h4>Renderização Avançada</h4>
+        <div className="small muted mb-2" style={{ color: '#f85149' }}>
+          ⚠️ Recursos pesados — podem reduzir o FPS
+        </div>
+
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={renderSettings?.flirGI || false}
+            onChange={(e) => setRenderSettings({ flirGI: e.target.checked })}
+          />
+          <div style={{ flex: 1 }}>
+            <strong>Flir GI</strong>
+            <div className="small muted">
+              Iluminação global em tempo real (aproximação de luz indireta/bounce).
+              Adiciona hemisphere light + contact shadows melhoradas.
+            </div>
+          </div>
+        </label>
+
+        <label className="checkbox-row mt-2">
+          <input
+            type="checkbox"
+            checked={renderSettings?.flirAdaptiveMesh || false}
+            onChange={(e) => setRenderSettings({ flirAdaptiveMesh: e.target.checked })}
+          />
+          <div style={{ flex: 1 }}>
+            <strong>Flir Adaptive Mesh</strong>
+            <div className="small muted">
+              Geometria adaptativa — ajusta o nível de detalhe (LOD) automaticamente
+              consoante a distância à câmara. Permite modelos mais detalhados sem
+              penalizar o desempenho à distância.
+            </div>
+          </div>
+        </label>
       </div>
     </>
   )

@@ -24,6 +24,7 @@ import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
 import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
 import { createFlirCodeRuntime } from '../../utils/flirscript/flircode'
 import { createAnimationPlayer } from '../../utils/animationPlayer'
+import { createAnimationController, defaultAnimationController } from '../../utils/conects/animationController'
 import { clearPoseCache } from '../../utils/sharedAnimationCache'
 import { createNPCAI } from '../../utils/conects/npcAI'
 import { debugLog } from '../../utils/debug/debugStore'
@@ -84,6 +85,8 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   const physicsRef = useRef(null)
   const runtimesRef = useRef(new Map())
   const animPlayersRef = useRef(new Map())
+  const animControllersRef = useRef(new Map()) // instanceId → animationController
+  const playerSpeedRef = useRef(new Map()) // instanceId → speed (para blending idle/walk)
   const npcAIsRef = useRef(new Map())
   const timerStatesRef = useRef(new Map())
   const joystickRef = useRef({ x: 0, z: 0, active: false })
@@ -551,9 +554,43 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         return null
       }
       const player = createAnimationPlayer(animations, getMesh, getBones)
+
+      // Procurar AnimationBoostObject na cena para ativar blending
+      const boostConect = (setupScene.conects || []).find(c => c.type === 'AnimationBoostObject')
+      if (boostConect) {
+        player.setBoost(true, boostConect.blendTime || 0.3)
+      }
+
       animPlayersRef.current.set(inst.instanceId, player)
-      if (animations.idle) player.play('idle', { loop: true })
-      else { const f = Object.keys(animations)[0]; if (f) player.play(f, { loop: true }) }
+
+      // Se é PersonalObject ou NpcObject com animationController, criar controller
+      if (inst.type === 'PersonalObject' || inst.type === 'NpcObject') {
+        const controllerGraph = inst.animationController || defaultAnimationController()
+        const getContext = () => {
+          const speed = playerSpeedRef.current.get(inst.instanceId) || 0
+          const mesh = getMesh()
+          let grounded = true
+          if (mesh && physicsRef.current) {
+            // Tentar obter grounded do physics system
+            try { grounded = physicsRef.current.isGrounded?.(inst.instanceId) ?? true } catch { grounded = true }
+          }
+          return { speed, grounded, attacking: false }
+        }
+        const controller = createAnimationController(controllerGraph, getContext)
+        animControllersRef.current.set(inst.instanceId, controller)
+
+        // Tocar o clip do estado inicial
+        const initialState = controller.getState()
+        if (initialState?.clip && animations[initialState.clip]) {
+          player.play(initialState.clip, { loop: true, blendTime: 0.3 })
+        } else if (animations.idle) {
+          player.play('idle', { loop: true })
+        }
+      } else {
+        // Objeto normal: tocar idle por defeito
+        if (animations.idle) player.play('idle', { loop: true })
+        else { const f = Object.keys(animations)[0]; if (f) player.play(f, { loop: true }) }
+      }
     }
     for (const inst of setupScene.objects || []) setupAnimationPlayer(inst, inst.objectId)
     for (const conect of setupScene.conects || []) setupAnimationPlayer(conect, conect.sourceObjectId)
@@ -623,6 +660,8 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       for (const [, s] of timerStatesRef.current) { if (s.interval) clearInterval(s.interval); if (s.audio) s.audio.pause() }
       timerStatesRef.current.clear()
       animPlayersRef.current.clear()
+      animControllersRef.current.clear()
+      playerSpeedRef.current.clear()
       physicsRef.current?.dispose()
       physicsRef.current = null
       window.removeEventListener('touchstart', onTouchStart)
@@ -661,8 +700,22 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       rt.triggerEvent('tick', { deltaTime: delta })
     }
 
-    // Animation players
-    for (const player of animPlayersRef.current.values()) player.update(delta)
+    // Animation players + controllers
+    for (const [id, player] of animPlayersRef.current.entries()) {
+      const controller = animControllersRef.current.get(id)
+      if (controller) {
+        const prevState = controller.getState()
+        controller.update(delta)
+        const newState = controller.getState()
+        // Se o estado mudou, mudar de clip com blending
+        if (newState && newState.id !== prevState?.id && newState.clip) {
+          const boostConect = (setupScene?.conects || []).find(c => c.type === 'AnimationBoostObject')
+          player.play(newState.clip, { loop: true, blendTime: boostConect?.blendTime || 0.3 })
+          debugLog(`Anim: ${prevState?.clip || 'none'} → ${newState.clip} (speed=${playerSpeedRef.current.get(id)?.toFixed(1)})`, 'log', 'Anim')
+        }
+      }
+      player.update(delta)
+    }
 
     // NPC AI
     for (const ai of npcAIsRef.current.values()) ai.update(delta)
@@ -681,6 +734,8 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
 
     // Joystick → PersonalObject — usar setupScene (ref)
     const keys = window._flirKeys || {}
+    // Reset de speeds no início de cada frame
+    for (const id of playerSpeedRef.current.keys()) playerSpeedRef.current.set(id, 0)
     if (joystickRef.current.active || keys['w'] || keys['a'] || keys['s'] || keys['d']) {
       for (const conect of setupScene?.conects || []) {
         if (conect.type === 'PersonalObject') {
@@ -695,6 +750,9 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           if ((keys[' '] || keys['space']) && conect.canJump) {
             physicsRef.current?.jumpPersonal(conect.instanceId)
           }
+          // Guardar speed para o animation controller (blending idle/walk)
+          const currentSpeed = Math.hypot(mx, mz)
+          playerSpeedRef.current.set(conect.instanceId, currentSpeed)
         }
       }
     }

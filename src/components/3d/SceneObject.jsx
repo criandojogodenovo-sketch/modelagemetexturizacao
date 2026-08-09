@@ -21,6 +21,7 @@ import {
   mirrorGeometry,
   arrayGeometry,
   solidifyGeometry,
+  curveDeform,
 } from '../../utils/meshOperations'
 import { compositeTextureLayers } from '../../utils/textureCompositor'
 import { useStore } from '../../store/useStore'
@@ -41,7 +42,8 @@ export function loadTexture(dataURL) {
 }
 
 // Aplica a stack de modificadores a uma geometria
-function applyModifiers(geometry, modifiers) {
+// pathLookup: função (pathId) → array de [x,y,z] pontos (para modificador 'curve')
+function applyModifiers(geometry, modifiers, pathLookup) {
   if (!modifiers || modifiers.length === 0) return geometry
   let result = geometry
   for (const mod of modifiers) {
@@ -64,6 +66,17 @@ function applyModifiers(geometry, modifiers) {
         case 'solidify':
           result = solidifyGeometry(result, mod.params.thickness || 0.1)
           break
+        case 'curve': {
+          // Deforma ao longo de um PathObject
+          if (!mod.params.pathId) break
+          const pathPoints = pathLookup?.(mod.params.pathId)
+          if (!pathPoints || pathPoints.length < 2) break
+          result = curveDeform(result, pathPoints, {
+            twist: mod.params.twist || 0,
+            stretch: mod.params.stretch || 1,
+          })
+          break
+        }
         default:
           break
       }
@@ -80,6 +93,20 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
   const mode = useStore((s) => s.mode)
   const selectedId = useStore((s) => s.selectedId)
   const isWeightMode = mode === 'weight' && selectedId === obj.id
+
+  // pathLookup: procura PathObject na cena ativa e devolve os pontos
+  const scenes = useStore((s) => s.scenes)
+  const activeSceneId = useStore((s) => s.activeSceneId)
+  const pathLookup = useMemo(() => {
+    return (pathId) => {
+      // Procurar em todas as cenas por um conect com instanceId === pathId
+      for (const scene of scenes || []) {
+        const pathConect = (scene.conects || []).find(c => c.instanceId === pathId)
+        if (pathConect?.points) return pathConect.points
+      }
+      return null
+    }
+  }, [scenes, activeSceneId])
 
   // ----- Geometria (com modificadores aplicados) -----
   const geometry = useMemo(() => {
@@ -107,9 +134,9 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       base = def ? def.build(THREE, obj.args) : new THREE.BoxGeometry(1, 1, 1)
     }
     // Aplicar modificadores não destrutivos
-    const final = applyModifiers(base, obj.modifiers)
+    const final = applyModifiers(base, obj.modifiers, pathLookup)
     return final
-  }, [obj.type, obj.args, obj.imported, obj.bufferGeometry, obj.customGeometry, obj.modifiers])
+  }, [obj.type, obj.args, obj.imported, obj.bufferGeometry, obj.customGeometry, obj.modifiers, pathLookup])
 
   // ----- Material -----
   const material = useMemo(() => {
