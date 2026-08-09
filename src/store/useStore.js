@@ -1547,8 +1547,9 @@ export const useStore = create(
         uiScreens: state.uiScreens,
         activeUIScreenId: state.activeUIScreenId,
         flirCodeClasses: state.flirCodeClasses, // Sistema 2: persistir classes
+        selectedId: state.selectedId, // Persistir seleção (resolve bug de WeightPaintPanel após reload)
       }),
-      version: 3,
+      version: 4,
     }
   )
 )

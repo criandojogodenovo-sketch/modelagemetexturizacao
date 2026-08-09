@@ -334,8 +334,14 @@ function PropertyField({ propDef, value, onChange, onFocus }) {
     case 'objectRef':
       // Lista de instâncias disponíveis na cena
       const scene = useStore.getState().scenes.find((s) => s.id === useStore.getState().activeSceneId)
+      // sourceObjectId aponta para o catálogo (objectId); outras props (followTarget, etc.)
+      // apontam para instâncias na cena (instanceId).
+      const useCatalogId = key === 'sourceObjectId'
       const options = [
-        ...(scene?.objects || []).map((o) => ({ id: o.instanceId, label: `Objeto: ${o.objectId?.slice(-6)}` })),
+        ...(scene?.objects || []).map((o) => ({
+          id: useCatalogId ? o.objectId : o.instanceId,
+          label: `Objeto: ${o.objectId?.slice(-6)}`,
+        })),
         ...(scene?.conects || []).map((c) => ({ id: c.instanceId, label: `${c.name} (${c.type})` })),
       ]
       return (

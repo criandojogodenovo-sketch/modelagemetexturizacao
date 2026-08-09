@@ -69,10 +69,28 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
     return null
   }
 
-  // VisualObject: usa modelo do catálogo
-  if (conect.type === 'VisualObject') {
+  // VisualObject, PersonalObject e NpcObject com sourceObjectId:
+  // usam o modelo do catálogo (incluindo esqueleto/animações) via SceneObject.
+  // Isto é CRÍTICO — sem isto, o runtime só mostra uma cápsula placeholder
+  // e o SkinnedMesh nunca é instanciado.
+  if (
+    conect.type === 'VisualObject' ||
+    ((conect.type === 'PersonalObject' || conect.type === 'NpcObject' || conect.type === 'RigidObject') && conect.sourceObjectId)
+  ) {
     const obj = objects.find((o) => o.id === conect.sourceObjectId)
-    if (!obj) return null
+    if (!obj) {
+      // sourceObjectId definido mas modelo não encontrado — fallback para placeholder
+      return (
+        <PlaceholderMesh
+          ref={(node) => {
+            if (typeof meshRef === 'function') meshRef(node)
+            else if (meshRef) meshRef.current = node
+            setMeshRef?.(node)
+          }}
+          conect={conect}
+        />
+      )
+    }
     const sceneObj = {
       ...obj,
       id: conect.instanceId,
@@ -90,7 +108,7 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
     )
   }
 
-  // Rigid/Static/Stop/Personal: placeholder com geometria simples
+  // Rigid/Static/Stop/Personal sem modelo: placeholder com geometria simples
   return (
     <PlaceholderMesh
       ref={(node) => {

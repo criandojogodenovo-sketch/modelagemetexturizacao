@@ -80,29 +80,29 @@ function interpolateVec3(a, b, t, type) {
  */
 export function getCachedPose(clipName, keyframes, time) {
   const cacheKey = clipName + '_' + time.toFixed(4) // 4 decimal places
-  
+
   // Verificar cache
   if (poseCache.has(cacheKey)) {
     return poseCache.get(cacheKey)
   }
-  
+
   // Calcular pose
   const sortedByBone = getSortedKeyframes(clipName, keyframes)
   const pose = new Map()
-  
+
   for (const [boneId, sortedKfs] of sortedByBone) {
     const pair = findKeyframeBinary(sortedKfs, time)
     if (!pair) continue
     const { prev, next, t } = pair
     const interp = next.interpolation || 'ease'
-    
+
     pose.set(boneId, {
       position: interpolateVec3(prev.position || [0,0,0], next.position || [0,0,0], t, interp),
       rotation: interpolateVec3(prev.rotation || [0,0,0], next.rotation || [0,0,0], t, interp),
       scale: interpolateVec3(prev.scale || [1,1,1], next.scale || [1,1,1], t, interp),
     })
   }
-  
+
   poseCache.set(cacheKey, pose)
   return pose
 }
@@ -110,12 +110,19 @@ export function getCachedPose(clipName, keyframes, time) {
 /**
  * Aplica uma pose calculada aos bones de um NPC.
  * Não recalcula interpolação — apenas copia valores.
+ *
+ * Suporta três formas de identificar o osso:
+ *  - b.id === boneId              (quando bones são objetos do store)
+ *  - b.name === boneId            (quando bones são THREE.Bone com .name = boneDef.id)
+ *  - b.userData.boneId === boneId (quando bones são THREE.Bone com userData definido)
  */
 export function applyPose(pose, bones) {
   if (!pose || !bones) return
   for (const [boneId, transform] of pose) {
     if (boneId === 'object') continue
-    const bone = bones.find((b) => b.id === boneId || b.name === boneId)
+    const bone = bones.find(
+      (b) => b.id === boneId || b.name === boneId || b.userData?.boneId === boneId
+    )
     if (bone) {
       bone.position.set(...transform.position)
       bone.rotation.set(...transform.rotation)

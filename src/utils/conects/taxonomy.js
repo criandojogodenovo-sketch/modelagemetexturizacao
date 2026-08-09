@@ -141,12 +141,14 @@ export const CONECT_TAXONOMY = [
       canJump: true,
       grounded: false,
       fixedRotation: true,
+      sourceObjectId: null, // referência a um objeto do catálogo (com esqueleto/animações)
     },
     properties: [
       prop('moveSpeed', 'Velocidade de movimento', 'number', 5, { min: 0.5, max: 20, step: 0.5 }),
       prop('jumpForce', 'Força de salto', 'number', 8, { min: 1, max: 20, step: 0.5 }),
       prop('canJump', 'Pode saltar', 'boolean', true),
       prop('fixedRotation', 'Fixar rotação', 'boolean', true),
+      prop('sourceObjectId', 'Modelo do catálogo (com esqueleto)', 'objectRef', null),
     ],
   },
   {
@@ -168,6 +170,7 @@ export const CONECT_TAXONOMY = [
       patrolIndex: 0,
       health: 100,
       fixedRotation: true,
+      sourceObjectId: null, // referência a um objeto do catálogo (com esqueleto/animações)
     },
     properties: [
       prop('moveSpeed', 'Velocidade', 'number', 3, { min: 0.5, max: 20, step: 0.5 }),
@@ -177,6 +180,7 @@ export const CONECT_TAXONOMY = [
       prop('patrolPath', 'Path de patrulha', 'objectRef', null),
       prop('health', 'Vida', 'number', 100, { min: 0, max: 1000, step: 10 }),
       prop('fixedRotation', 'Fixar rotação', 'boolean', true),
+      prop('sourceObjectId', 'Modelo do catálogo (com esqueleto)', 'objectRef', null),
     ],
   },
   {

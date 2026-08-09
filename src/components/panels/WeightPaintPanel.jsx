@@ -68,18 +68,17 @@ export default function WeightPaintPanel() {
     } else {
       // Para primitivas, gerar posições a partir do tipo
       const PRIMITIVES = {
-        cube: () => { const g = new THREE.BoxGeometry(1,1,1); return g.attributes.position.array },
-        sphere: () => { const g = new THREE.SphereGeometry(0.6,16,12); return g.attributes.position.array },
-        cylinder: () => { const g = new THREE.CylinderGeometry(0.5,0.5,1.2,16); return g.attributes.position.array },
-        cone: () => { const g = new THREE.ConeGeometry(0.6,1.2,16); return g.attributes.position.array },
-        plane: () => { const g = new THREE.PlaneGeometry(1.5,1.5); return g.attributes.position.array },
-        torus: () => { const g = new THREE.TorusGeometry(0.6,0.2,16,32); return g.attributes.position.array },
+        cube: () => Array.from(new THREE.BoxGeometry(1,1,1).attributes.position.array),
+        sphere: () => Array.from(new THREE.SphereGeometry(0.6,16,12).attributes.position.array),
+        cylinder: () => Array.from(new THREE.CylinderGeometry(0.5,0.5,1.2,16).attributes.position.array),
+        cone: () => Array.from(new THREE.ConeGeometry(0.6,1.2,16).attributes.position.array),
+        plane: () => Array.from(new THREE.PlaneGeometry(1.5,1.5).attributes.position.array),
+        torus: () => Array.from(new THREE.TorusGeometry(0.6,0.2,16,32).attributes.position.array),
       }
       const gen = PRIMITIVES[selected.type]
       if (gen) {
-        const g = gen()
-        positions = Array.from(g.attributes.position.array)
-        // Guardar como customGeometry para uso futuro
+        positions = gen()
+        // Guardar como customGeometry para uso futuro (normaliza para array regular)
         updateObject(selected.id, { customGeometry: { positions, normals: [], uvs: [] } })
       }
     }
@@ -96,7 +95,11 @@ export default function WeightPaintPanel() {
       const vz = positions[v * 3 + 2]
 
       // Calcular distância a cada osso
-      const distances = bones.map(bone => {
+      const distances = bones.map((bone, idx) => {
+        if (!bone || !bone.position) {
+          console.warn('Bone inválido at index', idx, 'bone=', bone)
+          return { boneId: bone?.id || null, dist: Infinity }
+        }
         const bx = bone.position[0]
         const by = bone.position[1]
         const bz = bone.position[2]
@@ -119,7 +122,7 @@ export default function WeightPaintPanel() {
     toast(`Auto-peso calculado para ${vertCount} vértices`, 'success')
     } catch (err) {
       toast('Erro auto-peso: ' + err.message, 'error')
-      console.error('Auto-peso error:', err)
+      console.error('Auto-peso error:', err, { selected, bones, hasSkeleton: !!selected?.skeleton })
     }
   }
 

@@ -162,33 +162,31 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
           // Interpolar entre prevPose e pose
           for (const [boneId, currentTransform] of pose) {
             const prevTransform = prevPose.get(boneId)
+            const bone = bones.find(
+              (b) => b.id === boneId || b.name === boneId || b.userData?.boneId === boneId
+            )
+            if (!bone) continue
             if (prevTransform) {
-              const bone = bones.find((b) => b.id === boneId || b.name === boneId)
-              if (bone) {
-                bone.position.set(
-                  prevTransform.position[0] * blendWeight + currentTransform.position[0] * (1 - blendWeight),
-                  prevTransform.position[1] * blendWeight + currentTransform.position[1] * (1 - blendWeight),
-                  prevTransform.position[2] * blendWeight + currentTransform.position[2] * (1 - blendWeight),
-                )
-                bone.rotation.set(
-                  prevTransform.rotation[0] * blendWeight + currentTransform.rotation[0] * (1 - blendWeight),
-                  prevTransform.rotation[1] * blendWeight + currentTransform.rotation[1] * (1 - blendWeight),
-                  prevTransform.rotation[2] * blendWeight + currentTransform.rotation[2] * (1 - blendWeight),
-                )
-                bone.scale.set(
-                  prevTransform.scale[0] * blendWeight + currentTransform.scale[0] * (1 - blendWeight),
-                  prevTransform.scale[1] * blendWeight + currentTransform.scale[1] * (1 - blendWeight),
-                  prevTransform.scale[2] * blendWeight + currentTransform.scale[2] * (1 - blendWeight),
-                )
-              }
+              bone.position.set(
+                prevTransform.position[0] * blendWeight + currentTransform.position[0] * (1 - blendWeight),
+                prevTransform.position[1] * blendWeight + currentTransform.position[1] * (1 - blendWeight),
+                prevTransform.position[2] * blendWeight + currentTransform.position[2] * (1 - blendWeight),
+              )
+              bone.rotation.set(
+                prevTransform.rotation[0] * blendWeight + currentTransform.rotation[0] * (1 - blendWeight),
+                prevTransform.rotation[1] * blendWeight + currentTransform.rotation[1] * (1 - blendWeight),
+                prevTransform.rotation[2] * blendWeight + currentTransform.rotation[2] * (1 - blendWeight),
+              )
+              bone.scale.set(
+                prevTransform.scale[0] * blendWeight + currentTransform.scale[0] * (1 - blendWeight),
+                prevTransform.scale[1] * blendWeight + currentTransform.scale[1] * (1 - blendWeight),
+                prevTransform.scale[2] * blendWeight + currentTransform.scale[2] * (1 - blendWeight),
+              )
             } else {
               // Osso não existe no clip anterior — usar apenas o atual
-              const bone = bones.find((b) => b.id === boneId || b.name === boneId)
-              if (bone) {
-                bone.position.set(...currentTransform.position)
-                bone.rotation.set(...currentTransform.rotation)
-                bone.scale.set(...currentTransform.scale)
-              }
+              bone.position.set(...currentTransform.position)
+              bone.rotation.set(...currentTransform.rotation)
+              bone.scale.set(...currentTransform.scale)
             }
           }
         }

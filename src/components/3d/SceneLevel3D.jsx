@@ -532,14 +532,31 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     for (const conect of setupScene.conects || []) setupRuntime(conect, conect.flirScript)
 
     // Animation players
-    for (const inst of [...(setupScene.objects || []), ...(setupScene.conects || [])]) {
-      if (inst.animations && Object.keys(inst.animations).length > 0) {
-        const player = createAnimationPlayer(inst.animations, () => meshRefs.current.get(inst.instanceId) || conectMeshRefs.current.get(inst.instanceId), () => null)
-        animPlayersRef.current.set(inst.instanceId, player)
-        if (inst.animations.idle) player.play('idle', { loop: true })
-        else { const f = Object.keys(inst.animations)[0]; if (f) player.play(f, { loop: true }) }
+    // NOTA: as animações vivem no objeto do catálogo (em objects), não na instância.
+    // Para instâncias de objetos (setupScene.objects), precisamos de ir buscar o
+    // objeto original via inst.objectId. Para conects (PersonalObject/NpcObject com
+    // sourceObjectId), fazemos o mesmo via conect.sourceObjectId.
+    const setupAnimationPlayer = (inst, sourceObjectId) => {
+      if (!sourceObjectId) return
+      const catalogObj = objectsRef.current.find((o) => o.id === sourceObjectId)
+      const animations = catalogObj?.animations || inst.animations
+      if (!animations || Object.keys(animations).length === 0) return
+      const getMesh = () => meshRefs.current.get(inst.instanceId) || conectMeshRefs.current.get(inst.instanceId)
+      // getBones: extrai THREE.Bone[] do SkinnedMesh (se o objeto tem esqueleto)
+      // Isto é CRÍTICO — sem isto, applyPose nunca modifica os bones e o
+      // SkinnedMesh não deforma.
+      const getBones = () => {
+        const mesh = getMesh()
+        if (mesh && mesh.isSkinnedMesh && mesh.skeleton) return mesh.skeleton.bones
+        return null
       }
+      const player = createAnimationPlayer(animations, getMesh, getBones)
+      animPlayersRef.current.set(inst.instanceId, player)
+      if (animations.idle) player.play('idle', { loop: true })
+      else { const f = Object.keys(animations)[0]; if (f) player.play(f, { loop: true }) }
     }
+    for (const inst of setupScene.objects || []) setupAnimationPlayer(inst, inst.objectId)
+    for (const conect of setupScene.conects || []) setupAnimationPlayer(conect, conect.sourceObjectId)
 
     // NPC AI
     for (const conect of setupScene.conects || []) {

@@ -23,6 +23,7 @@ import {
   solidifyGeometry,
 } from '../../utils/meshOperations'
 import { compositeTextureLayers } from '../../utils/textureCompositor'
+import { useStore } from '../../store/useStore'
 
 // Cache de texturas carregadas a partir de dataURLs
 const textureCache = new Map()
@@ -75,6 +76,10 @@ function applyModifiers(geometry, modifiers) {
 
 const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect }, meshRef) {
   const innerRef = useRef()
+  // Modo de edição (para mostrar mapa de calor em weight painting)
+  const mode = useStore((s) => s.mode)
+  const selectedId = useStore((s) => s.selectedId)
+  const isWeightMode = mode === 'weight' && selectedId === obj.id
 
   // ----- Geometria (com modificadores aplicados) -----
   const geometry = useMemo(() => {
@@ -155,6 +160,73 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     mat.needsUpdate = true
     return mat
   }, [obj.material, obj.type])
+
+  // ----- Material de mapa de calor para weight painting -----
+  // Criado apenas quando em modo 'weight' e o objeto está selecionado.
+  // Mostra a influência do osso ativo (window._weightPaintActiveBone) como
+  // gradiente azul (0) → verde → amarelo → vermelho (1).
+  // Usa MeshBasicMaterial (não precisa de luz) para garantir que as cores
+  // são sempre visíveis independentemente da iluminação ou transform do skeleton.
+  const weightMaterial = useMemo(() => {
+    if (!isWeightMode) return null
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.95,
+    })
+    return mat
+  }, [isWeightMode])
+
+  // Atualizar vertex colors no useFrame (em modo weight)
+  useFrame(() => {
+    if (!isWeightMode || !weightMaterial || !innerRef.current) return
+    const mesh = innerRef.current
+    const geom = mesh.geometry
+    if (!geom || !geom.attributes.position) return
+
+    const vertCount = geom.attributes.position.count
+    const activeBoneId = window._weightPaintActiveBone
+    const skinWeights = obj.skinWeights || {}
+
+    // Criar ou reutilizar o buffer de cores
+    let colorAttr = geom.attributes.color
+    if (!colorAttr || colorAttr.count !== vertCount) {
+      colorAttr = new THREE.BufferAttribute(new Float32Array(vertCount * 3), 3)
+      geom.setAttribute('color', colorAttr)
+      // Forçar recompilação do material quando o attribute é criado pela 1ª vez
+      if (mesh.material) {
+        mesh.material.vertexColors = true
+        mesh.material.needsUpdate = true
+      }
+    }
+
+    // Para cada vértice, calcular peso do osso ativo e mapear para cor
+    for (let v = 0; v < vertCount; v++) {
+      const w = activeBoneId ? (skinWeights[v]?.[activeBoneId] || 0) : 0
+      // Mapa de calor: 0=azul, 0.25=ciano, 0.5=verde, 0.75=amarelo, 1=vermelho
+      let r, g, b
+      if (w < 0.25) {
+        const t = w / 0.25
+        r = 0; g = t * 0.5; b = 1
+      } else if (w < 0.5) {
+        const t = (w - 0.25) / 0.25
+        r = 0; g = 0.5 + t * 0.5; b = 1 - t
+      } else if (w < 0.75) {
+        const t = (w - 0.5) / 0.25
+        r = t; g = 1; b = 0
+      } else {
+        const t = (w - 0.75) / 0.25
+        r = 1; g = 1 - t; b = 0
+      }
+      colorAttr.setXYZ(v, r, g, b)
+    }
+    colorAttr.needsUpdate = true
+    // Garantir que o material tem vertexColors ativado
+    if (mesh.material && !mesh.material.vertexColors) {
+      mesh.material.vertexColors = true
+      mesh.material.needsUpdate = true
+    }
+  })
 
   // ----- Compositing de camadas de textura (assíncrono) -----
   // Quando há múltiplas camadas, compõe-as num único mapa e aplica ao material.
@@ -295,6 +367,10 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     obj.outlineColor ||
     (isSelected ? '#2f81f7' : null)
 
+  // Material efetivo: em modo weight, usar o weightMaterial (vertex colors);
+  // caso contrário, o material normal.
+  const effectiveMaterial = weightMaterial || material
+
   // Se tem esqueleto, usar SkinnedMesh; caso contrário, Mesh normal
   if (skinData) {
     return (
@@ -305,7 +381,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
           else if (meshRef) meshRef.current = node
         }}
         geometry={geometry}
-        material={material}
+        material={effectiveMaterial}
         position={obj.position}
         rotation={obj.rotation}
         scale={obj.scale}
@@ -320,7 +396,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
         {skinData.bones
           .filter(b => !b.parent || b.parent.type !== 'Bone')
           .map(bone => <primitive key={bone.uuid} object={bone} />)}
-        {isSelected && (
+        {isSelected && !isWeightMode && (
           <mesh scale={[1.02, 1.02, 1.02]} geometry={geometry}>
             <meshBasicMaterial
               color="#2f81f7"
@@ -343,7 +419,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
         else if (meshRef) meshRef.current = node
       }}
       geometry={geometry}
-      material={material}
+      material={effectiveMaterial}
       position={obj.position}
       rotation={obj.rotation}
       scale={obj.scale}
@@ -353,7 +429,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       receiveShadow
       userData={{ objectId: obj.id }}
     >
-      {isSelected && (
+      {isSelected && !isWeightMode && (
         <mesh scale={[1.02, 1.02, 1.02]} geometry={geometry}>
           <meshBasicMaterial
             color="#2f81f7"
