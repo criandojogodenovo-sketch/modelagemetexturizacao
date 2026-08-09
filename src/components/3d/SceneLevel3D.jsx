@@ -985,10 +985,6 @@ export default function SceneLevel3D() {
         dpr={[1, 2]}
         camera={{ position: [8, 6, 10], fov: 50, near: 0.1, far: 200 }}
         gl={{ antialias: true, preserveDrawingBuffer: true, alpha: false }}
-        onCreated={({ gl }) => {
-          // Sem tone mapping para o Sky procedural renderizar corretamente
-          gl.toneMapping = THREE.NoToneMapping
-        }}
         onPointerMissed={() => {
           if (!isGameMode) {
             setSelectedInstanceId(null)

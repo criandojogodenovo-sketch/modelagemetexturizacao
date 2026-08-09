@@ -445,10 +445,11 @@ function SkyMesh({ conect, setMeshRef }) {
   const { scene, gl } = useThree()
 
   // Criar o objeto Sky uma vez (não recriar a cada render)
+  // Scale 100 = raio 50, dentro do far plane (200) da câmara
   const skyObj = useMemo(() => {
     if (conect.skyType !== 'procedural') return null
     const sky = new Sky()
-    sky.scale.setScalar(1000)
+    sky.scale.setScalar(100)
     return sky
   }, [conect.skyType])
 
@@ -465,6 +466,20 @@ function SkyMesh({ conect, setMeshRef }) {
     skyObj.material.uniforms['mieCoefficient'].value = conect.mieCoefficient ?? 0.005
     skyObj.material.uniforms['mieDirectionalG'].value = 0.8
   }, [skyObj, conect.sunElevation, conect.sunAzimuth, conect.turbidity, conect.rayleigh, conect.mieCoefficient])
+
+  // Configurar tone mapping do renderer para o Sky procedural
+  // (Sky shader calcula cores em HDR; sem tone mapping correto fica branco)
+  useEffect(() => {
+    if (conect.skyType !== 'procedural') return
+    const prevToneMapping = gl.toneMapping
+    const prevExposure = gl.toneMappingExposure
+    gl.toneMapping = THREE.ACESFilmicToneMapping
+    gl.toneMappingExposure = 1.0
+    return () => {
+      gl.toneMapping = prevToneMapping
+      gl.toneMappingExposure = prevExposure
+    }
+  }, [conect.skyType, gl])
 
   // Aplicar background consoante o tipo
   useEffect(() => {
