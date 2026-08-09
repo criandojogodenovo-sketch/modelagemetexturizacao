@@ -240,6 +240,72 @@ export default function SceneSettings() {
             </div>
           </div>
         </label>
+
+        <label className="checkbox-row mt-2">
+          <input
+            type="checkbox"
+            checked={renderSettings?.vertexAO || false}
+            onChange={(e) => setRenderSettings({ vertexAO: e.target.checked })}
+          />
+          <div style={{ flex: 1 }}>
+            <strong>Vertex AO (Oclusão Ambiental)</strong>
+            <div className="small muted">
+              Pré-calcula oclusão ambiental por vértice (cantos/frestas mais escuros).
+              Custo zero em runtime — cálculo feito uma vez no setup.
+            </div>
+          </div>
+        </label>
+      </div>
+
+      {/* Otimização de Sombras — ativo por defeito, reduz custo de shadow passes */}
+      <div className="panel-section">
+        <h4>Otimização de Sombras</h4>
+        <div className="small muted mb-2" style={{ color: '#3fb950' }}>
+          ⚡ Recomendado — reduz o gargalo principal (shadow passes)
+        </div>
+
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={renderSettings?.shadowOptimizations ?? true}
+            onChange={(e) => setRenderSettings({ shadowOptimizations: e.target.checked })}
+          />
+          <div style={{ flex: 1 }}>
+            <strong>Shadow Distance Culling</strong>
+            <div className="small muted">
+              Objetos além da distância configurada não projetam sombras.
+              Reduz draw calls na shadow pass sem afetar a qualidade visível.
+            </div>
+          </div>
+        </label>
+
+        {renderSettings?.shadowOptimizations !== false && (
+          <>
+            <div className="prop-row mt-2">
+              <label>Distância de sombra: {renderSettings?.shadowDistance || 20} unidades</label>
+              <input
+                type="range"
+                min="5"
+                max="60"
+                step="5"
+                value={renderSettings?.shadowDistance || 20}
+                onChange={(e) => setRenderSettings({ shadowDistance: Number(e.target.value) })}
+              />
+            </div>
+
+            <div className="prop-row">
+              <label>Resolução do shadow map</label>
+              <select
+                value={renderSettings?.shadowMapSize || 1024}
+                onChange={(e) => setRenderSettings({ shadowMapSize: Number(e.target.value) })}
+              >
+                <option value="1024">1024 (performance)</option>
+                <option value="2048">2048 (qualidade)</option>
+                <option value="4096">4096 (máxima — pesado)</option>
+              </select>
+            </div>
+          </>
+        )}
       </div>
     </>
   )

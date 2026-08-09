@@ -24,6 +24,7 @@ import {
   curveDeform,
 } from '../../utils/meshOperations'
 import { compositeTextureLayers } from '../../utils/textureCompositor'
+import { computeVertexAO, applyVertexAO } from '../../utils/vertexAO'
 import { useStore } from '../../store/useStore'
 
 // Cache de texturas carregadas a partir de dataURLs
@@ -94,6 +95,9 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
   const selectedId = useStore((s) => s.selectedId)
   const isWeightMode = mode === 'weight' && selectedId === obj.id
 
+  // Vertex AO setting
+  const vertexAOEnabled = useStore((s) => s.renderSettings?.vertexAO || false)
+
   // pathLookup: procura PathObject na cena ativa e devolve os pontos
   const scenes = useStore((s) => s.scenes)
   const activeSceneId = useStore((s) => s.activeSceneId)
@@ -135,8 +139,25 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     }
     // Aplicar modificadores não destrutivos
     const final = applyModifiers(base, obj.modifiers, pathLookup)
+
+    // Aplicar Vertex AO se ativado (apenas para geometrias com >50 vértices
+    // — primitivas muito simples não beneficiam)
+    if (vertexAOEnabled && final.attributes.position && final.attributes.normal) {
+      const vertCount = final.attributes.position.count
+      if (vertCount > 50) {
+        try {
+          const aoValues = computeVertexAO(final, { samples: 16, distance: 1.5 })
+          if (aoValues) {
+            applyVertexAO(final, aoValues, 0.5)
+          }
+        } catch (err) {
+          console.warn('Vertex AO falhou:', err)
+        }
+      }
+    }
+
     return final
-  }, [obj.type, obj.args, obj.imported, obj.bufferGeometry, obj.customGeometry, obj.modifiers, pathLookup])
+  }, [obj.type, obj.args, obj.imported, obj.bufferGeometry, obj.customGeometry, obj.modifiers, pathLookup, vertexAOEnabled])
 
   // ----- Material -----
   const material = useMemo(() => {
@@ -150,6 +171,8 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       wireframe: m.wireframe || false,
       flatShading: m.flatShading || false,
       side: obj.type === 'plane' ? THREE.DoubleSide : THREE.FrontSide,
+      // Ativar vertexColors se Vertex AO estiver ativo (para mostrar o AO)
+      vertexColors: vertexAOEnabled,
     })
 
     // Emissive

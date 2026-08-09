@@ -82,6 +82,11 @@ const initialScene = {
   renderSettings: {
     flirGI: false,        // Iluminação global em tempo real (aproximação)
     flirAdaptiveMesh: false, // Geometria adaptativa (LOD automático por distância)
+    // Otimização de sombras (ativa por defeito — reduz custo de shadow passes)
+    shadowOptimizations: true,   // ativa shadow distance culling + castShadow adaptativo
+    shadowDistance: 20,          // objetos além desta distância não projetam sombras
+    shadowMapSize: 1024,         // 1024 (performance) ou 2048 (qualidade)
+    vertexAO: false,             // Ambient Occlusion pré-calculado por vértice (custo zero em runtime)
   },
 }
 

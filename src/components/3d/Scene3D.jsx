@@ -331,6 +331,40 @@ function FlirAdaptiveMeshHelper({ enabled }) {
   return null
 }
 
+// ----- Componente: shadow distance culling -----
+// Desliga castShadow em meshes que estão além da distância configurada da câmara.
+// Reduz draw calls na shadow pass (o gargalo principal confirmado em testes).
+// Otimização: usa meshRefs (Map) em vez de scene.traverse, e só reavalia
+// quando a câmara se move significativamente (>5 unidades) ou quando o nº de meshes muda.
+function ShadowOptimizer({ enabled, distance, meshRefs }) {
+  const { camera } = useThree()
+  const lastCamPosRef = useRef(new THREE.Vector3(Infinity, Infinity, Infinity))
+  const lastMeshCountRef = useRef(0)
+
+  useFrame(() => {
+    if (!enabled || !meshRefs?.current) return
+    const camPos = camera.position
+    const meshCount = meshRefs.current.size
+    // Só reavaliar se a câmara se moveu >5 unidades OU se o nº de meshes mudou
+    if (camPos.distanceToSquared(lastCamPosRef.current) < 25 && meshCount === lastMeshCountRef.current) return
+    lastCamPosRef.current.copy(camPos)
+    lastMeshCountRef.current = meshCount
+
+    const distSq = distance * distance
+    for (const [, mesh] of meshRefs.current) {
+      if (mesh && mesh.geometry) {
+        const meshPos = mesh.position
+        const dx = meshPos.x - camPos.x
+        const dy = meshPos.y - camPos.y
+        const dz = meshPos.z - camPos.z
+        const d = dx * dx + dy * dy + dz * dz
+        mesh.castShadow = d <= distSq
+      }
+    }
+  })
+  return null
+}
+
 // ----- Componente principal -----
 export default function Scene3D() {
   const objects = useStore((s) => s.objects)
@@ -417,8 +451,8 @@ export default function Scene3D() {
           color={lights.directional.color}
           position={lights.directional.position}
           castShadow
-          shadow-mapSize-width={2048}
-          shadow-mapSize-height={2048}
+          shadow-mapSize-width={renderSettings?.shadowMapSize || 1024}
+          shadow-mapSize-height={renderSettings?.shadowMapSize || 1024}
           shadow-camera-left={-15}
           shadow-camera-right={15}
           shadow-camera-top={15}
@@ -491,6 +525,13 @@ export default function Scene3D() {
 
         {/* Flir Adaptive Mesh — LOD adaptativo (recurso pesado) */}
         <FlirAdaptiveMeshHelper enabled={renderSettings?.flirAdaptiveMesh || false} />
+
+        {/* Shadow Optimizer — distance culling (reduz draw calls na shadow pass) */}
+        <ShadowOptimizer
+          enabled={renderSettings?.shadowOptimizations ?? true}
+          distance={renderSettings?.shadowDistance || 20}
+          meshRefs={meshRefs}
+        />
 
         {/* Câmara orbital — desativada em modo sculpt durante o arraste */}
         <OrbitControls

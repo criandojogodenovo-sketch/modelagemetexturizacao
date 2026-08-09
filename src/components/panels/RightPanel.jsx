@@ -142,7 +142,7 @@ function ObjectProperties({ obj }) {
       </div>
 
       {/* Material */}
-      <MaterialEditor obj={obj} />
+      {obj?.material && <MaterialEditor obj={obj} />}
 
       {/* Args da primitiva (se aplicável) */}
       {!obj.imported && obj.args && <PrimitiveArgsEditor obj={obj} />}

@@ -31,7 +31,11 @@ export default function MaterialEditor({ obj }) {
   const mapInputRef = useRef()
   const normalInputRef = useRef()
 
+  // Guarda: se obj não existe, não renderizar
+  if (!obj || !obj.material) return null
+
   const m = obj.material
+  void updateMaterial; void commitMaterial; void _pushHistory; void toast; void mapInputRef; void normalInputRef
 
   // Atualiza um campo do material (em tempo real, sem histórico)
   const set = (patch) => updateMaterial(obj.id, patch)
