@@ -16,7 +16,6 @@
     mieCoefficient: 0.005,
     name: 'Sky Procedural'
   });
-  // Adicionar cubo
   s.addObjectToScene(s.addObject('cube', [0, 1, 0]).id, [0, 1, 0]);
   return JSON.stringify({ skyId: sky.instanceId, skyType: 'procedural' });
 })();
