@@ -57,9 +57,11 @@ function GameCameraGizmo({ camera }) {
 }
 
 // Componente interno que aplica o fundo da cena
-function SceneBackgroundSolid({ background }) {
+function SceneBackgroundSolid({ background, hasSkyObject }) {
   const { scene } = useThree()
   useEffect(() => {
+    // Se há um SkyObject na cena, ele trata do background — não sobrescrever
+    if (hasSkyObject) return
     if (background.type === 'gradient') {
       const canvas = document.createElement('canvas')
       canvas.width = 2; canvas.height = 256
@@ -75,8 +77,43 @@ function SceneBackgroundSolid({ background }) {
     } else {
       scene.background = new THREE.Color(background.color)
     }
-  }, [background, scene])
+  }, [background, scene, hasSkyObject])
   return null
+}
+
+// ===== Componente que aplica FogObject à cena =====
+function FogApplier({ conects }) {
+  const { scene } = useThree()
+  const fogConect = (conects || []).find(c => c.type === 'FogObject')
+  useEffect(() => {
+    if (!fogConect) {
+      scene.fog = null
+      return
+    }
+    if (fogConect.fogType === 'exponential') {
+      scene.fog = new THREE.FogExp2(fogConect.color || 0xa0a0a0, fogConect.density || 0.02)
+    } else {
+      scene.fog = new THREE.Fog(fogConect.color || 0xa0a0a0, fogConect.near || 5, fogConect.far || 50)
+    }
+  }, [fogConect?.fogType, fogConect?.color, fogConect?.near, fogConect?.far, fogConect?.density, scene])
+  return null
+}
+
+// ===== Helper: encontrar uma luz por nome ou instanceId =====
+// Procura em todos os conects de luz (LuminousObject, SunObject, PointObject, etc.)
+// e devolve o THREE.Light correspondente do meshRef.
+function findLight(lightId, setupScene, conectMeshRefs) {
+  const lightTypes = ['LuminousObject', 'SunObject', 'PointObject', 'SpotObject', 'AreaObject', 'AmbientObject']
+  const conects = (setupScene?.conects || []).filter(c => lightTypes.includes(c.type))
+  // Procurar por instanceId ou por name
+  const conect = conects.find(c => c.instanceId === lightId || c.name === lightId)
+  if (!conect) return null
+  const mesh = conectMeshRefs.current.get(conect.instanceId)
+  if (!mesh) return null
+  // Procurar a luz dentro do grupo
+  let light = null
+  mesh.traverse(obj => { if (obj.isLight && !light) light = obj })
+  return light
 }
 
 // ===== Componente que gere o modo jogo dentro do canvas =====
@@ -454,6 +491,33 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           // Abrir URL externa
           window.open(subTarget, '_blank')
           debugLog(`Link: abriu URL "${subTarget}"`, 'log', 'Links')
+        }
+      },
+
+      // ===== Funções de luz (FlirCode) =====
+      // setLightIntensity(nomeOuId, valor) — ajusta intensidade de uma luz por nome ou instanceId
+      setLightIntensity: (lightId, value) => {
+        const light = findLight(lightId, setupScene, conectMeshRefs)
+        if (light) {
+          light.intensity = value
+          debugLog(`Luz "${lightId}" intensidade = ${value}`, 'log', 'Light')
+        }
+      },
+      // setLightColor(nomeOuId, cor) — ajusta cor de uma luz (hex string ex: '#ff0000')
+      setLightColor: (lightId, color) => {
+        const light = findLight(lightId, setupScene, conectMeshRefs)
+        if (light) {
+          light.color = new THREE.Color(color)
+          debugLog(`Luz "${lightId}" cor = ${color}`, 'log', 'Light')
+        }
+      },
+      // setLightVisible(nomeOuId, bool) — liga/desliga uma luz
+      setLightVisible: (lightId, visible) => {
+        const mesh = conectMeshRefs.current.get(lightId)
+        if (mesh) {
+          mesh.visible = visible
+          // Também esconder luzes filho
+          mesh.traverse(obj => { if (obj.isLight) obj.visible = visible })
         }
       },
     }
@@ -921,6 +985,10 @@ export default function SceneLevel3D() {
         dpr={[1, 2]}
         camera={{ position: [8, 6, 10], fov: 50, near: 0.1, far: 200 }}
         gl={{ antialias: true, preserveDrawingBuffer: true, alpha: false }}
+        onCreated={({ gl }) => {
+          // Sem tone mapping para o Sky procedural renderizar corretamente
+          gl.toneMapping = THREE.NoToneMapping
+        }}
         onPointerMissed={() => {
           if (!isGameMode) {
             setSelectedInstanceId(null)
@@ -930,7 +998,8 @@ export default function SceneLevel3D() {
         }}
       >
         <Suspense fallback={null}>
-          <SceneBackgroundSolid background={background} />
+          <SceneBackgroundSolid background={background} hasSkyObject={!!(activeScene?.conects || []).find(c => c.type === 'SkyObject')} />
+          <FogApplier conects={activeScene?.conects} />
 
           <ambientLight intensity={lights.ambient.intensity} color={lights.ambient.color} />
           <directionalLight

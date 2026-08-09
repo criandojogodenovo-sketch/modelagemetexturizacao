@@ -14,11 +14,34 @@
  *  - CheckpointObject: renderiza uma bandeira/marca
  *  - Outros (UI, Sound, Sky, Fog, View, etc.): sem visual 3D (só lógica)
  */
-import { forwardRef, useMemo, useEffect } from 'react'
+import { forwardRef, useMemo, useEffect, useRef } from 'react'
+import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
+import { Sky } from 'three/examples/jsm/objects/Sky.js'
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js'
 import { useStore } from '../../store/useStore'
 import { findConectDefinition } from '../../utils/conects/taxonomy'
 import SceneObject from '../3d/SceneObject'
+
+// ===== Helper: converter temperatura Kelvin para cor RGB =====
+// Baseado em http://www.tannerhelland.com/4435/convert-temperature-rgb-algorithm-code/
+function kelvinToRGB(kelvin) {
+  const temp = kelvin / 100
+  let r, g, b
+  if (temp <= 66) {
+    r = 255
+    g = 99.4708025861 * Math.log(temp) - 161.1195681661
+    b = temp <= 19 ? 0 : 138.5177312231 * Math.log(temp - 10) - 305.0447927307
+  } else {
+    r = 329.698727446 * Math.pow(temp - 60, -0.1332047592)
+    g = 288.1221695283 * Math.pow(temp - 60, -0.0755148492)
+    b = 255
+  }
+  r = Math.max(0, Math.min(255, r)) / 255
+  g = Math.max(0, Math.min(255, g)) / 255
+  b = Math.max(0, Math.min(255, b)) / 255
+  return new THREE.Color(r, g, b)
+}
 
 const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, setMeshRef }, meshRef) {
   const def = findConectDefinition(conect.type)
@@ -26,6 +49,28 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
   // Se não tem visual, não renderiza mesh — mas pode adicionar luzes, etc.
   if (conect.type === 'LuminousObject') {
     return <LuminousMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // Novos tipos de luz (expandir Conects de Luz)
+  if (conect.type === 'SunObject') {
+    return <SunMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+  if (conect.type === 'PointObject') {
+    return <PointLightMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+  if (conect.type === 'SpotObject') {
+    return <SpotLightMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+  if (conect.type === 'AreaObject') {
+    return <AreaLightMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+  if (conect.type === 'AmbientObject') {
+    return <AmbientLightMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // SkyObject agora tem visual (céu procedural, HDRI, gradient, solid)
+  if (conect.type === 'SkyObject') {
+    return <SkyMesh conect={conect} setMeshRef={setMeshRef} />
   }
 
   if (conect.type === 'TerrainObject') {
@@ -206,6 +251,312 @@ function LuminousMesh({ conect, setMeshRef }) {
   )
 }
 
+// ===== SunObject (luz direcional com temperatura de cor Kelvin) =====
+function SunMesh({ conect, setMeshRef }) {
+  // Converter temperatura Kelvin para cor RGB
+  const color = useMemo(() => kelvinToRGB(conect.temperature || 6500), [conect.temperature])
+  // Calcular direção do sol a partir de elevação/azimute
+  const sunDirection = useMemo(() => {
+    const elev = THREE.MathUtils.degToRad(conect.elevation ?? 45)
+    const azim = THREE.MathUtils.degToRad(conect.azimuth ?? 180)
+    return [
+      Math.cos(elev) * Math.sin(azim),
+      Math.sin(elev),
+      Math.cos(elev) * Math.cos(azim),
+    ]
+  }, [conect.elevation, conect.azimuth])
+
+  return (
+    <group
+      ref={setMeshRef}
+      position={conect.position}
+      userData={{ conectInstanceId: conect.instanceId, isLight: true, lightType: 'sun' }}
+    >
+      <directionalLight
+        intensity={conect.intensity}
+        color={color}
+        position={sunDirection}
+        castShadow={conect.castShadow}
+      />
+      {/* Gizmo: sol (esfera laranja + raios paralelos) */}
+      <mesh>
+        <sphereGeometry args={[0.3, 16, 16]} />
+        <meshBasicMaterial color="#ffa500" />
+      </mesh>
+      {/* Setas paralelas indicando direção da luz */}
+      <group position={[0, 0, 0]}>
+        {[0, 1, 2].map(i => (
+          <mesh key={i} position={[sunDirection[0] * (1 + i * 0.5), sunDirection[1] * (1 + i * 0.5), sunDirection[2] * (1 + i * 0.5)]}>
+            <coneGeometry args={[0.08, 0.2, 4]} />
+            <meshBasicMaterial color="#ffa500" transparent opacity={0.6} />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  )
+}
+
+// ===== PointObject (luz pontual com alcance e atenuação) =====
+function PointLightMesh({ conect, setMeshRef }) {
+  return (
+    <group
+      ref={setMeshRef}
+      position={conect.position}
+      userData={{ conectInstanceId: conect.instanceId, isLight: true, lightType: 'point' }}
+    >
+      <pointLight
+        intensity={conect.intensity}
+        color={conect.color}
+        distance={conect.distance}
+        decay={conect.decay}
+        castShadow={conect.castShadow}
+      />
+      {/* Gizmo: esfera azul (luz pontual) */}
+      <mesh>
+        <sphereGeometry args={[0.2, 16, 16]} />
+        <meshBasicMaterial color={conect.color || '#ffffff'} />
+      </mesh>
+      {/* Halo */}
+      <mesh>
+        <sphereGeometry args={[0.35, 16, 16]} />
+        <meshBasicMaterial color={conect.color || '#ffffff'} transparent opacity={0.15} />
+      </mesh>
+      {/* Esfera wireframe a indicar alcance */}
+      {conect.distance > 0 && (
+        <mesh>
+          <sphereGeometry args={[conect.distance, 16, 16]} />
+          <meshBasicMaterial color={conect.color || '#ffffff'} wireframe transparent opacity={0.05} />
+        </mesh>
+      )}
+    </group>
+  )
+}
+
+// ===== SpotObject (holofote com cone) =====
+function SpotLightMesh({ conect, setMeshRef }) {
+  const targetRef = useRef()
+  const angleRad = THREE.MathUtils.degToRad(conect.angle || 45)
+  // Calcular posição do target (aponta para -Y do grupo)
+  const targetPos = [0, -1, 0]
+
+  useEffect(() => {
+    if (targetRef.current) {
+      targetRef.current.position.set(...targetPos)
+    }
+  }, [])
+
+  return (
+    <group
+      ref={setMeshRef}
+      position={conect.position}
+      rotation={conect.rotation}
+      userData={{ conectInstanceId: conect.instanceId, isLight: true, lightType: 'spot' }}
+    >
+      <spotLight
+        intensity={conect.intensity}
+        color={conect.color}
+        distance={conect.distance}
+        angle={angleRad}
+        penumbra={conect.penumbra}
+        decay={conect.decay}
+        castShadow={conect.castShadow}
+        position={[0, 0, 0]}
+        target={targetRef.current}
+      />
+      <object3D ref={targetRef} position={targetPos} />
+      {/* Gizmo: cone a indicar direção do holofote */}
+      <mesh position={[0, -0.5, 0]} rotation={[Math.PI, 0, 0]}>
+        <coneGeometry args={[Math.tan(angleRad) * 1, 1, 16, 1, true]} />
+        <meshBasicMaterial color={conect.color || '#ffffff'} wireframe transparent opacity={0.4} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Pequena esfera na fonte */}
+      <mesh>
+        <sphereGeometry args={[0.15, 12, 12]} />
+        <meshBasicMaterial color={conect.color || '#ffffff'} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== AreaObject (luz de área retangular) =====
+function AreaLightMesh({ conect, setMeshRef }) {
+  const lightRef = useRef()
+  // RectAreaLight precisa de RectAreaLightUniformsLib (inicializado no Scene3D)
+  useEffect(() => {
+    if (lightRef.current) {
+      lightRef.current.width = conect.width || 2
+      lightRef.current.height = conect.height || 2
+    }
+  }, [conect.width, conect.height])
+
+  return (
+    <group
+      ref={setMeshRef}
+      position={conect.position}
+      rotation={conect.rotation}
+      userData={{ conectInstanceId: conect.instanceId, isLight: true, lightType: 'area' }}
+    >
+      <rectAreaLight
+        ref={lightRef}
+        intensity={conect.intensity}
+        color={conect.color}
+        width={conect.width || 2}
+        height={conect.height || 2}
+        position={[0, 0, 0]}
+      />
+      {/* Gizmo: retângulo a indicar a área da luz */}
+      <mesh>
+        <planeGeometry args={[conect.width || 2, conect.height || 2]} />
+        <meshBasicMaterial color={conect.color || '#ffffff'} transparent opacity={0.3} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Wireframe para melhor visibilidade */}
+      <mesh>
+        <planeGeometry args={[conect.width || 2, conect.height || 2]} />
+        <meshBasicMaterial color={conect.color || '#ffffff'} wireframe side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== AmbientObject (luz ambiente com cor de céu/chão) =====
+function AmbientLightMesh({ conect, setMeshRef }) {
+  return (
+    <group
+      ref={setMeshRef}
+      position={conect.position}
+      userData={{ conectInstanceId: conect.instanceId, isLight: true, lightType: 'ambient' }}
+    >
+      <hemisphereLight
+        intensity={conect.intensity}
+        color={conect.color}
+        groundColor={conect.groundColor}
+      />
+      {/* Gizmo: esfera cinza semi-transparente (sem direção) */}
+      <mesh>
+        <sphereGeometry args={[0.3, 16, 16]} />
+        <meshBasicMaterial color="#888888" transparent opacity={0.3} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== SkyObject (solid, gradient, hdri, procedural) =====
+function SkyMesh({ conect, setMeshRef }) {
+  const { scene, gl } = useThree()
+
+  // Criar o objeto Sky uma vez (não recriar a cada render)
+  const skyObj = useMemo(() => {
+    if (conect.skyType !== 'procedural') return null
+    const sky = new Sky()
+    sky.scale.setScalar(1000)
+    return sky
+  }, [conect.skyType])
+
+  // Atualizar uniforms do Sky quando parâmetros mudam
+  useEffect(() => {
+    if (!skyObj) return
+    const sun = new THREE.Vector3()
+    const elev = THREE.MathUtils.degToRad(conect.sunElevation ?? 25)
+    const azim = THREE.MathUtils.degToRad(conect.sunAzimuth ?? 180)
+    sun.setFromSphericalCoords(1, elev, azim)
+    skyObj.material.uniforms['sunPosition'].value.copy(sun)
+    skyObj.material.uniforms['turbidity'].value = conect.turbidity ?? 10
+    skyObj.material.uniforms['rayleigh'].value = conect.rayleigh ?? 1
+    skyObj.material.uniforms['mieCoefficient'].value = conect.mieCoefficient ?? 0.005
+    skyObj.material.uniforms['mieDirectionalG'].value = 0.8
+  }, [skyObj, conect.sunElevation, conect.sunAzimuth, conect.turbidity, conect.rayleigh, conect.mieCoefficient])
+
+  // Aplicar background consoante o tipo
+  useEffect(() => {
+    if (conect.skyType === 'solid') {
+      scene.background = new THREE.Color(conect.solidColor || '#87ceeb')
+    } else if (conect.skyType === 'gradient') {
+      const canvas = document.createElement('canvas')
+      canvas.width = 2
+      canvas.height = 256
+      const ctx = canvas.getContext('2d')
+      const grad = ctx.createLinearGradient(0, 0, 0, 256)
+      grad.addColorStop(0, conect.topColor || '#1a4d8f')
+      grad.addColorStop(1, conect.bottomColor || '#aac4e8')
+      ctx.fillStyle = grad
+      ctx.fillRect(0, 0, 2, 256)
+      const tex = new THREE.CanvasTexture(canvas)
+      tex.colorSpace = THREE.SRGBColorSpace
+      scene.background = tex
+    } else if (conect.skyType === 'hdri' && conect.hdriUrl) {
+      const pmrem = new THREE.PMREMGenerator(gl)
+      new RGBELoader().load(conect.hdriUrl, (texture) => {
+        const envMap = pmrem.fromEquirectangular(texture).texture
+        scene.background = envMap
+        scene.environment = envMap
+        texture.dispose()
+        pmrem.dispose()
+      })
+    } else if (conect.skyType === 'procedural') {
+      // Para procedural, limpar scene.background para que o Sky mesh seja visível
+      // (o Sky é um mesh 3D que renderiza o céu)
+      scene.background = null
+    }
+  }, [conect.skyType, conect.solidColor, conect.topColor, conect.bottomColor, conect.hdriUrl, scene, gl])
+
+  // Adicionar Sky diretamente à cena se for procedural
+  useEffect(() => {
+    if (conect.skyType === 'procedural' && skyObj) {
+      scene.add(skyObj)
+      return () => { scene.remove(skyObj) }
+    }
+  }, [skyObj, scene, conect.skyType])
+
+  if (conect.skyType === 'procedural' && skyObj) {
+    return (
+      <group ref={setMeshRef} userData={{ conectInstanceId: conect.instanceId }}>
+        {conect.starsEnabled && <StarsMesh />}
+        {/* Sky é adicionado diretamente à cena via useEffect acima */}
+        <mesh visible={false}>
+          <sphereGeometry args={[0.1, 8, 8]} />
+          <meshBasicMaterial />
+        </mesh>
+      </group>
+    )
+  }
+
+  return (
+    <group ref={setMeshRef} userData={{ conectInstanceId: conect.instanceId }}>
+      <mesh visible={false}>
+        <sphereGeometry args={[0.1, 8, 8]} />
+        <meshBasicMaterial />
+      </mesh>
+    </group>
+  )
+}
+
+// Componente auxiliar: estrelas (Points)
+function StarsMesh() {
+  const points = useMemo(() => {
+    const geo = new THREE.BufferGeometry()
+    const count = 1000
+    const positions = new Float32Array(count * 3)
+    for (let i = 0; i < count; i++) {
+      // Distribuir numa esfera de raio 800
+      const theta = Math.random() * Math.PI * 2
+      const phi = Math.acos(Math.random() * 2 - 1)
+      const r = 800
+      positions[i * 3] = r * Math.sin(phi) * Math.cos(theta)
+      positions[i * 3 + 1] = r * Math.cos(phi)
+      positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta)
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    return geo
+  }, [])
+  return (
+    <points geometry={points}>
+      <pointsMaterial color="#ffffff" size={1.5} sizeAttenuation={false} transparent opacity={0.8} />
+    </points>
+  )
+}
+
+// ===== WaterObject (com ondas e reflexos via THREE.Water) =====
+
 // ===== TerrainObject =====
 function TerrainMesh({ conect, setMeshRef }) {
   const geometry = useMemo(() => {
@@ -289,15 +640,46 @@ function TerrainMesh({ conect, setMeshRef }) {
   )
 }
 
-// ===== WaterObject =====
+// ===== WaterObject (com ondas animadas via vertex displacement) =====
 function WaterMesh({ conect, setMeshRef }) {
+  const meshRef = useRef()
+  const time = useRef(0)
+
+  // Geometria com subdivisões para ondas
+  const geometry = useMemo(() => {
+    const [w, h] = conect.size || [20, 20]
+    const g = new THREE.PlaneGeometry(w, h, 32, 32)
+    g.rotateX(-Math.PI / 2)
+    return g
+  }, [conect.size])
+
+  // Animar ondas no useFrame
+  useFrame((_, delta) => {
+    time.current += delta * (conect.waveSpeed || 0.5)
+    if (!meshRef.current) return
+    const pos = meshRef.current.geometry.attributes.position
+    const waveHeight = conect.waveHeight || 0.1
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i)
+      const z = pos.getZ(i)
+      // Ondas senoidais combinadas
+      const y = Math.sin(x * 0.5 + time.current) * waveHeight
+        + Math.cos(z * 0.5 + time.current * 0.7) * waveHeight * 0.5
+      pos.setY(i, y)
+    }
+    pos.needsUpdate = true
+    meshRef.current.geometry.computeVertexNormals()
+  })
+
   return (
     <mesh
-      ref={setMeshRef}
+      ref={(node) => {
+        meshRef.current = node
+        if (typeof setMeshRef === 'function') setMeshRef(node)
+      }}
       position={conect.position}
-      rotation={[-Math.PI / 2, 0, 0]}
+      geometry={geometry}
     >
-      <planeGeometry args={conect.size || [20, 20]} />
       <meshStandardMaterial
         color={conect.color}
         transparent

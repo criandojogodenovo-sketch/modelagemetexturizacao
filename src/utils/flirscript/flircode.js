@@ -631,6 +631,16 @@ export function createFlirCodeRuntime(source, gameContext) {
       case 'playSequence':
         gameContext.playSequence?.(evaluatedArgs[0])
         break
+      // Sistema: Luzes
+      case 'setLightIntensity':
+        gameContext.setLightIntensity?.(evaluatedArgs[0], evaluatedArgs[1])
+        break
+      case 'setLightColor':
+        gameContext.setLightColor?.(evaluatedArgs[0], evaluatedArgs[1])
+        break
+      case 'setLightVisible':
+        gameContext.setLightVisible?.(evaluatedArgs[0], evaluatedArgs[1])
+        break
       default:
         debugLog(`Função desconhecida: ${name}`, 'warning', 'FlirCode')
     }

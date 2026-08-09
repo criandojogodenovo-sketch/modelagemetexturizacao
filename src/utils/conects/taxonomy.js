@@ -267,6 +267,125 @@ export const CONECT_TAXONOMY = [
     ],
   },
   {
+    type: 'SunObject',
+    label: 'Sun Object (Sol)',
+    category: 'visual',
+    icon: '☀️',
+    description: 'Luz direcional que simula o sol — sombras paralelas, temperatura de cor (Kelvin)',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      color: '#ffffff',
+      intensity: 2.0,
+      elevation: 45,       // graus (0=horizonte, 90=zénite)
+      azimuth: 180,        // graus (0=norte, 180=sul)
+      temperature: 6500,   // Kelvin (6500=neutro, 3000=quente, 10000=frio)
+      castShadow: true,
+    },
+    properties: [
+      prop('intensity', 'Intensidade', 'number', 2.0, { min: 0, max: 10, step: 0.1 }),
+      prop('temperature', 'Temperatura (K)', 'number', 6500, { min: 1000, max: 20000, step: 100 }),
+      prop('elevation', 'Elevação (graus)', 'number', 45, { min: 0, max: 90, step: 1 }),
+      prop('azimuth', 'Azimute (graus)', 'number', 180, { min: 0, max: 360, step: 1 }),
+      prop('castShadow', 'Projeta sombras', 'boolean', true),
+    ],
+  },
+  {
+    type: 'PointObject',
+    label: 'Point Object (Luz Pontual)',
+    category: 'visual',
+    icon: '🔵',
+    description: 'Luz pontual — emite em todas as direções, com alcance e atenuação',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      color: '#ffffff',
+      intensity: 2.0,
+      distance: 15,
+      decay: 2,            // atenuação física (0=sem decay, 2=realista)
+      castShadow: true,
+    },
+    properties: [
+      prop('color', 'Cor', 'color', '#ffffff'),
+      prop('intensity', 'Intensidade', 'number', 2.0, { min: 0, max: 20, step: 0.1 }),
+      prop('distance', 'Alcance', 'number', 15, { min: 0, max: 100, step: 1 }),
+      prop('decay', 'Atenuação', 'number', 2, { min: 0, max: 4, step: 0.1 }),
+      prop('castShadow', 'Projeta sombras', 'boolean', true),
+    ],
+  },
+  {
+    type: 'SpotObject',
+    label: 'Spot Object (Holofote)',
+    category: 'visual',
+    icon: '🔦',
+    description: 'Holofote — cone de luz com ângulo e suavidade de borda configuráveis',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      color: '#ffffff',
+      intensity: 5.0,
+      distance: 20,
+      angle: 45,           // graus (abertura do cone)
+      penumbra: 0.3,       // 0=borda dura, 1=borda suave
+      decay: 2,
+      castShadow: true,
+    },
+    properties: [
+      prop('color', 'Cor', 'color', '#ffffff'),
+      prop('intensity', 'Intensidade', 'number', 5.0, { min: 0, max: 50, step: 0.5 }),
+      prop('distance', 'Alcance', 'number', 20, { min: 0, max: 100, step: 1 }),
+      prop('angle', 'Ângulo (graus)', 'number', 45, { min: 5, max: 90, step: 1 }),
+      prop('penumbra', 'Suavidade borda', 'number', 0.3, { min: 0, max: 1, step: 0.05 }),
+      prop('decay', 'Atenuação', 'number', 2, { min: 0, max: 4, step: 0.1 }),
+      prop('castShadow', 'Projeta sombras', 'boolean', true),
+    ],
+  },
+  {
+    type: 'AreaObject',
+    label: 'Area Object (Luz de Área)',
+    category: 'visual',
+    icon: '▭',
+    description: 'Luz de área retangular — suave e realista (janelas, painéis). Mais pesada que point.',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      color: '#ffffff',
+      intensity: 5.0,
+      width: 2,
+      height: 2,
+    },
+    properties: [
+      prop('color', 'Cor', 'color', '#ffffff'),
+      prop('intensity', 'Intensidade', 'number', 5.0, { min: 0, max: 50, step: 0.5 }),
+      prop('width', 'Largura', 'number', 2, { min: 0.1, max: 20, step: 0.1 }),
+      prop('height', 'Altura', 'number', 2, { min: 0.1, max: 20, step: 0.1 }),
+    ],
+  },
+  {
+    type: 'AmbientObject',
+    label: 'Ambient Object (Ambiente)',
+    category: 'visual',
+    icon: '🌫️',
+    description: 'Luz ambiente uniforme — preenche sombras sem criar novas. Sem direção.',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      color: '#ffffff',
+      intensity: 0.5,
+      groundColor: '#1a1a2e',  // cor do bounce do chão
+    },
+    properties: [
+      prop('color', 'Cor (céu)', 'color', '#ffffff'),
+      prop('groundColor', 'Cor (chão)', 'color', '#1a1a2e'),
+      prop('intensity', 'Intensidade', 'number', 0.5, { min: 0, max: 5, step: 0.05 }),
+    ],
+  },
+  {
     type: 'ReflectObject',
     label: 'Reflect Object (Sonda)',
     category: 'visual',
@@ -411,21 +530,36 @@ export const CONECT_TAXONOMY = [
     label: 'Sky Object (Céu)',
     category: 'environment',
     icon: '🌤️',
-    description: 'Céu/ambiente (cor, gradiente ou HDRI)',
+    description: 'Céu/ambiente (cor, gradiente, HDRI ou céu procedural com sol)',
     hasPhysics: false,
     hasVisual: false,
     flirScriptable: false,
     defaults: {
-      skyType: 'gradient', // solid | gradient | hdri
+      skyType: 'gradient', // solid | gradient | hdri | procedural
       topColor: '#1a4d8f',
       bottomColor: '#aac4e8',
+      solidColor: '#87ceeb',
       hdriUrl: null,
+      // Céu procedural (THREE.Sky)
+      sunElevation: 25,     // graus (0=horizonte, 90=zénite)
+      sunAzimuth: 180,      // graus (0=norte, 90=este, 180=sul)
+      rayleigh: 1,          // espalhamento atmosférico (azul do céu)
+      turbidity: 10,        // quantidade de partículas (amarelado)
+      mieCoefficient: 0.005,// espalhamento Mie (brilho do sol)
+      starsEnabled: false,
     },
     properties: [
-      prop('skyType', 'Tipo', 'select', 'gradient', { options: ['solid', 'gradient', 'hdri'] }),
+      prop('skyType', 'Tipo', 'select', 'gradient', { options: ['solid', 'gradient', 'hdri', 'procedural'] }),
+      prop('solidColor', 'Cor sólida', 'color', '#87ceeb'),
       prop('topColor', 'Cor superior', 'color', '#1a4d8f'),
       prop('bottomColor', 'Cor inferior', 'color', '#aac4e8'),
       prop('hdriUrl', 'URL HDRI', 'text', ''),
+      prop('sunElevation', 'Sol: Elevação (graus)', 'number', 25, { min: 0, max: 90, step: 1 }),
+      prop('sunAzimuth', 'Sol: Azimute (graus)', 'number', 180, { min: 0, max: 360, step: 1 }),
+      prop('rayleigh', 'Rayleigh (azul)', 'number', 1, { min: 0, max: 10, step: 0.1 }),
+      prop('turbidity', 'Turbidez', 'number', 10, { min: 0, max: 30, step: 0.5 }),
+      prop('mieCoefficient', 'Mie (brilho sol)', 'number', 0.005, { min: 0, max: 0.1, step: 0.001 }),
+      prop('starsEnabled', 'Estrelas (à noite)', 'boolean', false),
     ],
   },
   {
