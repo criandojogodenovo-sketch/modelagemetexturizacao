@@ -1,479 +1,956 @@
 # Flir Engine — Documentação Completa
 
 > Engine de jogos 3D mobile no navegador — funciona offline (PWA), sem instalar nada.
+>
+> Esta documentação cobre **tudo o que existe na engine** (commit mais recente), escrita para dois públicos: utilizadores humanos (que podem não saber programar) e IAs/assistentes (que precisam de contexto preciso).
 
 ## Índice
+
 1. [Visão Geral](#1-visão-geral)
-2. [Modelagem](#2-modelagem)
-3. [Texturização](#3-texturização)
-4. [Cenas e Conects](#4-cenas-e-conects)
-5. [FlirCode — Scripting](#5-flircode--scripting)
-6. [Editor de UI](#6-editor-de-ui)
-7. [Sistema de Links](#7-sistema-de-links)
-8. [Física e Colisores](#8-física-e-colisores)
-9. [Armas e Combate](#9-armas-e-combate)
-10. [Inventário](#10-inventário)
-11. [Classes FlirCode](#11-classes-flircode)
-12. [Sinais](#12-sinais)
-13. [Multiplayer](#13-multiplayer)
-14. [Terrenos](#14-terrenos)
-15. [Animação](#15-animação)
-16. [Pós-Processamento](#16-pós-processamento)
-17. [Exportação](#17-exportação)
-18. [Referência FlirCode Completa](#18-referência-flircode-completa)
+2. [Aba Modelagem](#2-aba-modelagem)
+3. [Aba Cena](#3-aba-cena)
+4. [Aba Construtores](#4-aba-construtores)
+5. [Aba UI](#5-aba-ui)
+6. [Conects — Lista Completa](#6-conects--lista-completa)
+7. [FlirCode — Linguagem de Script](#7-flircode--linguagem-de-script)
+8. [Ambientes (Sky, Water, Fog, Luzes)](#8-ambientes-sky-water-fog-luzes)
+9. [Física e Colisões](#9-física-e-colisões)
+10. [Sistemas de Jogo (Armas, Inventário, GameState)](#10-sistemas-de-jogo-armas-inventário-gamestate)
+11. [Animação (Keyframes, Blending, Controlador)](#11-animação-keyframes-blending-controlador)
+12. [Organização (Camadas, Grupos, Hierarquia)](#12-organização-camadas-grupos-hierarquia)
+13. [Configurações e Renderização](#13-configurações-e-renderização)
+14. [Exportação e Persistência](#14-exportação-e-persistência)
+15. [Modo Story (Gravação + Replay)](#15-modo-story-gravação--replay)
+16. [Limitações Conhecidas](#16-limitações-conhecidas)
 
 ---
 
 ## 1. Visão Geral
 
-A Flir Engine é uma engine 3D completa que corre no browser. Principais sistemas:
+A **Flir Engine** é uma engine de jogos 3D que corre inteiramente no navegador. Não precisa de instalação — funciona como PWA (Progressive Web App), permitindo uso offline após o primeiro carregamento.
 
-- **Modelagem**: 6 primitivas, edit mode, modificadores, booleanas, escultura
-- **Texturização**: PBR completo, texturas, UV tiling, 12+ presets
-- **Cenas**: Multi-cena, Conects (28+ tipos), física cannon-es
-- **FlirCode**: Linguagem de scripting própria com 30+ funções
-- **UI Editor**: Editor visual estilo Figma/Canva com zoom, layers, snapping
-- **Terrenos**: Heightmap, 7 brushes, splatmap multi-camada, import/export PNG
-- **Multiplayer**: WebSocket com criar/entrar em salas
-- **Exportação**: HTML standalone jogável
+### Abas Principais
 
----
+| Aba | Função |
+|---|---|
+| **Modelagem** | Criar e editar objetos 3D (primitivas, esculpir, rigging, materiais, modificadores) |
+| **Cena** | Montar níveis com objetos do catálogo e Conects (física, IA, luzes, etc.) |
+| **Construtores** | Gerar edifícios e veículos proceduralmente com parâmetros simples |
+| **UI** | Criar interfaces de jogo (botões, textos, imagens, formulários) |
 
-## 2. Modelagem
+### Fluxo de Trabalho Típico
 
-### Primitivas
-Cubo, Esfera, Cilindro, Cone, Plano, Torus — adicionar via painel esquerdo ou BottomBar.
+1. Na aba **Modelagem**, cria-se objetos (cubos, esferas, modelos esculpidos, etc.)
+2. Na aba **Cena**, criam-se níveis e adicionam-se objetos do catálogo + Conects
+3. Na aba **Construtores**, podem-se gerar edifícios/veículos automaticamente
+4. Na aba **UI**, criam-se interfaces (menus, HUDs)
+5. Em **Cena**, clica-se em "▶ Executar Jogo" para testar
 
-### Edit Mode
-Selecionar um objeto → tab "Editar" → operações: Extrude, Subdivide, Loop Cut, Bevel.
+### Tecnologias
 
-### Modificadores
-Subdivision, Mirror, Array, Solidify — não destrutivos, empilháveis.
-
-### Booleanas
-União, Subtração, Interseção entre dois objetos.
-
-### Escultura
-Modo Sculpt com pincéis: Elevar, Rebaixar, Suavizar, Achatar.
+- **React + Vite** — UI e build
+- **Three.js (r0.185)** — renderização 3D
+- **@react-three/fiber + @react-three/drei** — bridge React ↔ Three.js
+- **cannon-es** — física
+- **Zustand** — state manager (com persistência via localStorage)
 
 ---
 
-## 3. Texturização
+## 2. Aba Modelagem
 
-Aceder via Menu Principal → 🎨 Texturização.
+A aba Modelagem permite criar e editar objetos 3D individuais. Cada objeto criado fica no "catálogo" e pode depois ser usado em cenas.
 
-### Material PBR
-- **Cor base**: color picker
-- **Roughness**: 0 (espelho) a 1 (fosco)
-- **Metalness**: 0 (não-metal) a 1 (metal puro)
-- **Opacidade**: 0 (invisível) a 1 (opaco)
-- **Emissive**: cor + intensidade (para objetos que brilham)
-- **Wireframe** e **Flat shading**: toggles
+### 2.1 Primitivas
 
-### Texturas
-Slots: Difusa, Normal, Roughness, Metalness, Emissive.
-Carregar via ficheiro (PNG/JPG) — fica guardada em base64 no projeto.
+6 tipos disponíveis:
 
-### UV Tiling
-- Repeat X/Y: repetir textura
-- Offset X/Y: deslocar textura
-- Rotação UV: rodar textura
+| Tipo | Argumentos |
+|---|---|
+| Cubo | `size` (tamanho) |
+| Esfera | `radius`, `segments` |
+| Cilindro | `radius`, `height`, `segments` |
+| Cone | `radius`, `height`, `segments` |
+| Plano | `width`, `height` |
+| Torus | `radius`, `tube`, `radialSegments`, `tubularSegments` |
 
-### Biblioteca
-12 presets: Plástico, Metal, Madeira, Pedra, Vidro, Ouro, Cobre, Borracha, Gelo, Neon, Holograma, Carro.
+### 2.2 Ferramentas (tabs do painel esquerdo)
 
-### Copy/Paste
-Copiar material de um objeto e colar noutro.
+| Tab | Função |
+|---|---|
+| **Ferramentas** | Seleção de objetos, mover/rodar/escalar, agrupar (parent) |
+| **Editar** | Edit mode: selecionar vértices/arestas/faces, extrude, inset, bevel, loop cut, merge, unwrap UV |
+| **Modificadores** | Subdivision, Mirror, Array, Solidify, Curva (deformar ao longo de Path) |
+| **Booleanas** | União, Subtração, Interseção entre dois objetos |
+| **Escanpir** | Esculpir a malha: raise, lower, smooth, flatten (com raio e força configuráveis) |
+| **Materiais** | Cor, roughness, metalness, emissive, opacidade, wireframe, flat shading, texturas (map + normalMap com tiling) |
+| **Esqueleto** | Adicionar ossos, preset Humanoide (19 ossos), rigging |
+| **Peso** | Pintar pesos dos ossos sobre a malha (auto-peso por proximidade, pincel manual) |
+| **Animação** | Keyframes por osso, clips (idle/walk/run/jump/attack), reprodução, gizmo de transformação em ossos |
+| **Cena** | Configurações globais (fundo, grelha, luzes, renderização avançada) |
+
+### 2.3 Modificadores
+
+| Modificador | Parâmetros |
+|---|---|
+| Subdivision Surface | `levels` (1–4) |
+| Mirror | `axis` (x/y/z) |
+| Array | `count` (2–20), `offset` [x, y, z] |
+| Solidify | `thickness` (0.01–1) |
+| Curva | `pathId` (PathObject de referência), `twist` (-3 a 3), `stretch` (0.1–3) |
+
+**Notas:**
+- Os modificadores são **não destrutivos** — aplicam-se por cima da geometria original.
+- O modificador **Curva** usa interpolação Catmull-Rom suave (passa por todos os pontos do Path sem angulosidades).
+- A ordem dos modificadores importa: Subdivision deve ser aplicado **antes** de Curva para ter vértices suficientes.
+
+### 2.4 Materiais
+
+Propriedades do material PBR (Physically Based Rendering):
+
+| Propriedade | Descrição |
+|---|---|
+| Cor base | Cor do objeto |
+| Roughness | 0 = espelho, 1 = mate |
+| Metalness | 0 = dielétrico, 1 = metal |
+| Emissive | Cor de brilho próprio |
+| Emissive Intensity | Intensidade do brilho |
+| Opacidade | 0 = invisível, 1 = opaco |
+| Wireframe | Mostrar apenas as arestas |
+| Flat Shading | Normais por face (visual facetado) |
+| Textura difusa (map) | Imagem PNG/JPG aplicada como cor |
+| Normal Map | Imagem que simula relevo |
+| Tiling U/V | Repetição da textura |
+| Offset U/V | Deslocamento da textura |
+
+### 2.5 Rigging e Weight Painting
+
+- **Esqueleto**: adiciona ossos manualmente ou usa o preset Humanoide (19 ossos: root, spine, chest, neck, head, shoulders, arms, hands, thighs, calves, feet).
+- **Weight Painting**: cada osso tem um peso (0–1) em cada vértice. O auto-peso calcula por proximidade. O pincel manual permite ajustar.
+- **SkinnedMesh**: quando um objeto tem esqueleto + skinWeights, é renderizado como `THREE.SkinnedMesh` — os ossos deformam a malha em tempo real.
+
+### 2.6 Animação no Editor
+
+- **Keyframes por osso**: seleciona um osso, move-o com o gizmo, e carrega em "Gravar Keyframe". O keyframe guarda posição/rotação/escala do osso no tempo atual.
+- **Clips**: idle, walk, run, jump, attack. Cada clip tem os seus próprios keyframes.
+- **Reprodução no editor**: o `EditorAnimationPlayer` aplica os keyframes aos bones no editor (não só no modo jogo).
+- **Interpolação**: ease (smoothstep), linear, ou step.
+- **Blending**: `AnimationBoostObject` na cena ativa blending suave entre clips (ex: idle → walk).
 
 ---
 
-## 4. Cenas e Conects
+## 3. Aba Cena
 
-### Cenas
-Multi-cena com criar/duplicar/apagar/reordenar. Cada cena tem objetos + conects.
+A aba Cena é onde se montam os níveis do jogo.
 
-### Conects (28+ tipos)
-| Categoria | Tipos |
-|-----------|-------|
-| Física | RigidObject, StaticObject, StopObject, PersonalObject, NpcObject, TriggerObject, JointObject |
-| Visual | VisualObject, LuminousObject, ParticleObject, TrailObject, ReflectObject |
-| Câmara/Áudio | ViewObject, SoundObject |
-| Ambiente | SkyObject, TerrainObject, WaterObject, FogObject |
-| UI | ButtonObject, JoystickObject, TextObject, ImageObject, PanelObject |
-| Gameplay | TimerObject, PathObject, CheckpointObject, WeaponObject, ItemObject |
-| Organização | GroupObject |
+### 3.1 Estrutura
 
-### Propriedades
-Cada Conect tem propriedades específicas (massa, velocidade, cor, etc.) editáveis no painel direito.
+- **Cenas**: cada cena é um nível independente. Pode ter múltiplas cenas e navegar entre elas.
+- **Catálogo**: lista de objetos criados na Modelagem, disponíveis para adicionar à cena.
+- **Conects**: elementos de jogo (física, IA, luzes, sons, etc.) — ver secção 6.
+- **Câmara de Jogo**: configurar tipo (perspetiva/ortográfica), FOV, near/far.
+
+### 3.2 Outliner de Conects
+
+- Lista hierárquica com indentação (filhos aparecem sob os pais).
+- **Drag-and-drop**: arrastar um Conect para dentro de outro torna-o filho (reparent).
+- Botão expandir/colapsar (▼/▶) para pais com filhos.
+- Tags: `script` (tem FlirCode), `modelo` (tem sourceObjectId), `↳ filho` (tem parentId).
+- Menu de contexto (⋯) por Conect: Ver Filhos/Substituir modelo, FlirScript, Controlador de Animação, Criar filho, Adicionar como filho, Conectar (Joint), Mover para outra cena, Duplicar, Apagar, Remover do pai.
+
+### 3.3 Painéis da Cena
+
+| Painel | Função |
+|---|---|
+| **Cenas** | Criar, duplicar, apagar, renomear cenas |
+| **Catálogo** | Lista de objetos da Modelagem (arrastar para a cena) |
+| **Objetos na Cena** | Instâncias de objetos do catálogo na cena atual |
+| **Conects na Cena** | Lista hierárquica de Conects |
+| **Camadas** | Gerir camadas (criar, apagar, mostrar/esconder, bloquear) |
+| **Data Assets** | ScriptableObjects (dados reutilizáveis) + Autoloads (scripts globais) |
+| **Modo Story** | Gravação e replay de ações do jogador |
+| **Câmara de Jogo** | Configurar câmara de jogo |
+
+### 3.4 Executar Jogo
+
+- Botão "▶ Executar Jogo" inicia o modo jogo.
+- O `SceneLevel3D` ativa física, FlirCode, animações, IA, câmara de jogo.
+- Botão "Parar" volta ao editor.
 
 ---
 
-## 5. FlirCode — Scripting
+## 4. Aba Construtores
 
-FlirCode é a linguagem de scripting da Flir Engine. Sintaxe simples baseada em blocos `begincode...endcode`.
+Gera objetos complexos sem modelar manualmente. Os objetos gerados entram no catálogo da Modelagem.
 
-### Estrutura
+### 4.1 Construtor de Edifícios
+
+| Parâmetro | Range | Descrição |
+|---|---|---|
+| Pisos | 1–6 | Número de andares |
+| Telhado | Plano / Inclinado / Duas águas | Tipo de telhado |
+| Largura | 3–15m | Largura do edifício |
+| Profundidade | 3–12m | Profundidade |
+| Altura do piso | 2–5m | Altura de cada andar |
+| Cor das paredes | Cor | Cor do material |
+
+**Gera**: chão, 4 paredes, teto, telhado, janelas decorativas e porta.
+
+**Botão "Variar"**: gera variações aleatórias (pisos, largura, telhado, cor) para criar ruas com casas não-idênticas.
+
+### 4.2 Construtor de Veículos
+
+| Parâmetro | Opções | Descrição |
+|---|---|---|
+| Tipo | Sedan / Desportivo / Camião | Carroçaria |
+| Tamanho rodas | 0.2–0.8 | Raio das rodas |
+| Cor | Cor | Cor da carroçaria |
+
+**Gera**: chassis, cabine, 4 rodas, 2 para-choques, vidro (windshield).
+
+---
+
+## 5. Aba UI
+
+Editor de interfaces de jogo (menus, HUDs, etc.).
+
+### 5.1 Tipos de Elementos (9)
+
+| Tipo | Propriedades |
+|---|---|
+| Button | label, color, textColor, fontSize, eventName |
+| Label | text, color, fontSize |
+| Input | placeholder, value, eventName |
+| Checkbox | label, checked, eventName |
+| Slider | min, max, value, eventName |
+| Form | fields, submitLabel, eventName |
+| Text | text |
+| Image | url |
+| Panel | color, opacity |
+
+### 5.2 Sistema de Ancoragem
+
+Cada elemento tem `position` (X%, Y%) e `size` (W, H em pixels). A posição é relativa ao ecrã.
+
+### 5.3 Ligação a FlirCode
+
+Cada elemento tem um `eventName` (ex: `onClick`, `onChange`, `onSubmit`). Quando o utilizador interage com o elemento, o evento é disparado no FlirCode do Conect associado.
+
+### 5.4 Sistema de Links
+
+A função `linkTo("scene"/"screen"/"url", "target")` no FlirCode permite navegação automática:
+- `linkTo("scene", "Nível 2")` — muda de cena
+- `linkTo("screen", "Menu Principal")` — mostra um ecrã de UI
+- `linkTo("url", "https://...")` — abre URL externo
+
+---
+
+## 6. Conects — Lista Completa
+
+Os Conects são os blocos de construção do jogo. Há **40 tipos** em 7 categorias.
+
+### 6.1 Física (7 tipos)
+
+#### RigidObject 📦
+Corpo com física real (gravidade, massa, atrito, ressalto).
+- **Propriedades**: mass, friction, restitution, linearDamping, angularDamping, fixedRotation, sourceObjectId
+- **Usos**: caixas, barris, objetos que caem e rolam
+
+#### StaticObject 🧱
+Não se move, colisão fixa.
+- **Propriedades**: friction, restitution, sourceObjectId
+- **Usos**: chão, paredes, obstáculos
+
+#### StopObject 🛑
+Kinematic — não reage à física mas pode ser movido por FlirScript.
+- **Propriedades**: friction, restitution, sourceObjectId
+- **Usos**: plataformas móveis, portas, elevadores
+
+#### PersonalObject 🚶
+Controlador de personagem/jogador.
+- **Propriedades**: moveSpeed, jumpForce, canJump, fixedRotation, sourceObjectId
+- **Usos**: o jogador principal. Controlado por joystick/teclado (WASD + espaço).
+
+#### NpcObject 🤖
+Personagem controlado por IA.
+- **Propriedades**: moveSpeed, behavior (idle/patrol/chase/flee), detectionRadius, loseSightRadius, patrolPath, health, sourceObjectId
+- **Usos**: inimigos, aliados, NPCs. A IA persegue o PersonalObject quando está dentro do raio de deteção.
+
+#### TriggerObject 🎯
+Zona que deteta entrada/saída sem colisão física.
+- **Propriedades**: size [X,Y,Z]
+- **Usos**: zonas que ativam eventos (ex: entrar numa zona dispara um diálogo)
+
+#### JointObject 🔗
+Junta/articulação entre dois objetos.
+- **Propriedades**: jointType (hinge/ball/spring/fixed), targetA, targetB, stiffness, damping
+- **Usos**: portas articuladas, correntes, molas
+
+### 6.2 Visual (10 tipos)
+
+#### VisualObject 🎨
+Malha 3D visível sem física.
+- **Propriedades**: sourceObjectId
+- **Usos**: decoração, acessórios
+
+#### LuminousObject 💡
+Fonte de luz genérica (point/directional/spot).
+- **Propriedades**: lightType, color, intensity, distance, castShadow
+
+#### SunObject ☀️
+Luz direcional que simula o sol, com temperatura de cor (Kelvin).
+- **Propriedades**: intensity, temperature (1000K–20000K), elevation, azimuth, castShadow
+- **Conversão Kelvin→RGB**: 6500K = branco neutro, 3000K = quente (laranja), 10000K = frio (azul)
+
+#### PointObject 🔵
+Luz pontual com alcance e atenuação configuráveis.
+- **Propriedades**: color, intensity, distance, decay, castShadow
+
+#### SpotObject 🔦
+Holofote com cone de luz.
+- **Propriedades**: color, intensity, distance, angle (graus), penumbra, decay, castShadow
+- **Gizmo**: cone wireframe a indicar direção e abertura
+
+#### AreaObject ▭
+Luz de área retangular (mais pesada — evitar mais de 2–3 em simultâneo).
+- **Propriedades**: color, intensity, width, height
+- **Gizmo**: retângulo preenchido + wireframe
+
+#### AmbientObject 🌫️
+Luz ambiente uniforme (hemisphere) — preenche sombras sem criar novas.
+- **Propriedades**: color (céu), groundColor (chão), intensity
+
+#### ReflectObject 🪞
+Sonda de reflexo/ambiente.
+- **Propriedades**: resolution, intensity
+
+#### ParticleObject ✨
+Sistema de partículas.
+- **Propriedades**: maxParticles, emissionRate, particleLife, particleSize, particleSpeed, color, spread, gravity
+
+#### TrailObject 💫
+Rasto visual atrás de um objeto.
+- **Propriedades**: length, width, color, fade, followTarget
+
+### 6.3 Câmara e Áudio (2 tipos)
+
+#### ViewObject 📷
+Câmara de jogo com modos de seguimento.
+- **Propriedades**: cameraRole (primary/secondary/player), cameraType (perspective/orthographic), fov, near, far, followTarget, followMode (none/third/top/side), followDistance, followHeight
+- **Usos**: câmara em terceira pessoa, vista de topo, vista lateral
+
+#### SoundObject 🔊
+Fonte de som/música.
+- **Propriedades**: url, volume, loop, autoplay, isMusic, spatial, maxDistance
+
+### 6.4 Ambiente (4 tipos)
+
+#### SkyObject 🌤️
+Céu/ambiente com 4 modos:
+- **solid**: cor sólida
+- **gradient**: gradiente vertical (topColor → bottomColor)
+- **hdri**: carrega ficheiro HDRI via URL (RGBELoader + PMREMGenerator)
+- **procedural**: céu atmosférico com shader custom (gradiente azul, sol com glow, tons de pôr do sol, estrelas, nuvens)
+- **Propriedades do procedural**: sunElevation (0–90°), sunAzimuth (0–360°), rayleigh (azul), turbidity (partículas), mieCoefficient (brilho do sol), starsEnabled
+
+#### TerrainObject ⛰️
+Terreno com heightmap editável.
+- **Propriedades**: width, depth, segments, heightScale, heightmapSeed
+
+#### WaterObject 🌊
+Plano de água com ondas animadas.
+- **Propriedades**: size [X,Z], color, opacity, waveHeight, waveSpeed
+- **Animação**: vertex displacement no useFrame (ondas senoidais combinadas)
+
+#### FogObject 🌫️
+Névoa com distância/cor configuráveis.
+- **Propriedades**: fogType (linear/exponential), color, near, far, density
+- **Funciona no editor e no jogo** (FogApplier component)
+
+### 6.5 UI (5 tipos)
+
+#### ButtonObject 🔘
+Botão na tela.
+- **Propriedades**: label, position [X,Y %], size [W,H], color, textColor, fontSize
+
+#### JoystickObject 🕹️
+Joystick virtual para mobile.
+- **Propriedades**: side (left/right), size, color, deadzone, targetPersonal
+
+#### TextObject 📝
+Texto na tela.
+- **Propriedades**: text, position, color, fontSize, align
+
+#### ImageObject 🖼️
+Imagem/ícone na tela.
+- **Propriedades**: url, position, size
+
+#### PanelObject ▬
+Painel de fundo para agrupar UI.
+- **Propriedades**: position, size, color, opacity
+
+### 6.6 Gameplay (9 tipos)
+
+#### SpawnObject 📍
+Ponto de criação automática de objetos.
+- **Propriedades**: objectToSpawn, interval (s), maxAlive, autoStart
+
+#### NavigatorObject 🌀
+Portal/passagem entre cenas.
+- **Propriedades**: targetSceneId, transitionType (fade/instant), transitionDuration, triggerRadius, spawnPosition
+- **Comportamento**: quando o PersonalObject entra no raio do portal, muda para a cena de destino
+
+#### CheckpointObject 🚩
+Ponto de recomeço/progresso.
+- **Propriedades**: checkpointId, isStart
+
+#### TimerObject ⏱️
+Temporizador de jogo.
+- **Propriedades**: duration (s), autoStart, loop
+
+#### PathObject 🛤️
+Caminho/waypoints para movimento guiado.
+- **Propriedades**: points (array de [x,y,z]), loop, speed, target
+- **Usos**: patrulha de NPCs, trajetos de plataformas móveis, modificador Curva
+
+#### WeaponObject 🔫
+Arma equipável com sistema de combate.
+- **Propriedades**: damage, fireRate (s), range, fireType (raycast/projectile), maxAmmo, reloadTime, showCrosshair
+
+#### ItemObject 🎁
+Item apanhável no mundo.
+- **Propriedades**: itemName, itemType (generic/weapon/consumable/material), quantity, icon, pickupRadius, autoPickup
+
+#### AnimationBoostObject ⚡
+Ativa blending suave entre clips de animação.
+- **Propriedades**: blendTime, interpolationQuality (low/medium/high)
+- **Comportamento**: quando presente na cena, todos os animation players usam blending entre clips
+
+#### GameStateObject 🎮
+Gere o estado global do jogo.
+- **Propriedades**: currentState (menu/playing/paused/gameover/custom)
+
+### 6.7 Organização (3 tipos)
+
+#### PrefabObject 📦
+Pacote reutilizável de Conects.
+- **Propriedades**: prefabData, sourcePrefabId
+
+#### GroupObject 📁
+Agrupa outros Conects sem corpo físico nem visual.
+- **Propriedades**: children
+- **Usos**: pasta/ container para organizar hierarquia
+
+#### ReferenceObject 🔗
+Mostra o conteúdo de outra cena sem duplicar dados.
+- **Propriedades**: targetSceneId
+- **Comportamento**: renderiza os objetos da cena referenciada na posição do ReferenceObject
+
+### 6.8 Propriedades de Colisor (auto-injetadas)
+
+Todos os Conects com `hasPhysics: true` têm estas propriedades:
+
+| Propriedade | Descrição |
+|---|---|
+| colliderShape | Forma do colisor: model (usa a geometria), box, sphere, capsule |
+| colliderSize | Tamanho do colisor [X,Y,Z] |
+| colliderOffset | Offset do colisor [X,Y,Z] |
+| colliderRadius | Raio (para esfera/cápsula) |
+| colliderHeight | Altura (para cápsula) |
+
+### 6.9 Ver Filhos / Substituir Modelo
+
+No menu de contexto (⋯) de cada Conect com visual:
+- **Ver Filhos / Modelo**: mostra o modelo atual (ou "placeholder embutido")
+- **Substituir**: lista objetos do catálogo para escolher
+- **Eliminar**: remove o sourceObjectId (volta ao placeholder)
+
+Funciona para: PersonalObject, NpcObject, RigidObject, StaticObject, StopObject, VisualObject.
+
+---
+
+## 7. FlirCode — Linguagem de Script
+
+FlirCode é a linguagem de script da engine. É orientada a eventos, com sintaxe simplificada.
+
+### 7.1 Sintaxe
+
+| Constructo | Sintaxe |
+|---|---|
+| Comentário | `$$ isto é um comentário` |
+| Bloco | `begincode ... endcode` |
+| Função | `fun nome(parametros) begincode ... endcode` |
+| Classe | `class Nome begincode ... endcode` |
+| Herança | `class Nome extends Base begincode ... endcode` |
+| Variável | `var nome = valor` |
+| Atribuição | `nome = valor` |
+| Condicional | `if (condicao) begincode ... endcode` |
+| Ciclo count | `repeat in number(5, i) begincode ... endcode` |
+| Ciclo incremento | `repeat +1 until 10 begincode ... endcode` |
+| Ciclo decremento | `repeat -1 until 0 begincode ... endcode` |
+| Switch | `switch (var) begincode ... endcode` |
+| Case | `case valor begincode ... endcode` |
+| Default | `default begincode ... endcode` |
+| `this` | Referência ao instanceId do Conect |
+
+**Operadores de condição**: `>`, `<`, `>=`, `<=`, `==`, `!=`
+
+**Tipos de valor**: string (`"..."`), número, booleano (`true`/`false`), `this`, concatenação (`a + b`)
+
+### 7.2 Eventos (19)
+
+Os eventos são funções com prefixo `on` que são chamadas automaticamente:
+
+| Função FlirCode | Quando dispara |
+|---|---|
+| `onStart` | Quando o jogo começa (uma vez) |
+| `onTick` | A cada frame do jogo |
+| `onCollide` | Quando colide com outro objeto |
+| `onTouch` | Quando o joystick está ativo |
+| `onSeePlayer` | Quando o NPC deteta o jogador |
+| `onLoseSight` | Quando o NPC perde de vista o jogador |
+| `onTimer` | Quando um TimerObject chega a zero |
+| `onEnterZone` | Ao entrar num TriggerObject |
+| `onExitZone` | Ao sair de um TriggerObject |
+| `onClick` | Ao clicar num botão de UI |
+| `onChange` | Ao mudar valor de input/checkbox/slider |
+| `onSubmit` | Ao submeter um formulário |
+| `onPlayerJoin` | Multiplayer: jogador entra |
+| `onPlayerLeave` | Multiplayer: jogador sai |
+| `onMessage` | Multiplayer: recebe mensagem |
+| `onSignal` | Quando um sinal é emitido |
+| `onDamage` | Quando recebe dano |
+| `onPickup` | Quando apanha um item |
+| `onGameStateChange` | Quando o estado do jogo muda |
+
+### 7.3 Funções Embutidas (48)
+
+#### Movimento e Transformação
+| Função | Argumentos | Descrição |
+|---|---|---|
+| `move(x, y, z)` | Direção | Move o objeto |
+| `rotate(x, y, z)` | Rotação em graus | Roda o objeto |
+| `scale(x, y, z)` | Escala | Escala o objeto |
+| `destroy()` | — | Esconde o objeto |
+| `createObject(name, x, y, z)` | Nome + posição | Cria instância de objeto do catálogo |
+| `changeScene(name)` | Nome da cena | Muda de cena |
+
+#### Variáveis e Estado
+| Função | Argumentos | Descrição |
+|---|---|---|
+| `setVar(name, value)` | Nome + valor | Define variável global |
+| `getVar(name)` | Nome | Lê variável global |
+| `setGameState(state)` | Estado | ⚠️ Stub — não implementado no runtime |
+| `getGameState()` | — | ⚠️ Stub — retorna 'menu' |
+| `saveProgress(key, value)` | Chave + valor | ⚠️ Stub — não implementado |
+| `loadProgress(key)` | Chave | ⚠️ Stub — não implementado |
+
+#### UI
+| Função | Argumentos | Descrição |
+|---|---|---|
+| `showUI(name)` | Nome do ecrã | Mostra ecrã de UI |
+| `hideUI(name)` | Nome do ecrã | Esconde ecrã de UI |
+| `showUIScreen(name)` | Nome do ecrã | Mostra ecrã de UI |
+| `hideUIScreen(name)` | Nome do ecrã | Esconde ecrã de UI |
+| `getUIValue(name)` | Nome do elemento | Lê valor de elemento de UI |
+| `setUIValue(name, value)` | Nome + valor | Define valor de elemento de UI |
+
+#### Debug
+| Função | Argumentos | Descrição |
+|---|---|---|
+| `print(msg)` | Mensagem | Log na consola de debug |
+| `warn(msg)` | Mensagem | Aviso na consola de debug |
+| `error(msg)` | Mensagem | Erro na consola de debug |
+
+#### Colisões e Distâncias
+| Função | Argumentos | Descrição |
+|---|---|---|
+| `collidingWith(type)` | Tipo de Conect | Retorna true se está a colidir |
+| `distanceTo(name)` | Nome do objeto | Retorna distância |
+| `isTouching()` | — | Retorna true se joystick ativo |
+
+#### Multiplayer
+| Função | Argumentos | Descrição |
+|---|---|---|
+| `sendMessage(data)` | Dados | Envia mensagem a outros jogadores |
+| `getPlayers()` | — | Retorna nº de jogadores |
+| `getPlayerState(playerId)` | ID do jogador | Retorna estado do jogador |
+
+#### Sinais
+| Função | Argumentos | Descrição |
+|---|---|---|
+| `emitSignal(name, data)` | Nome + dados | Emite sinal a todos os Conects |
+
+#### Combate
+| Função | Argumentos | Descrição |
+|---|---|---|
+| `shoot()` | — | Dispara arma equipada |
+| `reload()` | — | Recarrega arma |
+| `equipWeapon(name)` | Nome da arma | Equipa arma |
+| `getAmmo()` | — | Retorna munição atual |
+| `takeDamage(amount)` | Quantidade | Aplica dano ao objeto |
+| `getHealth()` | — | Retorna vida atual |
+
+#### Inventário
+| Função | Argumentos | Descrição |
+|---|---|---|
+| `addToInventory(name, qty)` | Nome + quantidade | Adiciona item ao inventário |
+| `removeFromInventory(name, qty)` | Nome + quantidade | Remove item do inventário |
+| `getInventoryCount(name)` | Nome | Retorna quantidade |
+| `hasItem(name)` | Nome | Retorna true se tem o item |
+
+#### Navegação
+| Função | Argumentos | Descrição |
+|---|---|---|
+| `linkTo(target, subTarget)` | "scene"/"screen"/"url" + alvo | Navegação automática |
+
+#### Animação e Som
+| Função | Argumentos | Descrição |
+|---|---|---|
+| `playAnim(name)` | Nome do clip | Reproduz animação |
+| `playSound(name)` | Nome ou URL | Reproduz som |
+| `playSequence(name)` | Nome | ⚠️ Stub — não implementado |
+
+#### Luzes
+| Função | Argumentos | Descrição |
+|---|---|---|
+| `setLightIntensity(id, value)` | Nome/ID + valor | Ajusta intensidade de luz |
+| `setLightColor(id, color)` | Nome/ID + cor hex | Ajusta cor de luz |
+| `setLightVisible(id, visible)` | Nome/ID + booleano | Liga/desliga luz |
+
+#### Data Assets
+| Função | Argumentos | Descrição |
+|---|---|---|
+| `getDataAsset(name)` | Nome ou ID | Retorna dados de ScriptableObject |
+| `getAutoload(name)` | Nome ou ID | Retorna autoload |
+
+### 7.4 Exemplo de Script Completo
+
 ```
-$$ Comentário
-fun onStart() begincode
-    print("Olá mundo!")
+$$ NPC que persegue o jogador quando o vê
+fun onSeePlayer begincode
+  print("Vi o jogador!")
+  setVar("chasing", true)
 endcode
 
-fun onTick() begincode
-    move(0, 0, 1)
-endcode
-```
-
-### Sintaxe
-- `$$ comentário` — linha de comentário
-- `var nome = valor` — declarar variável
-- `if (condição) begincode ... endcode` — condicional
-- `repeat in number(n, i) begincode ... endcode` — ciclo
-- `"string" + var` — concatenação
-- `this` — referência ao próprio objeto
-
----
-
-## 6. Editor de UI
-
-Editor visual estilo Figma/Canva.
-
-### Funcionalidades
-- **Zoom e pan**: scroll, alt+drag
-- **Snapping**: encaixe automático a bordas/centro (threshold 5px)
-- **Painel de camadas**: reordenar, esconder/mostrar
-- **Seleção múltipla**: shift+clique
-- **Alinhar**: esquerda/centro/direita/topo/meio/baixo
-- **Resize handles**: 8 cantos/bordas (shift = manter proporção)
-- **Painel de propriedades**: X/Y/W/H, cor, bordas, opacidade, tipografia
-- **Duplicar**: Ctrl+D
-- **Mobile**: panels como drawers com backdrop
-
-### Elementos
-Button, Label, Input, Checkbox, Slider, Text, Image, Panel.
-
----
-
-## 7. Sistema de Links
-
-Permite que botões de UI naveguem entre cenas ou telas.
-
-### Função FlirCode
-```
-linkTo("scene", "Nível 2")    $$ muda para a cena "Nível 2"
-linkTo("screen", "Menu")       $$ mostra a tela de UI "Menu"
-linkTo("url", "https://...")   $$ abre URL externa
-```
-
-### Como usar
-1. Criar múltiplas cenas ou telas de UI
-2. Adicionar um ButtonObject ou elemento Button
-3. No evento onClick, chamar `linkTo("scene", "nome_da_cena")`
-4. Durante o jogo, clicar no botão muda de cena/tela
-
----
-
-## 8. Física e Colisores
-
-### Física
-Integração com cannon-es. Tipos de body:
-- **RigidObject**: corpo rígido com gravidade
-- **StaticObject**: estático (chão, paredes)
-- **StopObject**: cinemático (movido por script)
-- **PersonalObject**: controlador de jogador (andar, saltar)
-- **NpcObject**: IA (patrulhar, perseguir, fugir)
-- **TriggerObject**: zona de gatilho sem colisão física
-
-### Colisores Independentes
-Cada Conect com física tem propriedades de colisor:
-- `colliderShape`: model | box | sphere | capsule
-- `colliderSize`: tamanho do colisor (X,Y,Z)
-- `colliderOffset`: deslocamento do colisor
-- `colliderRadius`: raio (esfera/cápsula)
-- `colliderHeight`: altura (cápsula)
-
-O gizmo verde (wireframe) mostra o colisor no editor, separado do modelo visual.
-
----
-
-## 9. Armas e Combate
-
-### WeaponObject
-Conect com: dano, cadência, alcance, tipo (raycast/projectile), munição, recarga, mira.
-
-### Funções FlirCode
-| Função | Descrição |
-|--------|-----------|
-| `shoot()` | Dispara a arma equipada (raycast) |
-| `reload()` | Recarrega a munição |
-| `equipWeapon("nome")` | Equipa uma arma |
-| `getAmmo()` | Retorna munição atual |
-| `takeDamage(qtd)` | Aplica dano a este objeto |
-| `getHealth()` | Retorna vida atual |
-
-### Evento
-```
-fun onDamage(quantidade, origem) begincode
-    print("recebeu " + quantidade + " de dano")
-endcode
-```
-
-### Crosshair
-Mira no centro do ecrã quando `showCrosshair = true` na arma.
-
----
-
-## 10. Inventário
-
-### ItemObject
-Conect com: itemName, itemType, quantity, icon, pickupRadius, autoPickup.
-
-### Funções FlirCode
-| Função | Descrição |
-|--------|-----------|
-| `addToInventory("nome", qtd)` | Adiciona item ao inventário |
-| `removeFromInventory("nome", qtd)` | Remove item |
-| `getInventoryCount("nome")` | Quantidade de um item |
-| `hasItem("nome")` | Verifica se tem pelo menos 1 |
-
-### Evento
-```
-fun onPickup(nomeItem, quantidade) begincode
-    print("apanhou: " + nomeItem)
-endcode
-```
-
-### Auto-pickup
-Quando `autoPickup = true`, o item é apanhado automaticamente quando o PersonalObject entra no raio.
-
-### Painel de Inventário
-Mostrado automaticamente no canto superior direito durante o jogo.
-
----
-
-## 11. Classes FlirCode
-
-### Sintaxe
-```
-class Inimigo begincode
-    var vida = 100
-
-    fun onStart() begincode
-        print("inimigo criado")
-    endcode
-
-    fun receberDano(qtd) begincode
-        vida = vida - qtd
-    endcode
+fun onLoseSight begincode
+  print("Perdi o jogador")
+  setVar("chasing", false)
 endcode
 
-class Zombie extends Inimigo begincode
-    fun onStart() begincode
-        vida = 150
-    endcode
+fun onTick begincode
+  if (getVar("chasing") == true) begincode
+    move(1, 0, 0)
+  endcode
 endcode
-```
 
-### Herança
-- `class Nome extends Base` — herda variáveis e funções
-- Funções da subclasse fazem override das da base
-- `this` refere-se ao próprio objeto
-
-### Atribuir a Conects
-No painel de propriedades → seletor "Classe FlirCode".
-
----
-
-## 12. Sinais
-
-Comunicação entre objetos sem ligação direta.
-
-### Função
-```
-emitSignal("porta_aberta", "porta_1")
-```
-
-### Evento
-```
-fun onSignal(nome, dados) begincode
-    if (nome == "porta_aberta") begincode
-        print("porta abriu: " + dados)
-    endcode
+fun onDamage(amount) begincode
+  print("Recebi " + amount + " de dano!")
+  if (getHealth() < 20) begincode
+    emitSignal("fleeing", this)
+  endcode
 endcode
 ```
 
 ---
 
-## 13. Multiplayer
+## 8. Ambientes (Sky, Water, Fog, Luzes)
 
-Sistema básico via WebSocket.
+### 8.1 SkyObject — Céu Procedural
 
-### Criar/Entrar em Sala
-- Menu Principal → 🌐 Multiplayer
-- "Criar Sala" gera código de 6 caracteres
-- "Entrar em Sala" com código
+O céu procedural usa um shader GLSL custom que **não depende do THREE.Sky nem do tone mapping**. As cores são calculadas diretamente em sRGB.
 
-### Sincronização
-Posição/rotação do PersonalObject sincronizada a 10Hz.
+**Features do shader:**
+1. Gradiente atmosférico (azul zénite → claro horizonte)
+2. Sol com disco + halo + glow (cor muda com elevação)
+3. Tons de pôr do sol (laranja/vermelho quando sol baixo)
+4. Rayleigh scattering (intensidade do azul)
+5. Turbidez (partículas → acinzentado)
+6. Noite (escurecimento quando sol abaixo do horizonte)
+7. Estrelas (com twinkle)
+8. Nuvens procedurais (FBM noise com animação)
 
-### Funções FlirCode
-| Função | Descrição |
-|--------|-----------|
-| `sendMessage(dados)` | Envia dados customizados |
-| `getPlayers()` | Número de jogadores ligados |
-| `getPlayerState(id)` | Estado de um jogador |
+**Controlos:**
+- `sunElevation` (0° = horizonte, 90° = zénite)
+- `sunAzimuth` (0° = norte, 180° = sul)
+- `rayleigh` (0–10): mais alto = céu mais azul
+- `turbidity` (0–30): mais alto = mais partículas
+- `starsEnabled`: ativa estrelas à noite
 
-### Eventos
-- `onPlayerJoin(playerId)`
-- `onPlayerLeave(playerId)`
-- `onMessage(playerId, dados)`
+Quando o SkyObject é procedural, também adiciona uma `DirectionalLight` que simula o sol, com cor e intensidade que mudam com a elevação.
 
-### Nota
-Sistema básico (sincronização simples), não anti-trapaça.
+### 8.2 WaterObject
 
----
+Plano de água com ondas animadas via vertex displacement no useFrame. Geometria com 32×32 subdivisões. Ondas calculadas com seno/cosseno combinados.
 
-## 14. Terrenos
+### 8.3 FogObject
 
-Editor com 4 tabs (estilo Unity):
+Aplica `THREE.Fog` (linear) ou `THREE.FogExp2` (exponencial) ao `scene.fog`. Funciona no editor e no jogo.
 
-### Escultura
-7 brushes: Elevar, Rebaixar, Suavizar, Achatar, Definir Altura, Ruído, Rampa.
-4 falloffs: Smooth, Linear, Constant, Sharp.
-Drag painting com spacing.
+### 8.4 Luzes
 
-### Textura
-4 camadas com blending (relva, terra, pedra, neve).
-Auto-textura por altura/inclinação.
-Pintura manual com pincel.
-
-### Detalhes
-Dispersão de objetos (foliage) com regras de altura/inclinação.
-
-### Definições
-Dimensões, resolução, Perlin params, import/export PNG heightmap.
+6 tipos de luz disponíveis (ver secção 6.2). Cada tipo tem um gizmo visual distinto:
+- **SunObject**: esfera laranja + setas paralelas
+- **PointObject**: esfera colorida + halo + wireframe (alcance)
+- **SpotObject**: cone wireframe + esfera na fonte
+- **AreaObject**: retângulo preenchido + wireframe
+- **AmbientObject**: esfera cinza semi-transparente
+- **LuminousObject**: esfera amarela + halo (genérico)
 
 ---
 
-## 15. Animação
+## 9. Física e Colisões
 
-### Keyframes
-Timeline com play/pause, keyframes por osso.
+### 9.1 Sistema de Física
 
-### FBX
-Importar FBX com animações e esqueleto. Modelo fica no catálogo.
+A engine usa **cannon-es** para física. O sistema suporta:
+- Gravidade configurável por cena
+- Corpos rígidos (RigidObject) com massa, atrito, ressalto
+- Corpos estáticos (StaticObject)
+- Corpos kinematic (StopObject) — movidos por script
+- Controladores de personagem (PersonalObject) com deteção de chão
+- Triggers (TriggerObject) — detetam entrada/saída sem colisão
 
-### Animation Controller
-Máquina de estados com transições entre clips.
+### 9.2 Colisores
 
----
+Cada Conect com física tem um colisor configurável:
+- **model**: usa a geometria do modelo como colisor
+- **box**: caixa alinhada com os eixos
+- **sphere**: esfera
+- **capsule**: cápsula (ideal para personagens)
 
-## 16. Pós-Processamento
+### 9.3 Juntas
 
-4 efeitos configuráveis por cena:
-- **Bloom**: brilho em zonas claras (intensidade, threshold)
-- **SSAO**: oclusão ambiente (intensidade, raio)
-- **Depth of Field**: desfoque de profundidade (foco, range, bokeh)
-- **Color Grading**: correção de cor (brilho, contraste, saturação, matiz, tinta)
-
-Avisos de desempenho quando efeitos pesados estão combinados.
-
----
-
-## 17. Exportação
-
-### HTML Standalone
-Menu Principal → 🎮 Exportar Jogo. Gera um ficheiro HTML único jogável em qualquer browser.
-
-### .flirengine
-Guardar/abrir projeto como ficheiro .flirengine (JSON com todo o estado).
-
-### Formatos
-- Importar: GLB, GLTF, OBJ, FBX, JSON
-- Exportar: GLB, OBJ, JSON, HTML standalone
+`JointObject` conecta dois objetos:
+- **hinge**: articulação (porta)
+- **ball**: rótula (cabeça)
+- **spring**: mola
+- **fixed**: fixo
 
 ---
 
-## 18. Referência FlirCode Completa
+## 10. Sistemas de Jogo
 
-### Funções Embutidas
+### 10.1 Armas e Combate
 
-| Função | Descrição | Funciona no Editor | Funciona no Export |
-|--------|-----------|:---:|:---:|
-| `print(msg)` | Log na consola de debug | ✅ | ✅ |
-| `warn(msg)` | Log de aviso | ✅ | ✅ |
-| `error(msg)` | Log de erro | ✅ | ✅ |
-| `move(x,y,z)` | Mover objeto | ✅ | ✅ |
-| `rotate(x,y,z)` | Rotacionar objeto | ✅ | ✅ |
-| `scale(x,y,z)` | Escalar objeto | ✅ | ✅ |
-| `destroy(obj)` | Destruir objeto | ✅ | ✅ |
-| `createObject("nome",x,y,z)` | Criar instância | ✅ | ✅ |
-| `changeScene("nome")` | Mudar de cena | ✅ | ✅ |
-| `wait(segundos)` | Aguardar (log apenas) | ✅ | ✅ |
-| `setVar("nome",val)` | Definir variável global | ✅ | ✅ |
-| `getVar("nome")` | Obter variável global | ✅ | ✅ |
-| `showUIScreen("nome")` | Mostrar tela de UI | ✅ | ✅ |
-| `hideUIScreen("nome")` | Esconder tela de UI | ✅ | ✅ |
-| `showUI("nome")` | Alias de showUIScreen | ✅ | ✅ |
-| `hideUI("nome")` | Alias de hideUIScreen | ✅ | ✅ |
-| `getUIValue("nome")` | Obter valor de elemento UI | ✅ | ✅ |
-| `setUIValue("nome",val)` | Definir valor de elemento UI | ✅ | ✅ |
-| `playSound("nome")` | Tocar som | ✅ | ✅ |
-| `playAnim("clip")` | Tocar animação | ✅ | ✅ |
-| `collidingWith("tipo")` | Verificar colisão | ✅ | ✅ |
-| `distanceTo("nome")` | Distância a outro objeto | ✅ | ✅ |
-| `isTouching()` | Ecrã a ser tocado | ✅ | ✅ |
-| `emitSignal("nome",dados)` | Emitir sinal | ✅ | ✅ |
-| `linkTo("tipo","alvo")` | Navegar (scene/screen/url) | ✅ | ✅ |
-| `shoot()` | Disparar arma | ✅ | ✅ |
-| `reload()` | Recarregar arma | ✅ | ✅ |
-| `equipWeapon("nome")` | Equipar arma | ✅ | ✅ |
-| `getAmmo()` | Munição atual | ✅ | ✅ |
-| `takeDamage(qtd)` | Receber dano | ✅ | ✅ |
-| `getHealth()` | Vida atual | ✅ | ✅ |
-| `addToInventory("nome",qtd)` | Adicionar item | ✅ | ✅ |
-| `removeFromInventory("nome",qtd)` | Remover item | ✅ | ✅ |
-| `getInventoryCount("nome")` | Quantidade de item | ✅ | ✅ |
-| `hasItem("nome")` | Verificar se tem item | ✅ | ✅ |
-| `sendMessage(dados)` | Enviar mensagem multiplayer | ✅ | ✅ |
-| `getPlayers()` | Número de jogadores | ✅ | ✅ |
-| `getPlayerState(id)` | Estado de jogador | ✅ | ✅ |
+- `WeaponObject`: define dano, cadência, alcance, munição, tipo (raycast/projectile)
+- `equipWeapon("nome")` equipa a arma no PersonalObject
+- `shoot()` dispara (raycast do jogador para a frente)
+- `takeDamage(amount)` aplica dano a um Conect (reduz health)
+- `getHealth()` retorna a vida atual
+- Mira (crosshair) aparece quando uma arma está equipada
 
-### Eventos
+### 10.2 Inventário
 
-| Evento | Descrição |
-|--------|-----------|
-| `onStart()` | Início do jogo |
-| `onTick()` | A cada frame |
-| `onCollide(outro)` | Colisão |
-| `onTouch()` | Toque/clique |
-| `onSeePlayer()` | NPC vê jogador |
-| `onLoseSight()` | NPC perde jogador |
-| `onTimer()` | Timer termina |
-| `onEnterZone()` | Entrar em trigger |
-| `onExitZone()` | Sair de trigger |
-| `onClick()` | Clique em botão UI |
-| `onChange()` | Mudança em input UI |
-| `onSubmit()` | Submit de form UI |
-| `onPlayerJoin(playerId)` | Jogador entra no multiplayer |
-| `onPlayerLeave(playerId)` | Jogador sai do multiplayer |
-| `onMessage(playerId,dados)` | Mensagem multiplayer |
-| `onSignal(nome,dados)` | Sinal recebido |
-| `onDamage(quantidade,origem)` | Dano recebido |
-| `onPickup(nomeItem,quantidade)` | Item apanhado |
+- `ItemObject`: item apanhável com auto-pickup
+- `addToInventory("nome", qty)` / `removeFromInventory("nome", qty)`
+- `getInventoryCount("nome")` / `hasItem("nome")`
+- Evento `onPickup` dispara em todos os runtimes quando um item é apanhado
 
-### Palavras-chave
-`fun`, `var`, `if`, `else`, `repeat`, `switch`, `case`, `default`, `begincode`, `endcode`, `in`, `number`, `until`, `class`, `extends`, `this`
+### 10.3 GameState
 
-### Syntax Highlighting
-O editor FlirCode tem cores:
-- **Keywords** (fun, var, if): vermelho-rosa
-- **Builtins** (print, move): roxo
-- **Events** (onStart, onTick): laranja
-- **Strings**: azul claro
-- **Numbers**: azul
-- **Comments** ($$): cinzento itálico
+- `GameStateObject`: gere o estado global (menu/playing/paused/gameover/custom)
+- ⚠️ `setGameState()` e `getGameState()` são stubs no runtime — as funções existem no FlirCode mas não têm implementação no gameContext
+
+### 10.4 NavigatorObject (Portais)
+
+- Colocado numa cena, transporta o jogador para outra cena
+- `transitionType`: fade (escurece e abre) ou instant
+- `triggerRadius`: raio de ativação
+- `spawnPosition`: posição inicial na cena de destino
+
+### 10.5 AnimationBoostObject
+
+- Quando presente na cena, ativa blending suave entre clips
+- `blendTime`: duração da transição (ex: 0.3s para idle → walk)
+- O `animationController` avalia condições (speed > 0.5 → walk) e muda o clip automaticamente
 
 ---
 
-*Documentação gerada para Flir Engine — MOBILE • WEB • POWERFUL*
+## 11. Animação
+
+### 11.1 Keyframes
+
+- Cada osso pode ter keyframes em tempos diferentes
+- Keyframes guardam posição, rotação e escala do osso
+- Clips: idle, walk, run, jump, attack
+- Interpolação: ease (smoothstep), linear, step
+
+### 11.2 Animation Player
+
+`createAnimationPlayer(animations, getMesh, getBones)`:
+- `play(clipName, options)`: options = { loop, speed, onComplete, blendTime }
+- `stop()`, `pause()`, `resume()`
+- `update(deltaTime)`: avança o tempo e aplica a pose aos bones
+- `setBoost(enabled, blendDur)`: ativa/desativa blending
+
+### 11.3 Animation Controller
+
+Máquina de estados com transições automáticas:
+- Estados: idle, walk, run, jump, attack
+- Transições baseadas em condições: `speed>0.5` → walk, `grounded==false` → jump
+- `getContext()` retorna `{ speed, grounded, attacking }`
+- O `speed` é calculado a partir do movimento do PersonalObject (hypot de mx, mz)
+
+### 11.4 Shared Animation Cache
+
+Otimização: 200+ NPCs que tocam o mesmo clip no mesmo tempo reutilizam a mesma pose calculada (uma vez por clip+tempo, não uma por NPC). O cache é limpo no início de cada frame.
+
+---
+
+## 12. Organização
+
+### 12.1 Camadas (Layers)
+
+- Criar, apagar, renomear camadas
+- Cada camada tem cor identificadora, visível (👁️/🚫), bloqueado (🔒/🔓)
+- Cada Conect pode ser atribuído a uma camada (no painel de propriedades)
+- Camada "Padrão" não pode ser apagada
+
+### 12.2 Grupos e Hierarquia
+
+- **GroupObject**: agrupa Conects sem corpo físico/visual
+- **Hierarquia pai-filho**: arrastar um Conect para dentro de outro no outliner torna-o filho
+- Mover o pai move os filhos automaticamente (THREE.Group)
+- Botão "Remover do pai" (🔓) no menu de contexto desassocia
+- Prevenção de ciclos (não permite tornar-se filho de um descendente)
+
+### 12.3 ReferenceObject
+
+- Mostra o conteúdo de outra cena sem duplicar dados
+- Editar o original atualiza automaticamente onde for referenciado
+
+### 12.4 ScriptableObjects (Data Assets)
+
+- Dados reutilizáveis partilhados entre Conects
+- Cada Data Asset tem campos key-value editáveis
+- `getDataAsset("nome")` no FlirCode retorna os dados
+
+### 12.5 Autoloads
+
+- Scripts globais sempre acessíveis
+- `getAutoload("nome")` no FlirCode retorna o autoload
+
+---
+
+## 13. Configurações e Renderização
+
+### 13.1 Configurações de Cena (tab Cena no painel esquerdo)
+
+| Configuração | Descrição |
+|---|---|
+| Fundo | Cor sólida ou gradiente |
+| Grelha | Visível, tamanho, divisões, cor |
+| Iluminação | Ambiente (intensidade, cor) + Direcional (intensidade, cor, posição) |
+
+### 13.2 Renderização Avançada
+
+| Recurso | Custo | Descrição |
+|---|---|---|
+| Flir GI | Médio | Hemisphere light + point light (aproximação de luz indireta) |
+| Flir Adaptive Mesh | Médio | LOD automático por distância (3 níveis: full/50%/25%) |
+| Vertex AO | Zero (setup) | Oclusão ambiental pré-calculada por vértice |
+| Parallax Occlusion Mapping | Moderado | Relevo sem polígonos (usa height map) |
+
+### 13.3 Otimização de Sombras
+
+| Configuração | Descrição |
+|---|---|
+| Shadow Distance Culling | Objetos além da distância não projetam sombras |
+| Distância de sombra | 5–60 unidades |
+| Resolução do shadow map | 1024 (performance) / 2048 (qualidade) / 4096 (máxima) |
+
+### 13.4 Pós-Processamento
+
+Efeitos disponíveis (no painel de Pós-Processamento):
+- Bloom
+- SSAO (Screen Space Ambient Occlusion)
+- DoF (Depth of Field)
+- Color Grading
+
+---
+
+## 14. Exportação e Persistência
+
+### 14.1 Guardar Projeto
+
+- **💾 .flirengine**: exporta o projeto completo como ficheiro JSON
+- **Guardar**: persiste no localStorage (automático via Zustand persist)
+- **Carregar**: importa projeto de ficheiro .flirengine
+- **IndexedDB**: sync automático para armazenamento persistente
+
+### 14.2 Exportar Jogo
+
+- Exporta um build estático jogável (HTML + JS)
+- Inclui PWA (funciona offline)
+- O build é colocado na pasta `dist/`
+
+### 14.3 Exportar Modelos
+
+- **GLB/GLTF**: exporta objeto selecionado
+- **OBJ**: exporta geometria
+- **FBX**: importa modelos FBX (com animações)
+- **JSON**: exporta/importa geometria
+
+---
+
+## 15. Modo Story (Gravação + Replay)
+
+Sistema de gravação de ações do jogador durante "Executar Jogo":
+
+1. Clicar em "🔴 Iniciar Gravação" (no painel Modo Story da aba Cena)
+2. O jogo inicia e todas as ações do jogador (movimento, salto) são gravadas
+3. Clicar em "⏹️ Parar Gravação" para guardar
+4. Posteriormente, clicar em "▶️" para reproduzir a gravação
+
+**Usos:**
+- Teste de regressão visual: se uma alteração futura partir algo, o replay mostra onde
+- Demo automática: deixar o jogo a jogar-se sozinho
+
+**Dados gravados:** tipo de ação (move, jump, click, collision, sceneChange), dados da ação, timestamp
+
+---
+
+## 16. Limitações Conhecidas
+
+### FlirCode
+
+| Limitação | Detalhe |
+|---|---|
+| `else if` / `else` / `switch` / `case` / `default` | Parseados mas **não executados** — apenas `if` funciona. Multi-branch conditionais não funcionam. |
+| `wait(seconds)` | Stub — apenas faz log, não espera realmente |
+| `setGameState()` / `getGameState()` | Stub — não implementado no runtime |
+| `saveProgress()` / `loadProgress()` | Stub — não implementado no runtime |
+| `playSequence()` | Stub — não implementado no runtime |
+
+### Renderização
+
+| Limitação | Detalhe |
+|---|---|
+| Sky procedural tons de pôr do sol | Funcionam mas são subtis em algumas configurações de tone mapping |
+| POM | Implementado mas precisa de um height map real para efeito visível |
+| Flir GI | Não tem impacto mensurável em cenas simples (bottleneck são sombras, não luzes) |
+| Shadow distance culling | Não tem impacto mensurável (browser limita FPS com vsync) |
+
+### Performance
+
+| Limitação | Detalhe |
+|---|---|
+| 200 NPCs animados | Otimizado com sharedAnimationCache (60 FPS confirmado) |
+| Área Light (RectAreaLight) | Mais pesada — evitar mais de 2–3 em simultâneo |
+
+---
+
+## Estatísticas da Engine
+
+| Métrica | Valor |
+|---|---|
+| Conects | 40 tipos em 7 categorias |
+| Funções FlirCode | 48 (5 são stubs) |
+| Eventos FlirCode | 19 |
+| Modificadores | 5 |
+| Primitivas | 6 |
+| Funções do gameContext | 38 |
+| Estados de animação (default) | 5 + 8 transições |
+| Uniforms do shader de céu | 5 |
+| Construtores | 2 (Edifícios + Veículos) |
+| Abas principais | 4 (Modelagem, Cena, Construtores, UI) |
