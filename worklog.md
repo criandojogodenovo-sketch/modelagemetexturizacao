@@ -381,3 +381,51 @@ Stage Summary:
 - Build: ✓ (2580 KiB)
 - Honestidade: não foi possível medir ganho de FPS do shadow combo (browser limitado a 38 FPS)
 - Vertex AO funciona mas efeito é subtil em geometrias convexas
+
+---
+Task ID: P11
+Agent: main
+Task: Sky/Water/Fog + 5 tipos de luz + FlirCode light API
+
+Work Log:
+1. PROBLEMAS CONFIRMADOS (reproduzidos antes de corrigir):
+   - SkyObject: NÃO aparecia no editor (gradient só na exportação, solid/hdri não funcionavam)
+   - WaterObject: plano azul SEM ondas (waveHeight/waveSpeed ignorados)
+   - FogObject: código dizia 'aplicado no useFrame' mas não estava
+   - LuminousObject: todos os tipos tinham o MESMO gizmo (esfera amarela)
+
+2. SkyObject EXPANDIDO:
+   - skyType: solid | gradient | hdri | procedural
+   - Procedural usa THREE.Sky (sun position, rayleigh, turbidity, mie)
+   - HDRI usa RGBELoader + PMREMGenerator (scene.background + scene.environment)
+   - TESTADO: solid (orange ✓), gradient (red-to-green ✓)
+   - Procedural: implementado mas precisa de ajuste de tone mapping (fica branco)
+
+3. WaterObject COM ONDAS:
+   - 32x32 subdivisões, useFrame anima vértices com seno/cosseno
+   - TESTADO: VLM confirma 'visible undulations and distorted grid pattern'
+
+4. FogObject CORRIGIDO:
+   - FogApplier component no Canvas, aplica THREE.Fog/FogExp2
+   - TESTADO: VLM confirma 'magenta fog making distant cubes appear faded'
+
+5. 5 NOVOS TIPOS DE LUZ com gizmos distintos:
+   - SunObject (☀️): direcional, temperatura Kelvin, esfera laranja + setas
+   - PointObject (🔵): pontual, alcance/decay, esfera + halo + wireframe
+   - SpotObject (🔦): holofote, ângulo/penumbra, cone wireframe + target
+   - AreaObject (▭): área retangular, width/height, retângulo preenchido
+   - AmbientObject (🌫️): ambiente, hemisphere, esfera cinza
+   - TESTADO: VLM confirma 4 gizmos distintos visíveis
+
+6. FlirCode LIGHT API:
+   - setLightIntensity(nomeOuId, valor)
+   - setLightColor(nomeOuId, cor)
+   - setLightVisible(nomeOuId, bool)
+   - findLight helper: procura em todos os tipos de luz
+
+Stage Summary:
+- Commit: 8005af3
+- Push: sucesso (origin/main)
+- Build: ✓ (2605 KiB)
+- Honestidade: Sky procedural precisa de ajuste de tone mapping (fica branco)
+- AreaObject (RectAreaLight) é mais pesada — evitar mais de 2-3 em simultâneo
