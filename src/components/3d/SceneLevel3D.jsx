@@ -825,9 +825,14 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           if ((keys[' '] || keys['space']) && conect.canJump) {
             physicsRef.current?.jumpPersonal(conect.instanceId)
           }
-          // Guardar speed para o animation controller (blending idle/walk)
           const currentSpeed = Math.hypot(mx, mz)
           playerSpeedRef.current.set(conect.instanceId, currentSpeed)
+
+          // Modo Story: gravar movimento
+          const store = useStore.getState()
+          if (store.isRecording) {
+            store.recordAction('move', { mx, mz, jump: !!(keys[' '] || keys['space']) })
+          }
         }
       }
     }

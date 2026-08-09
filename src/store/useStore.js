@@ -53,6 +53,24 @@ function snapshot(objects) {
   }))
 }
 
+// Snapshot universal — inclui objects, scenes, layers, scriptableObjects, autoloads
+function snapshotFull(state) {
+  return JSON.parse(JSON.stringify({
+    objects: state.objects,
+    scenes: state.scenes,
+    layers: state.layers,
+    scriptableObjects: state.scriptableObjects,
+    autoloads: state.autoloads,
+    renderSettings: state.renderSettings,
+    background: state.background,
+    grid: state.grid,
+    lights: state.lights,
+  }, (key, value) => {
+    if (key === 'bufferGeometry' && value && typeof value === 'object') return undefined
+    return value
+  }))
+}
+
 const initialScene = {
   objects: [],
   selectedId: null,
@@ -174,6 +192,11 @@ function newProjectState() {
     scriptableObjects: [],
     // Autoloads — scripts FlirCode globais sempre acessíveis
     autoloads: [],
+    // Modo Story — gravações de replay (ações do jogador durante "Executar Jogo")
+    storyRecordings: [],
+    isRecording: false,
+    currentRecording: null,
+    isPlayingRecording: false,
     // Edit mode
     editSelectionMode: 'face',
     selectedVertices: [],
@@ -245,8 +268,8 @@ export const useStore = create(
 
       // ---------- Helpers internos ----------
       _pushHistory: () => {
-        const { objects, past } = get()
-        const next = [...past, snapshot(objects)]
+        const state = get()
+        const next = [...state.past, snapshotFull(state)]
         if (next.length > MAX_HISTORY) next.shift()
         set({ past: next, future: [] })
       },
@@ -254,12 +277,12 @@ export const useStore = create(
       _pushHistoryCoalesced: (() => {
         let lastKey = null
         return (key) => {
-          const { objects, past } = get()
-          if (lastKey === key && past.length > 0) {
-            const next = [...past.slice(0, -1), snapshot(objects)]
+          const state = get()
+          if (lastKey === key && state.past.length > 0) {
+            const next = [...state.past.slice(0, -1), snapshotFull(state)]
             set({ past: next })
           } else {
-            const next = [...past, snapshot(objects)]
+            const next = [...state.past, snapshotFull(state)]
             if (next.length > MAX_HISTORY) next.shift()
             set({ past: next, future: [] })
           }
@@ -898,15 +921,18 @@ export const useStore = create(
       })),
 
       // ---------- Sistema de Camadas (Layers) ----------
-      addLayer: (name, color = '#888888') => set((s) => ({
-        layers: [...s.layers, {
-          id: `layer_${Math.random().toString(36).slice(2, 10)}`,
-          name: name || `Camada ${s.layers.length + 1}`,
-          color,
-          visible: true,
-          locked: false,
-        }],
-      })),
+      addLayer: (name, color = '#888888') => {
+        get()._pushHistory()
+        set((s) => ({
+          layers: [...s.layers, {
+            id: `layer_${Math.random().toString(36).slice(2, 10)}`,
+            name: name || `Camada ${s.layers.length + 1}`,
+            color,
+            visible: true,
+            locked: false,
+          }],
+        }))
+      },
       removeLayer: (layerId) => set((s) => ({
         layers: s.layers.filter(l => l.id !== layerId),
         // Remover layerId de objetos e conects que a usavam
@@ -928,6 +954,7 @@ export const useStore = create(
 
       // ---------- ScriptableObjects (dados reutilizáveis) ----------
       createScriptableObject: (name, template = {}) => {
+        get()._pushHistory()
         const so = {
           id: `so_${Math.random().toString(36).slice(2, 10)}`,
           name: name || 'Novo Data Asset',
@@ -954,6 +981,7 @@ export const useStore = create(
 
       // ---------- Autoloads (scripts globais) ----------
       createAutoload: (name) => {
+        get()._pushHistory()
         const al = {
           id: `autoload_${Math.random().toString(36).slice(2, 10)}`,
           name: name || 'Novo Autoload',
@@ -969,6 +997,62 @@ export const useStore = create(
       })),
       removeAutoload: (id) => set((s) => ({
         autoloads: s.autoloads.filter(al => al.id !== id),
+      })),
+
+      // ---------- Modo Story (Gravação + Replay) ----------
+      startRecording: (name) => {
+        set({
+          isRecording: true,
+          currentRecording: {
+            id: `rec_${Math.random().toString(36).slice(2, 10)}`,
+            name: name || `Gravação ${new Date().toLocaleTimeString()}`,
+            timestamp: Date.now(),
+            actions: [],
+            sceneId: get().activeSceneId,
+          },
+        })
+        get().toast('🔴 Gravação iniciada', 'info')
+      },
+      recordAction: (type, data) => {
+        const { isRecording, currentRecording } = get()
+        if (!isRecording || !currentRecording) return
+        const action = {
+          type, // 'move' | 'jump' | 'click' | 'collision' | 'sceneChange' | 'custom'
+          data,
+          time: performance.now(),
+        }
+        set({
+          currentRecording: {
+            ...currentRecording,
+            actions: [...currentRecording.actions, action],
+          },
+        })
+      },
+      stopRecording: () => {
+        const { currentRecording } = get()
+        if (!currentRecording) return
+        set((s) => ({
+          isRecording: false,
+          storyRecordings: [...s.storyRecordings, currentRecording],
+          currentRecording: null,
+        }))
+        get().toast(`✅ Gravação "${currentRecording.name}" guardada (${currentRecording.actions.length} ações)`, 'success')
+      },
+      playRecording: (recordingId) => {
+        const rec = get().storyRecordings.find(r => r.id === recordingId)
+        if (!rec) return
+        set({ isPlayingRecording: true })
+        get().toast(`▶️ A reproduzir "${rec.name}"...`, 'info')
+        // A reprodução é feada pelo SceneLevel3D que lê as ações
+        window._flirPlaybackRecording = rec
+      },
+      stopPlayback: () => {
+        set({ isPlayingRecording: false })
+        window._flirPlaybackRecording = null
+        get().toast('⏹️ Reprodução parada', 'info')
+      },
+      removeRecording: (recordingId) => set((s) => ({
+        storyRecordings: s.storyRecordings.filter(r => r.id !== recordingId),
       })),
 
       // ---------- UI Editor (Fase 6) ----------
@@ -1342,8 +1426,8 @@ export const useStore = create(
           get().toast('Crie uma cena primeiro', 'error')
           return null
         }
-        const conect = createConectInstance(type, position)
         get()._pushHistory()
+        const conect = createConectInstance(type, position)
         set((s) => ({
           scenes: s.scenes.map((sc) =>
             sc.id === activeSceneId
@@ -1375,6 +1459,7 @@ export const useStore = create(
 
       updateConect: (instanceId, patch) => {
         const { activeSceneId } = get()
+        get()._pushHistoryCoalesced(`conect:${instanceId}`)
         set((s) => ({
           scenes: s.scenes.map((sc) =>
             sc.id === activeSceneId
@@ -1541,29 +1626,49 @@ export const useStore = create(
         get().updateConect(instanceId, { animationController: controller })
       },
 
-      // ---------- Undo / Redo ----------
+      // ---------- Undo / Redo Universal ----------
       undo: () => {
-        const { past, future, objects } = get()
+        const { past, future } = get()
         if (past.length === 0) return
         const previous = past[past.length - 1]
         const newPast = past.slice(0, -1)
+        const currentState = snapshotFull(get())
         set({
           past: newPast,
-          future: [snapshot(objects), ...future].slice(0, MAX_HISTORY),
-          objects: previous,
+          future: [currentState, ...future].slice(0, MAX_HISTORY),
+          // Restaurar todo o estado do snapshot
+          objects: previous.objects,
+          scenes: previous.scenes,
+          layers: previous.layers,
+          scriptableObjects: previous.scriptableObjects,
+          autoloads: previous.autoloads,
+          renderSettings: previous.renderSettings,
+          background: previous.background,
+          grid: previous.grid,
+          lights: previous.lights,
         })
         get().toast('Desfeito', 'info', 1200)
       },
 
       redo: () => {
-        const { past, future, objects } = get()
+        const { past, future } = get()
         if (future.length === 0) return
         const next = future[0]
         const newFuture = future.slice(1)
+        const currentState = snapshotFull(get())
         set({
-          past: [...past, snapshot(objects)].slice(-MAX_HISTORY),
+          past: [...past, currentState].slice(-MAX_HISTORY),
           future: newFuture,
-          objects: next,
+          // Restaurar todo o estado do snapshot
+          objects: next.objects,
+          scenes: next.scenes,
+          layers: next.layers,
+          scriptableObjects: next.scriptableObjects,
+          autoloads: next.autoloads,
+          renderSettings: next.renderSettings,
+          background: next.background,
+          grid: next.grid,
+          lights: next.lights,
         })
         get().toast('Refeito', 'info', 1200)
       },

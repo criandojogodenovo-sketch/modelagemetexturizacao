@@ -245,6 +245,11 @@ export default function SceneEditorPanel({ onClose }) {
             <DataAssetsPanel />
           )}
 
+          {/* 4d. Modo Story (Gravação + Replay) */}
+          {activeScene && (
+            <StoryPanel />
+          )}
+
           {/* 5. Configuração da câmara de jogo */}
           {activeScene && (
             <GameCameraEditor scene={activeScene} onUpdate={updateGameCamera} />
@@ -728,6 +733,53 @@ function DataAssetsPanel() {
       <div className="small muted mt-2">
         💡 Usa <code>getDataAsset("nome")</code> e <code>getAutoload("nome")</code> no FlirCode.
       </div>
+    </div>
+  )
+}
+
+// ===== Painel do Modo Story (Gravação + Replay) =====
+function StoryPanel() {
+  const recordings = useStore((s) => s.storyRecordings)
+  const isRecording = useStore((s) => s.isRecording)
+  const startRecording = useStore((s) => s.startRecording)
+  const stopRecording = useStore((s) => s.stopRecording)
+  const playRecording = useStore((s) => s.playRecording)
+  const removeRecording = useStore((s) => s.removeRecording)
+  const openScenePreview = useStore((s) => s.openScenePreview)
+  const closeScenePreview = useStore((s) => s.closeScenePreview)
+
+  return (
+    <div className="panel-section">
+      <h4>🎬 Modo Story ({recordings.length})</h4>
+      <div className="small muted mb-2">
+        Grava as ações do jogador durante "Executar Jogo" e reproduz mais tarde.
+      </div>
+      {!isRecording ? (
+        <button style={{ width: '100%' }} onClick={() => {
+          startRecording(prompt('Nome da gravação:'))
+          openScenePreview()
+        }}>🔴 Iniciar Gravação</button>
+      ) : (
+        <button className="danger" style={{ width: '100%' }} onClick={() => {
+          stopRecording()
+          closeScenePreview()
+        }}>⏹️ Parar Gravação</button>
+      )}
+      {recordings.map((rec) => (
+        <div key={rec.id} style={{
+          display: 'flex', alignItems: 'center', gap: 4,
+          padding: '4px 6px', marginTop: 4,
+          background: 'var(--bg-panel-2)', borderRadius: 'var(--radius-sm)', fontSize: 11,
+        }}>
+          <span style={{ color: '#f4a261' }}>🎬</span>
+          <span style={{ flex: 1 }}>{rec.name} <span style={{ color: 'var(--text-muted)' }}>({rec.actions.length})</span></span>
+          <button style={{ padding: '2px 4px', fontSize: 10 }}
+            onClick={() => { playRecording(rec.id); openScenePreview() }}>▶️</button>
+          <button className="danger" style={{ padding: '2px 4px' }} onClick={() => removeRecording(rec.id)}>
+            <IconTrash width={11} height={11} />
+          </button>
+        </div>
+      ))}
     </div>
   )
 }
