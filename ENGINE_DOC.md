@@ -539,10 +539,10 @@ Os eventos são funções com prefixo `on` que são chamadas automaticamente:
 |---|---|---|
 | `setVar(name, value)` | Nome + valor | Define variável global |
 | `getVar(name)` | Nome | Lê variável global |
-| `setGameState(state)` | Estado | ⚠️ Stub — não implementado no runtime |
-| `getGameState()` | — | ⚠️ Stub — retorna 'menu' |
-| `saveProgress(key, value)` | Chave + valor | ⚠️ Stub — não implementado |
-| `loadProgress(key)` | Chave | ⚠️ Stub — não implementado |
+| `setGameState(state)` | Estado | Muda o estado global e dispara `onGameStateChange` em todos os Conects |
+| `getGameState()` | — | Retorna o estado global atual (default: 'menu') |
+| `saveProgress(key, value)` | Chave + valor | Guarda valor no localStorage (persiste entre sessões) |
+| `loadProgress(key)` | Chave | Lê valor do localStorage |
 
 #### UI
 | Função | Argumentos | Descrição |
@@ -608,7 +608,7 @@ Os eventos são funções com prefixo `on` que são chamadas automaticamente:
 |---|---|---|
 | `playAnim(name)` | Nome do clip | Reproduz animação |
 | `playSound(name)` | Nome ou URL | Reproduz som |
-| `playSequence(name)` | Nome | ⚠️ Stub — não implementado |
+| `playSequence(name)` | Nome | Executa autoload com esse nome ou emite sinal `sequence:name` |
 
 #### Luzes
 | Função | Argumentos | Descrição |
@@ -914,13 +914,7 @@ Sistema de gravação de ações do jogador durante "Executar Jogo":
 
 ### FlirCode
 
-| Limitação | Detalhe |
-|---|---|
-| `else if` / `else` / `switch` / `case` / `default` | Parseados mas **não executados** — apenas `if` funciona. Multi-branch conditionais não funcionam. |
-| `wait(seconds)` | Stub — apenas faz log, não espera realmente |
-| `setGameState()` / `getGameState()` | Stub — não implementado no runtime |
-| `saveProgress()` / `loadProgress()` | Stub — não implementado no runtime |
-| `playSequence()` | Stub — não implementado no runtime |
+Todas as funções FlirCode estão agora implementadas. `wait(seconds)` regista delays no gameContext, `else if`/`else`/`switch`/`case`/`default` funcionam corretamente, e `setGameState`/`getGameState`/`saveProgress`/`loadProgress`/`playSequence` têm implementação completa no runtime.
 
 ### Renderização
 

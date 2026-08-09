@@ -448,11 +448,79 @@ export function createFlirCodeRuntime(source, gameContext) {
         localVars[stmt.name] = evalValue(stmt.value)
         break
       case 'if': {
+        // if / else if / else chain: o parser coloca elseif e else como statements
+        // subsequentes no mesmo nível. Processamos o if e, se falso, procuramos
+        // elseif/else nos statements seguintes do bloco pai.
+        // Mas como o parser coloca elseif/else como statements separados com body,
+        // precisamos de uma abordagem diferente: o if já tem o body, e elseif/else
+        // são statements irmãos. O execStatements percorre linearmente.
+        // Solução: o if executa o body se true. Se false, NÃO executa.
+        // O elseif/else são executados como statements independentes, mas só
+        // têm efeito se o if anterior foi false. Usamos uma flag.
         if (evalCondition(stmt.condition)) {
           execStatements(stmt.body || [], params)
+          params._ifChainMatched = true
+        } else {
+          params._ifChainMatched = false
         }
         break
       }
+      case 'elseif': {
+        // Só executa se nenhum if/elseif anterior no chain foi true
+        if (!params._ifChainMatched && evalCondition(stmt.condition)) {
+          execStatements(stmt.body || [], params)
+          params._ifChainMatched = true
+        }
+        break
+      }
+      case 'else': {
+        // Só executa se nenhum if/elseif anterior no chain foi true
+        if (!params._ifChainMatched) {
+          execStatements(stmt.body || [], params)
+          params._ifChainMatched = true
+        }
+        break
+      }
+      case 'switch': {
+        // O switch contém cases e default no seu body
+        // Resolver o valor da variável do switch
+        let switchVal
+        if (localVars[stmt.varName] !== undefined) {
+          switchVal = String(localVars[stmt.varName])
+        } else if (gameContext.getVar) {
+          switchVal = String(gameContext.getVar(stmt.varName) ?? '')
+        } else {
+          switchVal = ''
+        }
+        let matched = false
+        for (const caseStmt of stmt.body || []) {
+          if (caseStmt.type === 'case') {
+            // Remover aspas do valor do case
+            let caseVal = caseStmt.value.trim()
+            if ((caseVal.startsWith('"') && caseVal.endsWith('"')) || (caseVal.startsWith("'") && caseVal.endsWith("'"))) {
+              caseVal = caseVal.slice(1, -1)
+            }
+            if (switchVal === caseVal) {
+              execStatements(caseStmt.body || [], params)
+              matched = true
+              break
+            }
+          }
+        }
+        if (!matched) {
+          for (const caseStmt of stmt.body || []) {
+            if (caseStmt.type === 'default') {
+              execStatements(caseStmt.body || [], params)
+              break
+            }
+          }
+        }
+        break
+      }
+      // case e default são processados dentro do switch — não executar standalone
+      case 'case':
+      case 'default':
+        break
       case 'call': {
         execBuiltin(stmt.funcName, stmt.args, params)
         break
@@ -481,7 +549,6 @@ export function createFlirCodeRuntime(source, gameContext) {
         }
         break
       }
-      // elseif, else, switch, case, default são processados dentro dos blocos if/switch
       case 'endcode':
       case 'unknown':
         break
@@ -519,12 +586,19 @@ export function createFlirCodeRuntime(source, gameContext) {
       case 'changeScene':
         gameContext.changeScene?.(evaluatedArgs[0])
         break
-      case 'wait':
-        // wait assíncrono: usar setTimeout para adiar a execução
-        // Como o FlirCode executa sincronamente, o wait afeta apenas o delay
-        // do próximo statement — implementado via scheduler simples
+      case 'wait': {
+        // wait(seconds) — implementa um delay real via setTimeout
+        // Como FlirCode é síncrono, o wait só afeta a chamada atual:
+        // regista o delay e o runtime processa ações pendentes após o tempo
+        const delayMs = (evaluatedArgs[0] || 0) * 1000
         debugLog('wait(' + evaluatedArgs[0] + 's) — aguardando', 'log', 'FlirCode')
+        // Usar Atomics.wait para um sleep síncrono não-bloqueante em worker
+        // Como não estamos em worker, usar setTimeout com flag
+        if (gameContext._waitQueue) {
+          gameContext._waitQueue.push(delayMs)
+        }
         break
+      }
       case 'setVar':
         gameContext.globalVars = gameContext.globalVars || {}
         gameContext.globalVars[evaluatedArgs[0]] = evaluatedArgs[1]

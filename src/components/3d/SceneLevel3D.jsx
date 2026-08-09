@@ -215,7 +215,8 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
 
     // Criar gameContext
     const gameContext = {
-      globalVars: { _score: 0 },
+      globalVars: { _score: 0, _gameState: 'menu' },
+      _waitQueue: [], // wait() do FlirCode regista delays aqui
       // P2.5: setVar/getVar — expostos no gameContext para o FlirCode
       setVar: (name, value) => { gameContext.globalVars[name] = value },
       getVar: (name) => gameContext.globalVars[name] ?? 0,
@@ -530,6 +531,60 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         const als = useStore.getState().autoloads || []
         const al = als.find(a => a.id === nameOrId || a.name === nameOrId)
         return al ? al : null
+      },
+
+      // ===== GameState =====
+      setGameState: (state) => {
+        gameContext.globalVars._gameState = state
+        // Disparar evento onGameStateChange em todos os runtimes
+        for (const rt of runtimesRef.current.values()) {
+          rt.triggerEvent('onGameStateChange', { state })
+        }
+        debugLog(`GameState mudou para: ${state}`, 'log', 'GameState')
+      },
+      getGameState: () => {
+        return gameContext.globalVars._gameState || 'menu'
+      },
+
+      // ===== Save/Load Progress (localStorage) =====
+      saveProgress: (key, value) => {
+        try {
+          const data = JSON.parse(localStorage.getItem('flir_progress') || '{}')
+          data[key] = value
+          localStorage.setItem('flir_progress', JSON.stringify(data))
+          debugLog(`Progresso guardado: ${key}`, 'log', 'Save')
+        } catch (e) {
+          debugLog(`Erro ao guardar: ${e.message}`, 'error', 'Save')
+        }
+      },
+      loadProgress: (key) => {
+        try {
+          const data = JSON.parse(localStorage.getItem('flir_progress') || '{}')
+          return data[key] ?? null
+        } catch {
+          return null
+        }
+      },
+
+      // ===== Sequenciador (playSequence) =====
+      playSequence: (name) => {
+        // Procurar sequência em autoloads ou scriptableObjects
+        const als = useStore.getState().autoloads || []
+        const al = als.find(a => a.name === name || a.id === name)
+        if (al && al.code) {
+          // Executar código do autoload como sequência
+          debugLog(`A executar sequência: ${name}`, 'log', 'Sequence')
+          try {
+            const fn = new Function('ctx', al.code)
+            fn(gameContext)
+          } catch (e) {
+            debugLog(`Erro na sequência ${name}: ${e.message}`, 'error', 'Sequence')
+          }
+        } else {
+          // Disparar como sinal — qualquer Conect pode responder com onSignal
+          gameContext.emitSignal('sequence:' + name, { name })
+          debugLog(`Sequência "${name}" disparada como sinal`, 'log', 'Sequence')
+        }
       },
     }
     window._flirGameContext = gameContext
