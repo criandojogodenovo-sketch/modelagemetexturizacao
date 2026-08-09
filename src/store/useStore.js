@@ -81,7 +81,7 @@ const initialScene = {
 }
 
 // Modos da aplicação
-export const APP_MODES = ['object', 'edit', 'sculpt', 'uv', 'paint', 'rig', 'animate']
+export const APP_MODES = ['object', 'edit', 'sculpt', 'uv', 'paint', 'rig', 'weight', 'animate']
 
 // Modos de seleção em edit mode
 export const EDIT_SELECTION_MODES = ['vertex', 'edge', 'face']

@@ -44,12 +44,15 @@ export default function AnimationPanel() {
       toast('Adicione um osso primeiro', 'error')
       return
     }
-    const firstBone = skeleton.bones[0]
-    addKeyframe(selected.id, activeClip, firstBone.id, animation.currentTime, {
-      position: [...firstBone.position],
-      rotation: [...firstBone.rotation],
-      scale: [...firstBone.scale],
-    })
+    // Adicionar keyframe para TODOS os ossos no tempo atual
+    for (const bone of skeleton.bones) {
+      addKeyframe(selected.id, activeClip, bone.id, animation.currentTime, {
+        position: [...bone.position],
+        rotation: [...bone.rotation],
+        scale: [...bone.scale],
+      })
+    }
+    toast(`${skeleton.bones.length} keyframes adicionados (todos os ossos) no tempo ${animation.currentTime.toFixed(1)}`, 'success')
   }
 
   return (
@@ -123,7 +126,25 @@ export default function AnimationPanel() {
         </div>
         <div className="small muted">
           Clip ativo: <strong>{activeClip}</strong> — {keyframes.length} keyframe(s)
+          ({new Set(keyframes.map(k => k.boneId)).size} ossos animados)
         </div>
+
+        {/* Lista de keyframes por osso */}
+        {keyframes.length > 0 && skeleton && (
+          <div className="mt-2" style={{ maxHeight: 120, overflowY: 'auto' }}>
+            {skeleton.bones.map(bone => {
+              const boneKfs = keyframes.filter(k => k.boneId === bone.id)
+              if (boneKfs.length === 0) return null
+              return (
+                <div key={bone.id} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0', fontSize: 10 }}>
+                  <span style={{ color: '#f4a261', minWidth: 60 }}>{bone.name || bone.id.slice(-6)}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>{boneKfs.length} kf</span>
+                  <span style={{ color: 'var(--text-muted)' }}>@ {boneKfs.map(k => k.time.toFixed(1)).join(', ')}</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       <div className="panel-section">

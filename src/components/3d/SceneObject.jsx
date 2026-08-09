@@ -13,6 +13,7 @@
  *  - Suportar skeleton (ossos) para animação
  */
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { PRIMITIVES } from '../../utils/primitives'
 import {
@@ -186,6 +187,82 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     if (m.normalMap) applyTiling(loadTexture(m.normalMap))
   }, [obj.material?.repeat, obj.material?.offset, obj.material?.map, obj.material?.normalMap, material])
 
+  // ----- Skinning: criar SkinnedMesh + Skeleton se o objeto tem esqueleto -----
+  const skinData = useMemo(() => {
+    if (!obj.skeleton || !obj.skeleton.bones || obj.skeleton.bones.length === 0) return null
+
+    // Criar THREE.Bone objects a partir dos dados do esqueleto
+    const bones = []
+    const boneMap = {} // boneId → THREE.Bone
+    for (const boneDef of obj.skeleton.bones) {
+      const bone = new THREE.Bone()
+      bone.name = boneDef.name || boneDef.id
+      bone.position.set(...(boneDef.position || [0, 0, 0]))
+      bone.rotation.set(...(boneDef.rotation || [0, 0, 0]))
+      bone.scale.set(...(boneDef.scale || [1, 1, 1]))
+      bone.userData.boneId = boneDef.id
+      boneMap[boneDef.id] = bone
+      bones.push(bone)
+    }
+    // Construir hierarquia
+    for (const boneDef of obj.skeleton.bones) {
+      if (boneDef.parentId && boneMap[boneDef.parentId]) {
+        boneMap[boneDef.parentId].add(boneMap[boneDef.id])
+      }
+    }
+
+    // Criar Skeleton
+    const skeleton = new THREE.Skeleton(bones)
+
+    // Criar skinIndices e skinWeights para a geometria
+    const skinWeights = obj.skinWeights || {}
+    const vertCount = geometry.attributes.position.count
+    const skinIndices = new Float32Array(vertCount * 4)
+    const skinWeightsArr = new Float32Array(vertCount * 4)
+
+    // Para cada vértice, encontrar os pesos
+    for (let v = 0; v < vertCount; v++) {
+      const weights = skinWeights[v] || {}
+      // Ordenar ossos por peso (maior primeiro) e pegar top 4
+      const sorted = Object.entries(weights)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+
+      let totalWeight = 0
+      for (let i = 0; i < 4; i++) {
+        if (i < sorted.length) {
+          const [boneId, weight] = sorted[i]
+          const boneIdx = obj.skeleton.bones.findIndex(b => b.id === boneId)
+          if (boneIdx >= 0) {
+            skinIndices[v * 4 + i] = boneIdx
+            skinWeightsArr[v * 4 + i] = weight
+            totalWeight += weight
+          }
+        }
+      }
+      // Normalizar para soma = 1
+      if (totalWeight > 0) {
+        for (let i = 0; i < 4; i++) {
+          skinWeightsArr[v * 4 + i] /= totalWeight
+        }
+      }
+    }
+
+    // Aplicar skinIndices e skinWeights à geometria
+    geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndices, 4))
+    geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinWeightsArr, 4))
+
+    return { bones, skeleton }
+  }, [obj.skeleton, obj.skinWeights, geometry])
+
+  // ----- Atualizar bones quando a animação corre (modo editor) -----
+  useFrame(() => {
+    if (skinData && innerRef.current && innerRef.current.isSkinnedMesh) {
+      // Forçar update do skeleton se os bones foram modificados
+      skinData.skeleton.update()
+    }
+  })
+
   // ----- Sincronizar transform -----
   // Aplicamos diretamente como props do mesh para garantir que estão sempre
   // sincronizados (o useEffect anterior falhava na 1ª renderização porque
@@ -217,6 +294,46 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
   const outlineColor =
     obj.outlineColor ||
     (isSelected ? '#2f81f7' : null)
+
+  // Se tem esqueleto, usar SkinnedMesh; caso contrário, Mesh normal
+  if (skinData) {
+    return (
+      <skinnedMesh
+        ref={(node) => {
+          innerRef.current = node
+          if (typeof meshRef === 'function') meshRef(node)
+          else if (meshRef) meshRef.current = node
+        }}
+        geometry={geometry}
+        material={material}
+        position={obj.position}
+        rotation={obj.rotation}
+        scale={obj.scale}
+        visible={obj.visible !== false}
+        onPointerDown={handlePointerDown}
+        castShadow
+        receiveShadow
+        userData={{ objectId: obj.id }}
+        skeleton={skinData.skeleton}
+      >
+        {/* Bones (hierarquia) — adicionados como filhos do skinnedMesh */}
+        {skinData.bones
+          .filter(b => !b.parent || b.parent.type !== 'Bone')
+          .map(bone => <primitive key={bone.uuid} object={bone} />)}
+        {isSelected && (
+          <mesh scale={[1.02, 1.02, 1.02]} geometry={geometry}>
+            <meshBasicMaterial
+              color="#2f81f7"
+              wireframe
+              transparent
+              opacity={0.3}
+              depthTest={false}
+            />
+          </mesh>
+        )}
+      </skinnedMesh>
+    )
+  }
 
   return (
     <mesh

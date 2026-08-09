@@ -103,6 +103,102 @@ function SculptRaycaster({ meshRefs, orbitRef }) {
   return null
 }
 
+// ----- Componente: raycast para weight painting -----
+function WeightPaintRaycaster({ meshRefs, orbitRef }) {
+  const { gl, camera } = useThree()
+  const mode = useStore((s) => s.mode)
+  const selectedId = useStore((s) => s.selectedId)
+  const objects = useStore((s) => s.objects)
+  const updateObject = useStore((s) => s.updateObject)
+  const isDraggingRef = useRef(false)
+  const raycaster = useRef(new THREE.Raycaster())
+
+  useEffect(() => {
+    if (mode !== 'weight' || !selectedId) return
+    const canvas = gl.domElement
+
+    const onPointerDown = (e) => {
+      isDraggingRef.current = true
+      if (orbitRef.current) orbitRef.current.enabled = false
+      doPaint(e)
+    }
+    const onPointerMove = (e) => {
+      if (!isDraggingRef.current) return
+      doPaint(e)
+    }
+    const onPointerUp = () => {
+      isDraggingRef.current = false
+      if (orbitRef.current) orbitRef.current.enabled = true
+    }
+
+    const doPaint = (e) => {
+      const obj = objects.find(o => o.id === selectedId)
+      if (!obj || !obj.skeleton || !obj.skeleton.bones) return
+      const mesh = meshRefs.current.get(selectedId)
+      if (!mesh) return
+
+      const rect = canvas.getBoundingClientRect()
+      const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+      const y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+      raycaster.current.setFromCamera(new THREE.Vector2(x, y), camera)
+      const intersects = raycaster.current.intersectObject(mesh)
+      if (intersects.length === 0) return
+
+      const hit = intersects[0]
+      const activeBoneId = window._weightPaintActiveBone
+      if (!activeBoneId) return
+
+      const geom = mesh.geometry
+      const positions = geom.attributes.position
+      const skinWeights = obj.skinWeights || {}
+      const brushRadius = window._weightPaintBrushSize || 0.3
+      const brushStrength = window._weightPaintBrushStrength || 0.5
+
+      const localHit = hit.point.clone().applyMatrix4(new THREE.Matrix4().copy(mesh.matrixWorld).invert())
+      const newWeights = { ...skinWeights }
+      let painted = 0
+
+      for (let v = 0; v < positions.count; v++) {
+        const vx = positions.getX(v)
+        const vy = positions.getY(v)
+        const vz = positions.getZ(v)
+        const dist = Math.sqrt((vx - localHit.x) ** 2 + (vy - localHit.y) ** 2 + (vz - localHit.z) ** 2)
+
+        if (dist <= brushRadius) {
+          const falloff = 1 - (dist / brushRadius)
+          const weight = falloff * brushStrength
+          if (!newWeights[v]) newWeights[v] = {}
+          const current = newWeights[v][activeBoneId] || 0
+          newWeights[v][activeBoneId] = Math.min(1, current + weight)
+          const total = Object.values(newWeights[v]).reduce((a, b) => a + b, 0)
+          if (total > 0) {
+            for (const boneId in newWeights[v]) {
+              newWeights[v][boneId] /= total
+            }
+          }
+          painted++
+        }
+      }
+
+      if (painted > 0) {
+        updateObject(selectedId, { skinWeights: newWeights })
+      }
+    }
+
+    canvas.addEventListener('pointerdown', onPointerDown)
+    canvas.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    return () => {
+      canvas.removeEventListener('pointerdown', onPointerDown)
+      canvas.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      if (orbitRef.current) orbitRef.current.enabled = true
+    }
+  }, [mode, selectedId, objects, updateObject, gl, camera, meshRefs, orbitRef])
+
+  return null
+}
+
 // ----- Componente interno: TransformControls -----
 function SelectedTransformControls({ selectedMesh, orbitRef }) {
   const transformMode = useStore((s) => s.transformMode)
@@ -266,6 +362,7 @@ export default function Scene3D() {
 
         {/* Raycast para sculpt */}
         <SculptRaycaster meshRefs={meshRefs} orbitRef={orbitRef} />
+        <WeightPaintRaycaster meshRefs={meshRefs} orbitRef={orbitRef} />
 
         {/* Câmara orbital — desativada em modo sculpt durante o arraste */}
         <OrbitControls

@@ -9,7 +9,8 @@
  *
  * Acedido via LeftPanel → tab "Pintar Peso"
  */
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import * as THREE from 'three'
 import { useStore, useSelectedObject } from '../../store/useStore'
 import { IconTrash } from '../ui/Icons'
 
@@ -26,6 +27,20 @@ export default function WeightPaintPanel() {
   const [brush, setBrush] = useState({ mode: 'paint', size: 0.3, strength: 0.5 })
   const [activeBoneId, setActiveBoneId] = useState(null)
 
+  // Sync brush/bone state with window for the WeightPaintRaycaster
+  useEffect(() => {
+    window._weightPaintActiveBone = activeBoneId
+    window._weightPaintBrushSize = brush.size
+    window._weightPaintBrushStrength = brush.strength
+  }, [activeBoneId, brush])
+
+  // Set mode to 'weight' when panel is active
+  useEffect(() => {
+    const setMode = useStore.getState().setMode
+    setMode('weight')
+    return () => setMode('object')
+  }, [])
+
   if (!selected) {
     return (
       <div className="panel-section">
@@ -40,11 +55,38 @@ export default function WeightPaintPanel() {
 
   // Auto-peso: calcular pesos por proximidade (heat map simplificado)
   const autoWeight = () => {
-    if (!bones.length || !selected.customGeometry) {
-      toast('Precisa de esqueleto e geometria', 'error')
+    try {
+    if (!bones.length) {
+      toast('Precisa de esqueleto', 'error')
       return
     }
-    const positions = selected.customGeometry.positions || selected.customGeometry.vertices || []
+    toast('A calcular auto-peso...', 'info')
+    // Obter posições dos vértices (customGeometry OU primitiva)
+    let positions = []
+    if (selected.customGeometry) {
+      positions = selected.customGeometry.positions || selected.customGeometry.vertices || []
+    } else {
+      // Para primitivas, gerar posições a partir do tipo
+      const PRIMITIVES = {
+        cube: () => { const g = new THREE.BoxGeometry(1,1,1); return g.attributes.position.array },
+        sphere: () => { const g = new THREE.SphereGeometry(0.6,16,12); return g.attributes.position.array },
+        cylinder: () => { const g = new THREE.CylinderGeometry(0.5,0.5,1.2,16); return g.attributes.position.array },
+        cone: () => { const g = new THREE.ConeGeometry(0.6,1.2,16); return g.attributes.position.array },
+        plane: () => { const g = new THREE.PlaneGeometry(1.5,1.5); return g.attributes.position.array },
+        torus: () => { const g = new THREE.TorusGeometry(0.6,0.2,16,32); return g.attributes.position.array },
+      }
+      const gen = PRIMITIVES[selected.type]
+      if (gen) {
+        const g = gen()
+        positions = Array.from(g.attributes.position.array)
+        // Guardar como customGeometry para uso futuro
+        updateObject(selected.id, { customGeometry: { positions, normals: [], uvs: [] } })
+      }
+    }
+    if (!positions || positions.length === 0) {
+      toast('Não foi possível obter geometria', 'error')
+      return
+    }
     const vertCount = positions.length / 3
     const weights = {}
 
@@ -75,6 +117,10 @@ export default function WeightPaintPanel() {
 
     updateObject(selected.id, { skinWeights: weights })
     toast(`Auto-peso calculado para ${vertCount} vértices`, 'success')
+    } catch (err) {
+      toast('Erro auto-peso: ' + err.message, 'error')
+      console.error('Auto-peso error:', err)
+    }
   }
 
   const clearWeights = () => {
