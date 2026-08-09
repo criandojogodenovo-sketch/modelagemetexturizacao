@@ -235,6 +235,11 @@ export default function SceneEditorPanel({ onClose }) {
             <ConectsList scene={activeScene} />
           )}
 
+          {/* 4b. Gestão de Camadas (Layers) */}
+          {activeScene && (
+            <LayersPanel />
+          )}
+
           {/* 5. Configuração da câmara de jogo */}
           {activeScene && (
             <GameCameraEditor scene={activeScene} onUpdate={updateGameCamera} />
@@ -292,6 +297,83 @@ function SceneListItem({ scene, isActive, onSelect, onDuplicate, onDelete, onRen
         <button className="danger" onClick={(e) => { e.stopPropagation(); onDelete() }} title="Apagar cena" style={{ padding: '2px 4px' }}>
           <IconTrash width={11} height={11} />
         </button>
+      </div>
+    </div>
+  )
+}
+
+// Editor da câmara de jogo
+// ===== Painel de Gestão de Camadas (Layers) =====
+function LayersPanel() {
+  const layers = useStore((s) => s.layers)
+  const addLayer = useStore((s) => s.addLayer)
+  const removeLayer = useStore((s) => s.removeLayer)
+  const updateLayer = useStore((s) => s.updateLayer)
+  const toggleLayerVisible = useStore((s) => s.toggleLayerVisible)
+  const toggleLayerLocked = useStore((s) => s.toggleLayerLocked)
+
+  return (
+    <div className="panel-section">
+      <h4>Camadas ({layers.length})</h4>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+        <button style={{ flex: 1, fontSize: 11 }} onClick={() => addLayer(prompt('Nome da camada:') || `Camada ${layers.length + 1}`)}>
+          + Nova Camada
+        </button>
+      </div>
+      {layers.map((layer) => (
+        <div key={layer.id} style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '4px 6px', marginBottom: 2,
+          background: 'var(--bg-panel-2)', borderRadius: 'var(--radius-sm)',
+          fontSize: 11,
+        }}>
+          {/* Cor identificadora */}
+          <input
+            type="color"
+            value={layer.color}
+            onChange={(e) => updateLayer(layer.id, { color: e.target.value })}
+            style={{ width: 20, height: 20, border: 'none', padding: 0, cursor: 'pointer' }}
+            title="Cor da camada"
+          />
+          {/* Visível */}
+          <button
+            onClick={() => toggleLayerVisible(layer.id)}
+            style={{ padding: '2px 4px', fontSize: 12, background: 'none', border: 'none', cursor: 'pointer' }}
+            title={layer.visible ? 'Esconder' : 'Mostrar'}
+          >
+            {layer.visible ? '👁️' : '🚫'}
+          </button>
+          {/* Bloqueado */}
+          <button
+            onClick={() => toggleLayerLocked(layer.id)}
+            style={{ padding: '2px 4px', fontSize: 12, background: 'none', border: 'none', cursor: 'pointer' }}
+            title={layer.locked ? 'Desbloquear' : 'Bloquear'}
+          >
+            {layer.locked ? '🔒' : '🔓'}
+          </button>
+          {/* Nome */}
+          <input
+            type="text"
+            value={layer.name}
+            onChange={(e) => updateLayer(layer.id, { name: e.target.value })}
+            style={{ flex: 1, background: 'none', border: 'none', color: 'var(--text)', fontSize: 11 }}
+          />
+          {/* Apagar (não permitir apagar a default) */}
+          {layer.id !== 'layer_default' && (
+            <button
+              className="danger"
+              style={{ padding: '2px 4px' }}
+              onClick={() => { if (confirm(`Apagar camada "${layer.name}"? Os objetos voltam à camada Padrão.`)) removeLayer(layer.id) }}
+              title="Apagar camada"
+            >
+              <IconTrash width={11} height={11} />
+            </button>
+          )}
+        </div>
+      ))}
+      <div className="small muted mt-2">
+        💡 Usa camadas para organizar e mostrar/esconder grupos de objetos.
+        Define a camada de cada Conect nas suas propriedades.
       </div>
     </div>
   )

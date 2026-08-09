@@ -149,6 +149,39 @@ export default function ConectPropertiesPanel({ conectId }) {
         ))}
       </div>
 
+      {/* Seletor de Camada (Layer) */}
+      <div className="panel-section">
+        <div className="prop-row">
+          <label>Camada</label>
+          <select
+            value={conect.layerId || 'layer_default'}
+            onChange={(e) => setProp('layerId', e.target.value)}
+          >
+            {useStore.getState().layers.map(l => (
+              <option key={l.id} value={l.id}>{l.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Seletor de cena de destino (NavigatorObject) */}
+      {conect.type === 'NavigatorObject' && (
+        <div className="panel-section">
+          <div className="prop-row">
+            <label>Cena de destino</label>
+            <select
+              value={conect.targetSceneId || ''}
+              onChange={(e) => setProp('targetSceneId', e.target.value || null)}
+            >
+              <option value="">— Selecionar —</option>
+              {useStore.getState().scenes.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
       {/* FlirScript */}
       {def.flirScriptable && (
         <div className="panel-section">

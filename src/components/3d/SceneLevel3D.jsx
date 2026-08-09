@@ -843,6 +843,33 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       }
     }
 
+    // Sistema: NavigatorObject — transporta o jogador para outra cena
+    if (player2) {
+      const playerMesh = conectMeshRefs.current.get(player2.instanceId)
+      if (playerMesh) {
+        for (const nav of setupScene?.conects || []) {
+          if (nav.type === 'NavigatorObject' && nav.targetSceneId) {
+            const navMesh = conectMeshRefs.current.get(nav.instanceId)
+            if (navMesh && navMesh.visible !== false) {
+              const dist = playerMesh.position.distanceTo(navMesh.position)
+              if (dist <= (nav.triggerRadius || 2)) {
+                // Transportar para a cena de destino
+                debugLog(`Portal ativado! A mudar para cena ${nav.targetSceneId}`, 'log', 'Navigator')
+                // Parar o jogo atual
+                useStore.getState().closeScenePreview()
+                // Mudar para a cena de destino
+                setTimeout(() => {
+                  useStore.getState().setActiveScene(nav.targetSceneId)
+                  useStore.getState().openScenePreview()
+                }, nav.transitionType === 'fade' ? (nav.transitionDuration || 0.5) * 1000 : 0)
+                break
+              }
+            }
+          }
+        }
+      }
+    }
+
     // Câmara: ViewObject ativa — usar setupScene (ref) para consistência
     const viewConects = (setupScene?.conects || []).filter((c) => c.type === 'ViewObject')
     const activeView = viewConects.find((c) => c.cameraRole === 'player') || viewConects.find((c) => c.cameraRole === 'primary') || viewConects[0]

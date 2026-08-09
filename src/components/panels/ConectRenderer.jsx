@@ -85,6 +85,10 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
     return <PathMesh conect={conect} setMeshRef={setMeshRef} />
   }
 
+  if (conect.type === 'NavigatorObject') {
+    return <NavigatorMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
   if (conect.type === 'CheckpointObject') {
     return <CheckpointMesh conect={conect} setMeshRef={setMeshRef} />
   }
@@ -760,6 +764,39 @@ function Line({ points, loop }) {
     <line geometry={geometry}>
       <lineBasicMaterial color="#2f81f7" transparent opacity={0.5} />
     </line>
+  )
+}
+
+// ===== CheckpointObject =====
+// ===== NavigatorObject (portal entre cenas) =====
+function NavigatorMesh({ conect, setMeshRef }) {
+  const time = useRef(0)
+  const ringRef = useRef()
+  useFrame((_, delta) => {
+    time.current += delta
+    if (ringRef.current) {
+      ringRef.current.rotation.z = time.current * 0.5
+      ringRef.current.rotation.y = Math.sin(time.current * 0.3) * 0.2
+    }
+  })
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} userData={{ conectInstanceId: conect.instanceId }}>
+      {/* Anel rotativo (portal) */}
+      <mesh ref={ringRef}>
+        <torusGeometry args={[conect.triggerRadius || 2, 0.15, 8, 32]} />
+        <meshStandardMaterial color="#8957e5" emissive="#8957e5" emissiveIntensity={0.5} transparent opacity={0.7} />
+      </mesh>
+      {/* Disco central (semi-transparente) */}
+      <mesh>
+        <circleGeometry args={[(conect.triggerRadius || 2) * 0.9, 32]} />
+        <meshBasicMaterial color="#8957e5" transparent opacity={0.15} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Indicador de cena de destino */}
+      <mesh position={[0, (conect.triggerRadius || 2) + 0.5, 0]}>
+        <sphereGeometry args={[0.2, 8, 8]} />
+        <meshBasicMaterial color="#f4a261" />
+      </mesh>
+    </group>
   )
 }
 

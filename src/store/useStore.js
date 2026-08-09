@@ -87,7 +87,12 @@ const initialScene = {
     shadowDistance: 20,          // objetos além desta distância não projetam sombras
     shadowMapSize: 1024,         // 1024 (performance) ou 2048 (qualidade)
     vertexAO: false,             // Ambient Occlusion pré-calculado por vértice (custo zero em runtime)
+    pom: false,                  // Parallax Occlusion Mapping (relevo sem polígonos)
   },
+  // Sistema de Camadas (Layers)
+  layers: [
+    { id: 'layer_default', name: 'Padrão', color: '#888888', visible: true, locked: false },
+  ],
 }
 
 // Modos da aplicação
@@ -888,6 +893,35 @@ export const useStore = create(
         renderSettings: { ...s.renderSettings, ...patch },
       })),
 
+      // ---------- Sistema de Camadas (Layers) ----------
+      addLayer: (name, color = '#888888') => set((s) => ({
+        layers: [...s.layers, {
+          id: `layer_${Math.random().toString(36).slice(2, 10)}`,
+          name: name || `Camada ${s.layers.length + 1}`,
+          color,
+          visible: true,
+          locked: false,
+        }],
+      })),
+      removeLayer: (layerId) => set((s) => ({
+        layers: s.layers.filter(l => l.id !== layerId),
+        // Remover layerId de objetos e conects que a usavam
+        objects: s.objects.map(o => o.layerId === layerId ? { ...o, layerId: 'layer_default' } : o),
+        scenes: s.scenes.map(sc => ({
+          ...sc,
+          conects: (sc.conects || []).map(c => c.layerId === layerId ? { ...c, layerId: 'layer_default' } : c),
+        })),
+      })),
+      updateLayer: (layerId, patch) => set((s) => ({
+        layers: s.layers.map(l => l.id === layerId ? { ...l, ...patch } : l),
+      })),
+      toggleLayerVisible: (layerId) => set((s) => ({
+        layers: s.layers.map(l => l.id === layerId ? { ...l, visible: !l.visible } : l),
+      })),
+      toggleLayerLocked: (layerId) => set((s) => ({
+        layers: s.layers.map(l => l.id === layerId ? { ...l, locked: !l.locked } : l),
+      })),
+
       // ---------- UI Editor (Fase 6) ----------
       // Múltiplas telas de UI: Main Menu, HUD, Game Over, etc.
       // Cada tela tem elementos (Button, Label, Input, Checkbox, Slider, etc.)
@@ -1564,6 +1598,7 @@ export const useStore = create(
         grid: state.grid,
         lights: state.lights,
         renderSettings: state.renderSettings,
+        layers: state.layers,
         transformMode: state.transformMode,
         mode: state.mode,
         scenes: state.scenes,

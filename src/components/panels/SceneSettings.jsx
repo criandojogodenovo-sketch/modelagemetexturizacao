@@ -255,6 +255,21 @@ export default function SceneSettings() {
             </div>
           </div>
         </label>
+
+        <label className="checkbox-row mt-2">
+          <input
+            type="checkbox"
+            checked={renderSettings?.pom || false}
+            onChange={(e) => setRenderSettings({ pom: e.target.checked })}
+          />
+          <div style={{ flex: 1 }}>
+            <strong>Parallax Occlusion Mapping (POM)</strong>
+            <div className="small muted">
+              Faz superfícies planas parecerem ter relevo real (tijolos, fendas).
+              Usa height map — sem adicionar polígonos. Custo moderado.
+            </div>
+          </div>
+        </label>
       </div>
 
       {/* Otimização de Sombras — ativo por defeito, reduz custo de shadow passes */}

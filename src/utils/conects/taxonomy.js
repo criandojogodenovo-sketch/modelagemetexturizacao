@@ -783,6 +783,31 @@ export const CONECT_TAXONOMY = [
     ],
   },
   {
+    type: 'NavigatorObject',
+    label: 'Navigator Object (Portal)',
+    category: 'gameplay',
+    icon: '🌀',
+    description: 'Portal/passagem entre cenas — transporta o jogador para outra cena ao contacto',
+    hasPhysics: false,
+    hasVisual: true,
+    flirScriptable: true,
+    defaults: {
+      targetSceneId: null,     // cena de destino
+      transitionType: 'fade',  // fade | instant
+      transitionDuration: 0.5, // segundos
+      spawnPosition: [0, 1, 0], // posição de spawn na cena de destino
+      preserveVelocity: false,
+      triggerRadius: 2,        // raio de ativação
+    },
+    properties: [
+      prop('transitionType', 'Transição', 'select', 'fade', { options: ['fade', 'instant'] }),
+      prop('transitionDuration', 'Duração (s)', 'number', 0.5, { min: 0, max: 5, step: 0.1 }),
+      prop('triggerRadius', 'Raio de ativação', 'number', 2, { min: 0.5, max: 20, step: 0.5 }),
+      prop('spawnPosition', 'Posição de spawn', 'vec3', [0, 1, 0]),
+      prop('preserveVelocity', 'Manter velocidade', 'boolean', false),
+    ],
+  },
+  {
     type: 'CheckpointObject',
     label: 'Checkpoint Object',
     category: 'gameplay',
