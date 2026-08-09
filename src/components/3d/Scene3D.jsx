@@ -16,6 +16,7 @@ import { Suspense, useEffect, useRef, useState, useCallback } from 'react'
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-three/drei'
 import * as THREE from 'three'
+import { WebGPURenderer } from 'three/webgpu'
 import SceneObject from './SceneObject'
 import SkeletonGizmo from './SkeletonGizmo'
 import { useStore } from '../../store/useStore'
@@ -434,7 +435,30 @@ export default function Scene3D() {
       shadows
       dpr={[1, 2]}
       camera={{ position: [5, 4, 6], fov: 50, near: 0.1, far: 200 }}
-      gl={{ antialias: true, preserveDrawingBuffer: true, alpha: false }}
+      gl={async (props) => {
+        // Verificar suporte WebGPU
+        if (typeof navigator !== 'undefined' && navigator.gpu) {
+          try {
+            const adapter = await navigator.gpu.requestAdapter()
+            if (adapter) {
+              // WebGPU disponível — usar WebGPURenderer
+              const renderer = new WebGPURenderer({
+                ...props,
+                antialias: true,
+                alpha: false,
+              })
+              await renderer.init()
+              console.log('[Renderer] WebGPU ativo', { adapter: adapter.info })
+              return renderer
+            }
+          } catch (e) {
+            console.warn('[Renderer] WebGPU falhou:', e.message)
+          }
+        }
+        // Fallback: WebGL2 (renderer tradicional, compatível com ShaderMaterial)
+        console.log('[Renderer] WebGL2 (fallback)')
+        return new THREE.WebGLRenderer({ ...props, antialias: true, alpha: false, preserveDrawingBuffer: true })
+      }}
       onPointerMissed={(e) => {
         if (e.type === 'click' || e.type === 'touchend') {
           if (mode === 'object') deselect()

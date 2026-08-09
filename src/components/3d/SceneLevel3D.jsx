@@ -16,6 +16,7 @@ import { Suspense, useEffect, useRef, useState, useCallback, useMemo } from 'rea
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-three/drei'
 import * as THREE from 'three'
+import { WebGPURenderer } from 'three/webgpu'
 import SceneObject from './SceneObject'
 import ConectRenderer from '../panels/ConectRenderer'
 import ColliderGizmo from './ColliderGizmo'
@@ -1082,7 +1083,28 @@ export default function SceneLevel3D() {
         shadows
         dpr={[1, 2]}
         camera={{ position: [8, 6, 10], fov: 50, near: 0.1, far: 200 }}
-        gl={{ antialias: true, preserveDrawingBuffer: true, alpha: false }}
+        gl={async (props) => {
+          // Verificar suporte WebGPU
+          if (typeof navigator !== 'undefined' && navigator.gpu) {
+            try {
+              const adapter = await navigator.gpu.requestAdapter()
+              if (adapter) {
+                const renderer = new WebGPURenderer({
+                  ...props,
+                  antialias: true,
+                  alpha: false,
+                })
+                await renderer.init()
+                console.log('[SceneLevel3D] WebGPU ativo', { adapter: adapter.info })
+                return renderer
+              }
+            } catch (e) {
+              console.warn('[SceneLevel3D] WebGPU falhou:', e.message)
+            }
+          }
+          console.log('[SceneLevel3D] WebGL2 (fallback)')
+          return new THREE.WebGLRenderer({ ...props, antialias: true, alpha: false, preserveDrawingBuffer: true })
+        }}
         onPointerMissed={() => {
           if (!isGameMode) {
             setSelectedInstanceId(null)
