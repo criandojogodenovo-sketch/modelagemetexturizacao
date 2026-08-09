@@ -240,6 +240,11 @@ export default function SceneEditorPanel({ onClose }) {
             <LayersPanel />
           )}
 
+          {/* 4c. Data Assets (ScriptableObjects + Autoloads) */}
+          {activeScene && (
+            <DataAssetsPanel />
+          )}
+
           {/* 5. Configuração da câmara de jogo */}
           {activeScene && (
             <GameCameraEditor scene={activeScene} onUpdate={updateGameCamera} />
@@ -591,5 +596,138 @@ function ConectOutlinerItem({ conect, conects, selectedConectId, selectConect, s
         />
       ))}
     </>
+  )
+}
+
+// ===== Painel de Data Assets (ScriptableObjects + Autoloads) =====
+function DataAssetsPanel() {
+  const scriptableObjects = useStore((s) => s.scriptableObjects)
+  const createScriptableObject = useStore((s) => s.createScriptableObject)
+  const updateScriptableObject = useStore((s) => s.updateScriptableObject)
+  const updateScriptableObjectData = useStore((s) => s.updateScriptableObjectData)
+  const removeScriptableObject = useStore((s) => s.removeScriptableObject)
+  const autoloads = useStore((s) => s.autoloads)
+  const createAutoload = useStore((s) => s.createAutoload)
+  const updateAutoload = useStore((s) => s.updateAutoload)
+  const removeAutoload = useStore((s) => s.removeAutoload)
+  const [expandedSO, setExpandedSO] = useState(null)
+  const [newDataKey, setNewDataKey] = useState('')
+
+  return (
+    <div className="panel-section">
+      <h4>📦 Data Assets ({scriptableObjects.length})</h4>
+      <div className="small muted mb-2">
+        Dados reutilizáveis partilhados entre Conects (estilo Unity ScriptableObject)
+      </div>
+      <button style={{ width: '100%', marginBottom: 8 }} onClick={() => {
+        const name = prompt('Nome do Data Asset (ex: "Arma Pistola", "Inimigo Básico"):')
+        if (name) createScriptableObject(name, { dano: 10, velocidade: 5, nome: name })
+      }}>
+        + Novo Data Asset
+      </button>
+      {scriptableObjects.map((so) => (
+        <div key={so.id} style={{
+          marginBottom: 4,
+          padding: '4px 6px',
+          background: 'var(--bg-panel-2)',
+          borderRadius: 'var(--radius-sm)',
+          fontSize: 11,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button
+              onClick={() => setExpandedSO(expandedSO === so.id ? null : so.id)}
+              style={{ padding: '0 4px', background: 'none', border: 'none', cursor: 'pointer' }}
+            >
+              {expandedSO === so.id ? '▼' : '▶'}
+            </button>
+            <input
+              type="text"
+              value={so.name}
+              onChange={(e) => updateScriptableObject(so.id, { name: e.target.value })}
+              style={{ flex: 1, background: 'none', border: 'none', color: 'var(--text)', fontSize: 11 }}
+            />
+            <button className="danger" style={{ padding: '2px 4px' }} onClick={() => removeScriptableObject(so.id)}>
+              <IconTrash width={11} height={11} />
+            </button>
+          </div>
+          {expandedSO === so.id && (
+            <div style={{ marginLeft: 16, marginTop: 4 }}>
+              {Object.entries(so.data).map(([key, value]) => (
+                <div key={key} style={{ display: 'flex', gap: 4, marginBottom: 2 }}>
+                  <span style={{ minWidth: 60, color: 'var(--text-muted)' }}>{key}:</span>
+                  <input
+                    type="text"
+                    value={String(value)}
+                    onChange={(e) => {
+                      let v = e.target.value
+                      if (!isNaN(v) && v !== '') v = Number(v)
+                      if (v === 'true') v = true
+                      if (v === 'false') v = false
+                      updateScriptableObjectData(so.id, key, v)
+                    }}
+                    style={{ flex: 1, fontSize: 10, padding: '1px 4px' }}
+                  />
+                  <button className="danger" style={{ padding: '1px 2px', fontSize: 9 }}
+                    onClick={() => {
+                      const newData = { ...so.data }
+                      delete newData[key]
+                      updateScriptableObject(so.id, { data: newData })
+                    }}
+                  >✕</button>
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                <input
+                  type="text"
+                  placeholder="nova chave"
+                  value={newDataKey}
+                  onChange={(e) => setNewDataKey(e.target.value)}
+                  style={{ flex: 1, fontSize: 10, padding: '1px 4px' }}
+                />
+                <button style={{ fontSize: 10, padding: '1px 6px' }} onClick={() => {
+                  if (newDataKey) {
+                    updateScriptableObjectData(so.id, newDataKey, 0)
+                    setNewDataKey('')
+                  }
+                }}>+ Campo</button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Autoloads */}
+      <h4 style={{ marginTop: 12 }}>🌐 Autoloads ({autoloads.length})</h4>
+      <div className="small muted mb-2">
+        Scripts globais sempre acessíveis via getAutoload("nome") em FlirCode
+      </div>
+      <button style={{ width: '100%', marginBottom: 8 }} onClick={() => {
+        const name = prompt('Nome do Autoload (ex: "GameManager", "AudioManager"):')
+        if (name) createAutoload(name)
+      }}>
+        + Novo Autoload
+      </button>
+      {autoloads.map((al) => (
+        <div key={al.id} style={{
+          display: 'flex', alignItems: 'center', gap: 4,
+          marginBottom: 4, padding: '4px 6px',
+          background: 'var(--bg-panel-2)', borderRadius: 'var(--radius-sm)', fontSize: 11,
+        }}>
+          <span style={{ color: '#8957e5' }}>⚡</span>
+          <input
+            type="text"
+            value={al.name}
+            onChange={(e) => updateAutoload(al.id, { name: e.target.value })}
+            style={{ flex: 1, background: 'none', border: 'none', color: 'var(--text)', fontSize: 11 }}
+          />
+          <button className="danger" style={{ padding: '2px 4px' }} onClick={() => removeAutoload(al.id)}>
+            <IconTrash width={11} height={11} />
+          </button>
+        </div>
+      ))}
+      <div className="small muted mt-2">
+        💡 Usa <code>getDataAsset("nome")</code> e <code>getAutoload("nome")</code> no FlirCode.
+      </div>
+    </div>
   )
 }

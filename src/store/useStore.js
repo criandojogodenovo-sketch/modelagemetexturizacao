@@ -170,6 +170,10 @@ function newProjectState() {
     },
     // Bone selecionado no editor (para rigging/animacao)
     selectedBoneId: null,
+    // ScriptableObjects — dados reutilizáveis (estilo Unity ScriptableObject)
+    scriptableObjects: [],
+    // Autoloads — scripts FlirCode globais sempre acessíveis
+    autoloads: [],
     // Edit mode
     editSelectionMode: 'face',
     selectedVertices: [],
@@ -922,6 +926,51 @@ export const useStore = create(
         layers: s.layers.map(l => l.id === layerId ? { ...l, locked: !l.locked } : l),
       })),
 
+      // ---------- ScriptableObjects (dados reutilizáveis) ----------
+      createScriptableObject: (name, template = {}) => {
+        const so = {
+          id: `so_${Math.random().toString(36).slice(2, 10)}`,
+          name: name || 'Novo Data Asset',
+          data: { ...template },
+          // Referências: que Conects usam este ScriptableObject
+          references: [],
+        }
+        set((s) => ({ scriptableObjects: [...s.scriptableObjects, so] }))
+        return so
+      },
+      updateScriptableObject: (id, patch) => set((s) => ({
+        scriptableObjects: s.scriptableObjects.map(so =>
+          so.id === id ? { ...so, ...patch } : so
+        ),
+      })),
+      updateScriptableObjectData: (id, key, value) => set((s) => ({
+        scriptableObjects: s.scriptableObjects.map(so =>
+          so.id === id ? { ...so, data: { ...so.data, [key]: value } } : so
+        ),
+      })),
+      removeScriptableObject: (id) => set((s) => ({
+        scriptableObjects: s.scriptableObjects.filter(so => so.id !== id),
+      })),
+
+      // ---------- Autoloads (scripts globais) ----------
+      createAutoload: (name) => {
+        const al = {
+          id: `autoload_${Math.random().toString(36).slice(2, 10)}`,
+          name: name || 'Novo Autoload',
+          code: '',
+        }
+        set((s) => ({ autoloads: [...s.autoloads, al] }))
+        return al
+      },
+      updateAutoload: (id, patch) => set((s) => ({
+        autoloads: s.autoloads.map(al =>
+          al.id === id ? { ...al, ...patch } : al
+        ),
+      })),
+      removeAutoload: (id) => set((s) => ({
+        autoloads: s.autoloads.filter(al => al.id !== id),
+      })),
+
       // ---------- UI Editor (Fase 6) ----------
       // Múltiplas telas de UI: Main Menu, HUD, Game Over, etc.
       // Cada tela tem elementos (Button, Label, Input, Checkbox, Slider, etc.)
@@ -1607,6 +1656,8 @@ export const useStore = create(
         uiScreens: state.uiScreens,
         activeUIScreenId: state.activeUIScreenId,
         flirCodeClasses: state.flirCodeClasses, // Sistema 2: persistir classes
+        scriptableObjects: state.scriptableObjects, // ScriptableObjects
+        autoloads: state.autoloads, // Autoloads
         selectedId: state.selectedId, // Persistir seleção (resolve bug de WeightPaintPanel após reload)
       }),
       version: 4,

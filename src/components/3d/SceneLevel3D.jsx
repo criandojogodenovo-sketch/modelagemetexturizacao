@@ -516,9 +516,20 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         const mesh = conectMeshRefs.current.get(lightId)
         if (mesh) {
           mesh.visible = visible
-          // Também esconder luzes filho
           mesh.traverse(obj => { if (obj.isLight) obj.visible = visible })
         }
+      },
+
+      // ===== ScriptableObjects + Autoloads (FlirCode) =====
+      getDataAsset: (nameOrId) => {
+        const sos = useStore.getState().scriptableObjects || []
+        const so = sos.find(s => s.id === nameOrId || s.name === nameOrId)
+        return so ? so.data : null
+      },
+      getAutoload: (nameOrId) => {
+        const als = useStore.getState().autoloads || []
+        const al = als.find(a => a.id === nameOrId || a.name === nameOrId)
+        return al ? al : null
       },
     }
     window._flirGameContext = gameContext

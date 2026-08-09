@@ -641,6 +641,12 @@ export function createFlirCodeRuntime(source, gameContext) {
       case 'setLightVisible':
         gameContext.setLightVisible?.(evaluatedArgs[0], evaluatedArgs[1])
         break
+      // Sistema: Data Assets (ScriptableObjects)
+      case 'getDataAsset':
+        return gameContext.getDataAsset?.(evaluatedArgs[0])
+      // Sistema: Autoloads (Singletons)
+      case 'getAutoload':
+        return gameContext.getAutoload?.(evaluatedArgs[0])
       default:
         debugLog(`Função desconhecida: ${name}`, 'warning', 'FlirCode')
     }

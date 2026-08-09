@@ -14,7 +14,6 @@ import { createBuildingObject, createVehicleObject } from '../../utils/buildingG
 export default function BuildersPanel({ open, onClose }) {
   const addObject = useStore((s) => s.addObject)
   const toast = useStore((s) => s.toast)
-  const selectObject = useStore((s) => s.selectObject)
 
   // === Estado do Construtor de Edifícios ===
   const [building, setBuilding] = useState({
@@ -36,8 +35,8 @@ export default function BuildersPanel({ open, onClose }) {
   const handleGenerateBuilding = () => {
     const obj = createBuildingObject(building)
     useStore.getState().addImportedObject(obj)
-    selectObject(obj.id)
-    toast(`Edifício "${obj.name}" criado e adicionado ao catálogo!`, 'success')
+    // Não selecionar automaticamente — evita crash do MaterialEditor com type 'custom'
+    toast(`Edifício "${obj.name}" criado! Vai a Modelagem para editar.`, 'success')
   }
 
   const handleVaryBuilding = () => {
@@ -52,15 +51,13 @@ export default function BuildersPanel({ open, onClose }) {
     setBuilding(varied)
     const obj = createBuildingObject(varied)
     useStore.getState().addImportedObject(obj)
-    selectObject(obj.id)
     toast('Variação gerada!', 'success')
   }
 
   const handleGenerateVehicle = () => {
     const obj = createVehicleObject(vehicle)
     useStore.getState().addImportedObject(obj)
-    selectObject(obj.id)
-    toast(`Veículo "${obj.name}" criado e adicionado ao catálogo!`, 'success')
+    toast(`Veículo "${obj.name}" criado! Vai a Modelagem para editar.`, 'success')
   }
 
   return (

@@ -102,7 +102,7 @@ export default function MaterialEditor({ obj }) {
 
       {/* Roughness */}
       <div className="prop-row">
-        <label>Brilho (Roughness): {m.roughness.toFixed(2)}</label>
+        <label>Brilho (Roughness): {(m.roughness ?? 0.7).toFixed(2)}</label>
         <input
           type="range"
           min="0"
@@ -121,7 +121,7 @@ export default function MaterialEditor({ obj }) {
 
       {/* Metalness */}
       <div className="prop-row">
-        <label>Metalicidade: {m.metalness.toFixed(2)}</label>
+        <label>Metalicidade: {(m.metalness ?? 0).toFixed(2)}</label>
         <input
           type="range"
           min="0"
@@ -140,13 +140,13 @@ export default function MaterialEditor({ obj }) {
 
       {/* Opacidade */}
       <div className="prop-row">
-        <label>Opacidade: {m.opacity.toFixed(2)}</label>
+        <label>Opacidade: {(m.opacity ?? 1).toFixed(2)}</label>
         <input
           type="range"
           min="0"
           max="1"
           step="0.01"
-          value={m.opacity}
+          value={m.opacity ?? 1}
           onFocus={_pushHistory}
           onChange={(e) => set({ opacity: Number(e.target.value), transparent: Number(e.target.value) < 1 })}
           onMouseUp={(e) => commit({ opacity: Number(e.target.value), transparent: Number(e.target.value) < 1 })}
@@ -245,47 +245,47 @@ export default function MaterialEditor({ obj }) {
             </div>
 
             <div className="prop-row">
-              <label>Tiling U (repetição horizontal): {m.repeat[0]}</label>
+              <label>Tiling U (repetição horizontal): {m.repeat?.[0] ?? 1}</label>
               <input
                 type="range"
                 min="0.1"
                 max="10"
                 step="0.1"
-                value={m.repeat[0]}
-                onChange={(e) => set({ repeat: [Number(e.target.value), m.repeat[1]] })}
+                value={m.repeat?.[0] ?? 1}
+                onChange={(e) => set({ repeat: [Number(e.target.value), m.repeat?.[1] ?? 1] })}
               />
             </div>
             <div className="prop-row">
-              <label>Tiling V (repetição vertical): {m.repeat[1]}</label>
+              <label>Tiling V (repetição vertical): {m.repeat?.[1] ?? 1}</label>
               <input
                 type="range"
                 min="0.1"
                 max="10"
                 step="0.1"
-                value={m.repeat[1]}
-                onChange={(e) => set({ repeat: [m.repeat[0], Number(e.target.value)] })}
+                value={m.repeat?.[1] ?? 1}
+                onChange={(e) => set({ repeat: [m.repeat?.[0] ?? 1, Number(e.target.value)] })}
               />
             </div>
             <div className="prop-row">
-              <label>Offset U: {m.offset[0].toFixed(2)}</label>
+              <label>Offset U: {(m.offset?.[0] ?? 0).toFixed(2)}</label>
               <input
                 type="range"
                 min="0"
                 max="1"
                 step="0.01"
-                value={m.offset[0]}
-                onChange={(e) => set({ offset: [Number(e.target.value), m.offset[1]] })}
+                value={m.offset?.[0] ?? 0}
+                onChange={(e) => set({ offset: [Number(e.target.value), m.offset?.[1] ?? 0] })}
               />
             </div>
             <div className="prop-row">
-              <label>Offset V: {m.offset[1].toFixed(2)}</label>
+              <label>Offset V: {(m.offset?.[1] ?? 0).toFixed(2)}</label>
               <input
                 type="range"
                 min="0"
                 max="1"
                 step="0.01"
-                value={m.offset[1]}
-                onChange={(e) => set({ offset: [m.offset[0], Number(e.target.value)] })}
+                value={m.offset?.[1] ?? 0}
+                onChange={(e) => set({ offset: [m.offset?.[0] ?? 0, Number(e.target.value)] })}
               />
             </div>
           </>
