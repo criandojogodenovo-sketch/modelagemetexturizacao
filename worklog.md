@@ -296,3 +296,38 @@ Stage Summary:
 - Build: ✓ (2575 KiB)
 - Honestidade: GI não mostrou impacto em cena simples (precisaria cenas complexas para medir)
 - Curve Deform funciona mas é uma aproximação (interpolação linear por segmento, não Bézier suave)
+
+---
+Task ID: P9
+Agent: main
+Task: 3 passos de fecho — Blending idle→walk + Flir GI teste + Curve Deform Catmull-Rom
+
+Work Log:
+1. Testar blending idle→walk (sem FBX, animações criadas manualmente)
+   - Script setup: cubo + 7 ossos humanoide + 15 keyframes idle + 29 keyframes walk
+   - PersonalObject com sourceObjectId + AnimationBoostObject + ViewObject
+   - Teste: pressionar W → log 'Anim: idle → walk (speed=3.0)'
+   - Soltar W → log 'Anim: walk → idle (speed=0.0)'
+   - Blending confirmado via logs (transições com blendTime=0.3s)
+
+2. Testar Flir GI em cena pesada (100 cubos)
+   - Sem GI: 16 FPS
+   - Com GI: 16 FPS
+   - Impacto: 0% (sem diferença mensurável)
+   - Bottleneck é rendering dos objetos (shadows), não as 2 luzes extra do GI
+   - SSGI não implementado: custo alto, ganho limitado em WebGL, impacto -30/-50% FPS
+
+3. Curve Deform com Catmull-Rom suave
+   - Substituído interpolação linear por THREE.CatmullRomCurve3
+   - Parametrização por arc-length (100+ amostras)
+   - Tangente via curve.getTangent()
+   - Teste: cilindro + path S (7 pontos) + subdivision(levels=3) ANTES do curve
+   - Resultado VLM: 'smooth and continuous — flowing curved path without sharp corners'
+   - Descoberta: ordem dos modificadores importa (subdivision antes de curve)
+
+Stage Summary:
+- Commit: 61d18d3
+- Push: sucesso (origin/main)
+- 3 passos concluídos com testes ativos
+- Honestidade: GI não tem impacto mensurável (bottleneck é rendering, não luzes)
+- Curve Deform agora suave graças a Catmull-Rom
