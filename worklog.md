@@ -252,3 +252,47 @@ Stage Summary:
   pequenos nos vértices do cubo (geometria não alinhada com esqueleto)
 - Para ver deformação óbvia, seria preciso um modelo FBX importado com
   geometria alinhada ao esqueleto
+
+---
+Task ID: P8
+Agent: main
+Task: 4 funcionalidades — Keyframes por osso + Blending idle/walk + Flir GI/Adaptive Mesh + Curve Deform
+
+Work Log:
+1. UI para criar keyframes por osso individualmente
+   - Adicionado selectedBoneId + selectBone/clearBoneSelection ao store
+   - SkeletonGizmo.onSelectBone wired ao store (click no osso do viewport seleciona)
+   - Novo BoneTransformControls: gizmo em bones (modos rig/weight/animate)
+   - Novo EditorAnimationPlayer: aplica keyframes aos bones no editor
+   - AnimationPanel: botão 'Modo Animar', lista clicável, 'Gravar Keyframe' só para osso selecionado
+   - TESTE: head bone gravado em t=0 e t=2.5 → animação reproduz e osso move-se (confirmado VLM)
+
+2. Blending entre clips baseado na velocidade
+   - Importado createAnimationController
+   - setupAnimationPlayer cria controller para PersonalObject/NpcObject
+   - AnimationBoostObject ativa player.setBoost(true, blendTime)
+   - playerSpeedRef guarda speed = hypot(mx, mz) do joystick
+   - controller.update → se estado muda, player.play(clip, { blendTime })
+
+3. Flir GI + Flir Adaptive Mesh
+   - renderSettings { flirGI, flirAdaptiveMesh } no store + setRenderSettings
+   - SceneSettings: secção 'Renderização Avançada' com toggles + aviso
+   - flirGI.js: hemisphere light + point light (aproximação bounce)
+   - flirAdaptiveMesh.js: THREE.LOD com 3 níveis (full/50%/25%)
+   - FlirGIHelper + FlirAdaptiveMeshHelper no Scene3D
+   - TESTE FPS: 19 FPS com e sem GI (cena simples, sem impacto mensurável)
+
+4. Mesh Curve Deformation
+   - 'curve' adicionado ao MODIFIER_TYPES
+   - curveDeform(geometry, pathPoints, options) no meshOperations.js
+   - SceneObject: applyModifiers aceita pathLookup, case 'curve'
+   - IconCurve + ModifierParams case 'curve' com dropdown de PathObjects
+   - TESTE: cilindro + PathObject em S → cilindro deforma seguindo o S (confirmado VLM)
+
+Stage Summary:
+- Commit: 778239d
+- Push: sucesso (origin/main)
+- 4 funcionalidades implementadas e testadas
+- Build: ✓ (2575 KiB)
+- Honestidade: GI não mostrou impacto em cena simples (precisaria cenas complexas para medir)
+- Curve Deform funciona mas é uma aproximação (interpolação linear por segmento, não Bézier suave)
