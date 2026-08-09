@@ -25,7 +25,7 @@ import * as CANNON from 'cannon-es'
 import * as THREE from 'three'
 import { findConectDefinition } from './taxonomy'
 
-const MAX_PHYSICS_OBJECTS = 200 // limite para performance em mobile
+const MAX_PHYSICS_OBJECTS = 50 // limite para performance em mobile
 
 export function createPhysicsSystem(options = {}) {
   const world = new CANNON.World({
