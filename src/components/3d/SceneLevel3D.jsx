@@ -16,7 +16,6 @@ import { Suspense, useEffect, useRef, useState, useCallback, useMemo } from 'rea
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-three/drei'
 import * as THREE from 'three'
-import { WebGPURenderer } from 'three/webgpu'
 import SceneObject from './SceneObject'
 import ConectRenderer from '../panels/ConectRenderer'
 import ColliderGizmo from './ColliderGizmo'
@@ -1084,26 +1083,28 @@ export default function SceneLevel3D() {
         dpr={[1, 2]}
         camera={{ position: [8, 6, 10], fov: 50, near: 0.1, far: 200 }}
         gl={async (props) => {
-          // Verificar suporte WebGPU
-          if (typeof navigator !== 'undefined' && navigator.gpu) {
-            try {
-              const adapter = await navigator.gpu.requestAdapter()
-              if (adapter) {
-                const renderer = new WebGPURenderer({
-                  ...props,
-                  antialias: true,
-                  alpha: false,
-                })
-                await renderer.init()
-                console.log('[SceneLevel3D] WebGPU ativo', { adapter: adapter.info })
-                return renderer
-              }
-            } catch (e) {
-              console.warn('[SceneLevel3D] WebGPU falhou:', e.message)
-            }
-          }
-          console.log('[SceneLevel3D] WebGL2 (fallback)')
-          return new THREE.WebGLRenderer({ ...props, antialias: true, alpha: false, preserveDrawingBuffer: true })
+          // ⚠️ WebGPU DESATIVADO — ver comentário no Scene3D.jsx
+          // Razão: shaders custom (flirSkyShader, MeshDepthMaterial) não são
+          // compatíveis com NodeBuilder/TSL do WebGPURenderer.
+          // Causa 12 FPS em dispositivos reais vs 30+ FPS em WebGL2.
+          const renderer = new THREE.WebGLRenderer({ ...props, antialias: true, alpha: false, preserveDrawingBuffer: true })
+          const rendererType = renderer.capabilities?.isWebGL2 ? 'WebGL2' : 'WebGL1'
+          console.log('[SceneLevel3D] ' + rendererType + ' ativo (WebGPU desativado)')
+          window._flirRendererType = rendererType
+
+          // Indicador visual temporário
+          setTimeout(() => {
+            const existing = document.getElementById('_renderer_indicator')
+            if (existing) existing.remove()
+            const el = document.createElement('div')
+            el.id = '_renderer_indicator'
+            el.style.cssText = 'position:fixed;bottom:40px;right:8px;background:rgba(0,0,0,0.7);color:#3fb950;padding:2px 8px;border-radius:4px;font-size:10px;z-index:9999;pointer-events:none;font-family:monospace'
+            el.textContent = 'Renderer: ' + rendererType
+            document.body.appendChild(el)
+            setTimeout(() => el.remove(), 5000)
+          }, 1000)
+
+          return renderer
         }}
         onPointerMissed={() => {
           if (!isGameMode) {

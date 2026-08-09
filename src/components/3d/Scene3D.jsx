@@ -16,7 +16,6 @@ import { Suspense, useEffect, useRef, useState, useCallback } from 'react'
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-three/drei'
 import * as THREE from 'three'
-import { WebGPURenderer } from 'three/webgpu'
 import SceneObject from './SceneObject'
 import SkeletonGizmo from './SkeletonGizmo'
 import { useStore } from '../../store/useStore'
@@ -436,28 +435,42 @@ export default function Scene3D() {
       dpr={[1, 2]}
       camera={{ position: [5, 4, 6], fov: 50, near: 0.1, far: 200 }}
       gl={async (props) => {
-        // Verificar suporte WebGPU
-        if (typeof navigator !== 'undefined' && navigator.gpu) {
-          try {
-            const adapter = await navigator.gpu.requestAdapter()
-            if (adapter) {
-              // WebGPU disponível — usar WebGPURenderer
-              const renderer = new WebGPURenderer({
-                ...props,
-                antialias: true,
-                alpha: false,
-              })
-              await renderer.init()
-              console.log('[Renderer] WebGPU ativo', { adapter: adapter.info })
-              return renderer
-            }
-          } catch (e) {
-            console.warn('[Renderer] WebGPU falhou:', e.message)
-          }
-        }
-        // Fallback: WebGL2 (renderer tradicional, compatível com ShaderMaterial)
-        console.log('[Renderer] WebGL2 (fallback)')
-        return new THREE.WebGLRenderer({ ...props, antialias: true, alpha: false, preserveDrawingBuffer: true })
+        // ⚠️ WebGPU DESATIVADO por defeito.
+        // Razão: o WebGPURenderer usa NodeBuilder/TSL que não é compatível com:
+        //  - flirSkyShader.js (ShaderMaterial custom em GLSL)
+        //  - MeshDepthMaterial (sombras)
+        //  - Materiais do drei (Grid, ContactShadows)
+        // Isto causa 12 FPS em dispositivos reais com WebGPU (vs 30+ FPS em WebGL2)
+        // e elementos que desaparecem (grelha, céu procedural).
+        //
+        // Para reativar WebGPU:
+        // 1. Reescrever flirSkyShader em TSL (Three Shader Language) ou NodeMaterial
+        // 2. Confirmar que drei Grid/ContactShadows são compatíveis
+        // 3. Testar em dispositivo real com WebGPU (não headless)
+        // 4. Verificar que FPS melhora ou pelo menos não piora
+        //
+        // Por agora: WebGLRenderer SEMPRE (com fallback nativo para WebGL1 se necessário)
+        const renderer = new THREE.WebGLRenderer({ ...props, antialias: true, alpha: false, preserveDrawingBuffer: true })
+
+        // Indicador do renderer ativo (para debug)
+        const rendererType = renderer.capabilities?.isWebGL2 ? 'WebGL2' : 'WebGL1'
+        console.log('[Renderer] ' + rendererType + ' ativo (WebGPU desativado)')
+        window._flirRendererType = rendererType
+
+        // Adicionar indicador visual temporário no canto do ecrã
+        setTimeout(() => {
+          const existing = document.getElementById('_renderer_indicator')
+          if (existing) existing.remove()
+          const el = document.createElement('div')
+          el.id = '_renderer_indicator'
+          el.style.cssText = 'position:fixed;bottom:40px;right:8px;background:rgba(0,0,0,0.7);color:#3fb950;padding:2px 8px;border-radius:4px;font-size:10px;z-index:9999;pointer-events:none;font-family:monospace'
+          el.textContent = 'Renderer: ' + rendererType
+          document.body.appendChild(el)
+          // Remover após 5 segundos
+          setTimeout(() => el.remove(), 5000)
+        }, 1000)
+
+        return renderer
       }}
       onPointerMissed={(e) => {
         if (e.type === 'click' || e.type === 'touchend') {
