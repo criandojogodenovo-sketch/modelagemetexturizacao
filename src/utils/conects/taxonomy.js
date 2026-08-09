@@ -78,6 +78,7 @@ export const CONECT_TAXONOMY = [
       linearDamping: 0.01,
       angularDamping: 0.01,
       fixedRotation: false,
+      sourceObjectId: null,
     },
     properties: [
       prop('mass', 'Massa', 'number', 1, { min: 0, max: 100, step: 0.1 }),
@@ -86,6 +87,7 @@ export const CONECT_TAXONOMY = [
       prop('linearDamping', 'Amortecimento linear', 'number', 0.01, { min: 0, max: 1, step: 0.01 }),
       prop('angularDamping', 'Amortecimento angular', 'number', 0.01, { min: 0, max: 1, step: 0.01 }),
       prop('fixedRotation', 'Fixar rotação', 'boolean', false),
+      prop('sourceObjectId', 'Modelo do catálogo', 'objectRef', null),
     ],
   },
   {
@@ -101,10 +103,12 @@ export const CONECT_TAXONOMY = [
       mass: 0,
       friction: 0.6,
       restitution: 0.1,
+      sourceObjectId: null,
     },
     properties: [
       prop('friction', 'Atrito', 'number', 0.6, { min: 0, max: 1, step: 0.05 }),
       prop('restitution', 'Ressalto', 'number', 0.1, { min: 0, max: 1, step: 0.05 }),
+      prop('sourceObjectId', 'Modelo do catálogo', 'objectRef', null),
     ],
   },
   {
@@ -119,10 +123,12 @@ export const CONECT_TAXONOMY = [
     defaults: {
       friction: 0.4,
       restitution: 0.2,
+      sourceObjectId: null,
     },
     properties: [
       prop('friction', 'Atrito', 'number', 0.4, { min: 0, max: 1, step: 0.05 }),
       prop('restitution', 'Ressalto', 'number', 0.2, { min: 0, max: 1, step: 0.05 }),
+      prop('sourceObjectId', 'Modelo do catálogo', 'objectRef', null),
     ],
   },
   {

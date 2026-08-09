@@ -1033,10 +1033,15 @@ export default function SceneLevel3D() {
             )
           })}
 
-          {/* Conects */}
-          {(activeScene.conects || []).map((conect) => (
-            <ConectSelectorWrapper key={conect.instanceId} conect={conect} objects={objects} isSelected={!isGameMode && conect.instanceId === selectedInstanceId} onSelect={() => selectConectInstance(conect.instanceId)} setMeshRef={(node) => setConectMeshRef(conect.instanceId, node)} isGameMode={isGameMode} />
-          ))}
+          {/* Conects — render hierárquico (respeita parentId) */}
+          <ConectHierarchy
+            conects={activeScene.conects || []}
+            objects={objects}
+            selectedInstanceId={selectedInstanceId}
+            selectConectInstance={selectConectInstance}
+            setConectMeshRef={setConectMeshRef}
+            isGameMode={isGameMode}
+          />
 
           {/* GameCamera gizmo — só no editor */}
           {!isGameMode && !(activeScene.conects || []).some((c) => c.type === 'ViewObject') && (
@@ -1064,6 +1069,70 @@ export default function SceneLevel3D() {
         </Suspense>
       </Canvas>
     </div>
+  )
+}
+
+// ===== Componente: render hierárquico de Conects (respeita parentId) =====
+// Renderiza conects raiz (sem parentId) e os seus filhos dentro de um <group>.
+// Isto faz com que mover o pai mova os filhos automaticamente (THREE.Group).
+function ConectHierarchy({ conects, objects, selectedInstanceId, selectConectInstance, setConectMeshRef, isGameMode }) {
+  // Separar conects raiz dos filhos
+  const rootConects = conects.filter(c => !c.parentId)
+  const childConects = conects.filter(c => c.parentId)
+
+  return (
+    <>
+      {rootConects.map((conect) => {
+        // Encontrar filhos deste conect
+        const children = childConects.filter(c => c.parentId === conect.instanceId)
+        const isSelected = !isGameMode && conect.instanceId === selectedInstanceId
+
+        if (children.length > 0) {
+          // Renderizar pai + filhos dentro de um <group> para hierarquia
+          return (
+            <group key={conect.instanceId} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+              {/* Pai — renderizado na origem do group (posição relativa 0) */}
+              <ConectSelectorWrapper
+                conect={{ ...conect, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }}
+                objects={objects}
+                isSelected={isSelected}
+                onSelect={() => selectConectInstance(conect.instanceId)}
+                setMeshRef={(node) => setConectMeshRef(conect.instanceId, node)}
+                isGameMode={isGameMode}
+              />
+              {/* Filhos — posições relativas ao pai */}
+              {children.map((child) => {
+                const childSelected = !isGameMode && child.instanceId === selectedInstanceId
+                return (
+                  <ConectSelectorWrapper
+                    key={child.instanceId}
+                    conect={child}
+                    objects={objects}
+                    isSelected={childSelected}
+                    onSelect={() => selectConectInstance(child.instanceId)}
+                    setMeshRef={(node) => setConectMeshRef(child.instanceId, node)}
+                    isGameMode={isGameMode}
+                  />
+                )
+              })}
+            </group>
+          )
+        }
+
+        // Sem filhos — renderizar normal
+        return (
+          <ConectSelectorWrapper
+            key={conect.instanceId}
+            conect={conect}
+            objects={objects}
+            isSelected={isSelected}
+            onSelect={() => selectConectInstance(conect.instanceId)}
+            setMeshRef={(node) => setConectMeshRef(conect.instanceId, node)}
+            isGameMode={isGameMode}
+          />
+        )
+      })}
+    </>
   )
 }
 

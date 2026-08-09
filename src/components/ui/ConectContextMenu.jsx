@@ -17,7 +17,8 @@ import { useStore } from '../../store/useStore'
 
 export default function ConectContextMenu({ conect, sceneId }) {
   const [open, setOpen] = useState(false)
-  const [subMenu, setSubMenu] = useState(null) // 'addChild' | 'connect' | 'regroup'
+  const [subMenu, setSubMenu] = useState(null) // 'addChild' | 'connect' | 'regroup' | 'viewChildren'
+  const [showReplaceList, setShowReplaceList] = useState(false)
   const menuRef = useRef(null)
 
   const setFlirScriptTarget = useStore((s) => s.setFlirScriptTarget)
@@ -32,6 +33,7 @@ export default function ConectContextMenu({ conect, sceneId }) {
   const scenes = useStore((s) => s.scenes)
   const setActiveScene = useStore((s) => s.setActiveScene)
   const toast = useStore((s) => s.toast)
+  const objects = useStore((s) => s.objects) // catálogo de objetos da modelagem
 
   useEffect(() => {
     if (!open) return
@@ -84,6 +86,22 @@ export default function ConectContextMenu({ conect, sceneId }) {
       case 'regroup':
         setSubMenu(subMenu === 'regroup' ? null : 'regroup')
         break
+      case 'viewChildren':
+        setSubMenu(subMenu === 'viewChildren' ? null : 'viewChildren')
+        break
+      case 'replaceModel':
+        setShowReplaceList(!showReplaceList)
+        break
+      case 'removeModel':
+        setOpen(false)
+        updateConect(conect.instanceId, { sourceObjectId: null })
+        toast('Modelo removido — voltou ao placeholder', 'info')
+        break
+      case 'unparent':
+        setOpen(false)
+        updateConect(conect.instanceId, { parentId: null })
+        toast('Removido do pai — agora independente', 'success')
+        break
       case 'duplicate':
         setOpen(false)
         duplicateConect(conect.instanceId)
@@ -125,7 +143,6 @@ export default function ConectContextMenu({ conect, sceneId }) {
   const moveToScene = (targetSceneId) => {
     const targetScene = scenes.find((s) => s.id === targetSceneId)
     if (!targetScene) return
-    // Remover da cena atual e adicionar à target
     useStore.setState((s) => ({
       scenes: s.scenes.map((sc) => {
         if (sc.id === sceneId) {
@@ -142,6 +159,21 @@ export default function ConectContextMenu({ conect, sceneId }) {
     setOpen(false)
   }
 
+  // Substituir o modelo do Conect por um objeto do catálogo
+  const replaceModel = (objectId) => {
+    updateConect(conect.instanceId, { sourceObjectId: objectId })
+    const obj = objects.find((o) => o.id === objectId)
+    toast(`Modelo substituído por "${obj?.name || 'objeto'}"`, 'success')
+    setSubMenu(null)
+    setOpen(false)
+  }
+
+  // Tipos de Conect que suportam sourceObjectId (podem ter modelo substituível)
+  const supportsModel = ['PersonalObject', 'NpcObject', 'RigidObject', 'StaticObject', 'StopObject', 'VisualObject'].includes(conect.type)
+
+  // Modelo atual (se tiver sourceObjectId)
+  const currentModel = conect.sourceObjectId ? objects.find((o) => o.id === conect.sourceObjectId) : null
+
   const isCharacter = conect.type === 'PersonalObject' || conect.type === 'NpcObject'
 
   // Listar outros conects na mesma cena para addChild/connect
@@ -152,7 +184,7 @@ export default function ConectContextMenu({ conect, sceneId }) {
     <div className="conect-context-wrap" ref={menuRef}>
       <button
         className="conect-context-btn"
-        onClick={(e) => { e.stopPropagation(); setOpen(!open); setSubMenu(null) }}
+        onClick={(e) => { e.stopPropagation(); setOpen(!open); setSubMenu(null); setShowReplaceList(false) }}
         title="Opções do Conect"
       >
         ⋯
@@ -170,6 +202,60 @@ export default function ConectContextMenu({ conect, sceneId }) {
           <button onClick={() => handleAction('material')}>
             🎨 Material / Propriedades
           </button>
+          {supportsModel && (
+            <button onClick={() => handleAction('viewChildren')}>
+              👁️ Ver Filhos / Modelo
+              {subMenu === 'viewChildren' ? ' ▲' : ' ▼'}
+            </button>
+          )}
+          {subMenu === 'viewChildren' && (
+            <div className="conect-context-submenu">
+              <div className="submenu-header">
+                {currentModel ? (
+                  <div>
+                    <strong>Modelo atual:</strong> {currentModel.name || currentModel.id.slice(-6)}
+                    <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                      <button className="submenu-item" style={{ flex: 1 }} onClick={(e) => { e.stopPropagation(); handleAction('replaceModel') }}>
+                        🔄 Substituir
+                      </button>
+                      <button className="submenu-item danger" style={{ flex: 1 }} onClick={(e) => { e.stopPropagation(); handleAction('removeModel') }}>
+                        🗑️ Eliminar
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="submenu-empty">A usar placeholder embutido</div>
+                    <button className="submenu-item" style={{ width: '100%', marginTop: 4 }} onClick={(e) => { e.stopPropagation(); handleAction('replaceModel') }}>
+                      🔄 Substituir por modelo do catálogo
+                    </button>
+                  </div>
+                )}
+              </div>
+              {showReplaceList && objects.length > 0 && (
+                <div className="conect-context-submenu" style={{ marginTop: 4 }}>
+                  {objects.map((o) => (
+                    <button
+                      key={o.id}
+                      className="submenu-item"
+                      onClick={(e) => { e.stopPropagation(); replaceModel(o.id) }}
+                      title={o.type}
+                    >
+                      {o.name || o.id.slice(-6)} ({o.type})
+                    </button>
+                  ))}
+                </div>
+              )}
+              {showReplaceList && objects.length === 0 && (
+                <div className="submenu-empty">Sem objetos no catálogo. Cria um na Modelagem primeiro.</div>
+              )}
+            </div>
+          )}
+          {conect.parentId && (
+            <button onClick={() => handleAction('unparent')}>
+              🔓 Remover do pai
+            </button>
+          )}
           <button onClick={() => handleAction('child')}>
             ➕ Criar Conect filho
           </button>

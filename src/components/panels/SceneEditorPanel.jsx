@@ -369,6 +369,7 @@ function ConectsList({ scene }) {
   const selectConect = useStore((s) => s.selectConect)
   const removeConectFromScene = useStore((s) => s.removeConectFromScene)
   const duplicateConect = useStore((s) => s.duplicateConect)
+  const updateConect = useStore((s) => s.updateConect)
   const setFlirScriptTarget = useStore((s) => s.setFlirScriptTarget)
   const conects = scene.conects || []
 
@@ -381,52 +382,132 @@ function ConectsList({ scene }) {
         </div>
       ) : (
         <div className="outliner">
-          {conects.map((conect) => {
-            const isSelected = conect.instanceId === selectedConectId
-            return (
-              <div
-                key={conect.instanceId}
-                className={`outliner-item ${isSelected ? 'selected' : ''}`}
-                onClick={() => selectConect(conect.instanceId)}
-              >
-                <span className="icon-dot" style={{ background: isSelected ? 'var(--accent)' : 'var(--text-muted)' }} />
-                <span
-                  style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  title={`${conect.type} — ${conect.name}`}
-                >
-                  {conect.name}
-                  {conect.flirScript && <span className="tag accent" style={{ marginLeft: 4 }}>script</span>}
-                </span>
-                <div className="actions">
-                  <ConectContextMenu conect={conect} sceneId={scene.id} />
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setFlirScriptTarget(scene.id, conect.instanceId) }}
-                    title="FlirScript"
-                    style={{ padding: '2px 4px', fontSize: 10 }}
-                  >
-                    🧩
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); duplicateConect(conect.instanceId) }}
-                    title="Duplicar"
-                    style={{ padding: '2px 4px' }}
-                  >
-                    <IconDuplicate width={11} height={11} />
-                  </button>
-                  <button
-                    className="danger"
-                    onClick={(e) => { e.stopPropagation(); removeConectFromScene(conect.instanceId) }}
-                    title="Apagar"
-                    style={{ padding: '2px 4px' }}
-                  >
-                    <IconTrash width={11} height={11} />
-                  </button>
-                </div>
-              </div>
-            )
-          })}
+          {/* Render hierárquico: raiz primeiro, depois filhos indentados */}
+          {conects.filter(c => !c.parentId).map((conect) => (
+            <ConectOutlinerItem
+              key={conect.instanceId}
+              conect={conect}
+              conects={conects}
+              selectedConectId={selectedConectId}
+              selectConect={selectConect}
+              sceneId={scene.id}
+              setFlirScriptTarget={setFlirScriptTarget}
+              duplicateConect={duplicateConect}
+              removeConectFromScene={removeConectFromScene}
+              updateConect={updateConect}
+              depth={0}
+            />
+          ))}
         </div>
       )}
     </div>
+  )
+}
+
+// ===== Componente: item do outliner com suporte a hierarquia e drag-and-drop =====
+function ConectOutlinerItem({ conect, conects, selectedConectId, selectConect, sceneId, setFlirScriptTarget, duplicateConect, removeConectFromScene, updateConect, depth }) {
+  const isSelected = conect.instanceId === selectedConectId
+  const children = conects.filter(c => c.parentId === conect.instanceId)
+  const [expanded, setExpanded] = useState(true)
+
+  // Drag-and-drop para reassociação (reparent)
+  const handleDragStart = (e) => {
+    e.dataTransfer.setData('text/conectInstanceId', conect.instanceId)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  const handleDragOver = (e) => {
+    // Permitir drop se o tipo estiver disponível
+    if (!e.dataTransfer.types.includes('text/conectinstanceid')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }
+  const handleDrop = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const childId = e.dataTransfer.getData('text/conectInstanceId')
+    if (!childId || childId === conect.instanceId) return
+    // Evitar ciclos: não permitir tornar-se filho de um descendente
+    let parent = conect
+    while (parent) {
+      if (parent.instanceId === childId) return
+      parent = conects.find(c => c.instanceId === parent.parentId)
+    }
+    updateConect(childId, { parentId: conect.instanceId })
+  }
+
+  return (
+    <>
+      <div
+        className={`outliner-item ${isSelected ? 'selected' : ''}`}
+        onClick={() => selectConect(conect.instanceId)}
+        draggable
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        style={{ marginLeft: depth * 16 }}
+      >
+        {children.length > 0 ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded) }}
+            style={{ padding: '0 2px', fontSize: 10, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+            title={expanded ? 'Colapsar' : 'Expandir'}
+          >
+            {expanded ? '▼' : '▶'}
+          </button>
+        ) : (
+          <span style={{ width: 16, display: 'inline-block' }} />
+        )}
+        <span className="icon-dot" style={{ background: isSelected ? 'var(--accent)' : 'var(--text-muted)' }} />
+        <span
+          style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          title={`${conect.type} — ${conect.name}`}
+        >
+          {conect.name}
+          {conect.parentId && <span style={{ color: 'var(--text-muted)', fontSize: 9, marginLeft: 4 }}>↳ filho</span>}
+          {conect.flirScript && <span className="tag accent" style={{ marginLeft: 4 }}>script</span>}
+          {conect.sourceObjectId && <span className="tag" style={{ marginLeft: 4, background: 'var(--accent-soft)' }}>modelo</span>}
+        </span>
+        <div className="actions">
+          <ConectContextMenu conect={conect} sceneId={sceneId} />
+          <button
+            onClick={(e) => { e.stopPropagation(); setFlirScriptTarget(sceneId, conect.instanceId) }}
+            title="FlirScript"
+            style={{ padding: '2px 4px', fontSize: 10 }}
+          >
+            🧩
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); duplicateConect(conect.instanceId) }}
+            title="Duplicar"
+            style={{ padding: '2px 4px' }}
+          >
+            <IconDuplicate width={11} height={11} />
+          </button>
+          <button
+            className="danger"
+            onClick={(e) => { e.stopPropagation(); removeConectFromScene(conect.instanceId) }}
+            title="Apagar"
+            style={{ padding: '2px 4px' }}
+          >
+            <IconTrash width={11} height={11} />
+          </button>
+        </div>
+      </div>
+      {expanded && children.map((child) => (
+        <ConectOutlinerItem
+          key={child.instanceId}
+          conect={child}
+          conects={conects}
+          selectedConectId={selectedConectId}
+          selectConect={selectConect}
+          sceneId={sceneId}
+          setFlirScriptTarget={setFlirScriptTarget}
+          duplicateConect={duplicateConect}
+          removeConectFromScene={removeConectFromScene}
+          updateConect={updateConect}
+          depth={depth + 1}
+        />
+      ))}
+    </>
   )
 }
