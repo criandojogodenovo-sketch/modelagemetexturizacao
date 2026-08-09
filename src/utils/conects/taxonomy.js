@@ -757,6 +757,26 @@ export const CONECT_TAXONOMY = [
     ],
   },
 
+  // ============ SISTEMA: ANIMATION BOOST ============
+  {
+    type: 'AnimationBoostObject',
+    label: 'Animation Boost',
+    category: 'gameplay',
+    icon: '⚡',
+    description: 'Melhora a qualidade/suavidade da animação (interpolação + blending)',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      blendTime: 0.3,
+      interpolationQuality: 'high',
+    },
+    properties: [
+      prop('blendTime', 'Tempo de blending (s)', 'number', 0.3, { min: 0.05, max: 2, step: 0.05 }),
+      prop('interpolationQuality', 'Qualidade interpolação', 'select', 'high', { options: ['low', 'medium', 'high'] }),
+    ],
+  },
+
   // ============ SISTEMA: GAME STATE ============
   {
     type: 'GameStateObject',

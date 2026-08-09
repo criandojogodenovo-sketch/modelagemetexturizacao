@@ -46,9 +46,23 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
   let loop = false
   let speed = 1
   let onComplete = null
+  
+  // AnimationBoost: blending entre clips
+  let prevClip = null
+  let prevTime = 0
+  let blendTime = 0
+  let blendDuration = 0
+  let boostEnabled = false
 
   function play(clipName, options = {}) {
     if (!animations[clipName] || animations[clipName].length === 0) return false
+    // AnimationBoost: guardar clip anterior para blending
+    if (boostEnabled && currentClip && currentClip !== clipName) {
+      prevClip = currentClip
+      prevTime = currentTime
+      blendTime = 0
+      blendDuration = options.blendTime ?? 0.3
+    }
     currentClip = clipName
     currentTime = 0
     playing = true
@@ -56,6 +70,11 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
     speed = options.speed ?? 1
     onComplete = options.onComplete
     return true
+  }
+  
+  function setBoost(enabled, blendDur = 0.3) {
+    boostEnabled = enabled
+    blendDuration = blendDur
   }
 
   function stop() {
@@ -91,6 +110,15 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
     const keyframes = animations[currentClip]
     if (!keyframes || keyframes.length === 0) return
 
+    // AnimationBoost: avançar blending
+    if (prevClip && blendTime < blendDuration) {
+      blendTime += deltaTime
+      prevTime += deltaTime * speed
+      if (blendTime >= blendDuration) {
+        prevClip = null // blending completo
+      }
+    }
+
     currentTime += deltaTime * speed
 
     // Calcular duração total do clip
@@ -125,15 +153,55 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
 
     // Aplicar aos bones (apenas copiar valores — sem recalcular)
     if (bones) {
-      applyPose(pose, bones)
+      // AnimationBoost: se estamos em blending, interpolar entre prevPose e pose
+      if (prevClip && blendTime < blendDuration) {
+        const prevKeyframes = animations[prevClip]
+        if (prevKeyframes && prevKeyframes.length > 0) {
+          const prevPose = getCachedPose(prevClip, prevKeyframes, prevTime)
+          const blendWeight = 1 - (blendTime / blendDuration)
+          // Interpolar entre prevPose e pose
+          for (const [boneId, currentTransform] of pose) {
+            const prevTransform = prevPose.get(boneId)
+            if (prevTransform) {
+              const bone = bones.find((b) => b.id === boneId || b.name === boneId)
+              if (bone) {
+                bone.position.set(
+                  prevTransform.position[0] * blendWeight + currentTransform.position[0] * (1 - blendWeight),
+                  prevTransform.position[1] * blendWeight + currentTransform.position[1] * (1 - blendWeight),
+                  prevTransform.position[2] * blendWeight + currentTransform.position[2] * (1 - blendWeight),
+                )
+                bone.rotation.set(
+                  prevTransform.rotation[0] * blendWeight + currentTransform.rotation[0] * (1 - blendWeight),
+                  prevTransform.rotation[1] * blendWeight + currentTransform.rotation[1] * (1 - blendWeight),
+                  prevTransform.rotation[2] * blendWeight + currentTransform.rotation[2] * (1 - blendWeight),
+                )
+                bone.scale.set(
+                  prevTransform.scale[0] * blendWeight + currentTransform.scale[0] * (1 - blendWeight),
+                  prevTransform.scale[1] * blendWeight + currentTransform.scale[1] * (1 - blendWeight),
+                  prevTransform.scale[2] * blendWeight + currentTransform.scale[2] * (1 - blendWeight),
+                )
+              }
+            } else {
+              // Osso não existe no clip anterior — usar apenas o atual
+              const bone = bones.find((b) => b.id === boneId || b.name === boneId)
+              if (bone) {
+                bone.position.set(...currentTransform.position)
+                bone.rotation.set(...currentTransform.rotation)
+                bone.scale.set(...currentTransform.scale)
+              }
+            }
+          }
+        }
+      } else {
+        // Sem blending — aplicar diretamente
+        applyPose(pose, bones)
+      }
     }
   }
 
   return {
-    play, stop, pause, resume, update,
+    play, stop, pause, resume, update, setBoost,
     getCurrentClip, isPlaying, getCurrentTime,
   }
 }
 
-// Exportar para que SceneLevel3D chame no início de cada frame
-export { clearPoseCache }

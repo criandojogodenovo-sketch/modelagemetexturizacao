@@ -17,6 +17,7 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-three/drei'
 import * as THREE from 'three'
 import SceneObject from './SceneObject'
+import SkeletonGizmo from './SkeletonGizmo'
 import { useStore } from '../../store/useStore'
 
 // ----- Componente interno: aplica o fundo da cena -----
@@ -246,13 +247,18 @@ export default function Scene3D() {
 
         {/* Objetos da cena */}
         {objects.map((obj) => (
-          <SceneObject
-            key={obj.id}
-            ref={(node) => setMeshRef(obj.id, node)}
-            obj={obj}
-            isSelected={obj.id === selectedId}
-            onSelect={selectObject}
-          />
+          <group key={obj.id}>
+            <SceneObject
+              ref={(node) => setMeshRef(obj.id, node)}
+              obj={obj}
+              isSelected={obj.id === selectedId}
+              onSelect={selectObject}
+            />
+            {/* SkeletonGizmo — visualização do esqueleto sobreposta ao modelo */}
+            {obj.id === selectedId && obj.skeleton && obj.skeleton.bones?.length > 0 && (
+              <SkeletonGizmo skeleton={obj.skeleton} selectedBoneId={null} onSelectBone={() => {}} />
+            )}
+          </group>
         ))}
 
         {/* Gizmo de transformação no objeto selecionado (só em modo object) */}
