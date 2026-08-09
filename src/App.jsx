@@ -20,6 +20,7 @@
 import { useEffect } from 'react'
 import TopBar from './components/panels/TopBar'
 import LeftPanel from './components/panels/LeftPanel'
+import BuildersPanel from './components/panels/BuildersPanel'
 import RightPanel from './components/panels/RightPanel'
 import Viewport from './components/panels/Viewport'
 import Timeline from './components/panels/Timeline'
@@ -170,6 +171,8 @@ export default function App() {
         <div className="app-body">
           {appMode === 'scene' ? (
             <SceneEditorPanel onClose={ui.leftDrawerOpen ? closeDrawers : null} />
+          ) : appMode === 'builders' ? (
+            <BuildersPanel open={ui.leftDrawerOpen} onClose={closeDrawers} />
           ) : (
             <LeftPanel open={ui.leftDrawerOpen} onClose={closeDrawers} />
           )}

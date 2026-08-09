@@ -164,11 +164,11 @@ export default function ConectPropertiesPanel({ conectId }) {
         </div>
       </div>
 
-      {/* Seletor de cena de destino (NavigatorObject) */}
-      {conect.type === 'NavigatorObject' && (
+      {/* Seletor de cena de destino (NavigatorObject + ReferenceObject) */}
+      {(conect.type === 'NavigatorObject' || conect.type === 'ReferenceObject') && (
         <div className="panel-section">
           <div className="prop-row">
-            <label>Cena de destino</label>
+            <label>{conect.type === 'ReferenceObject' ? 'Cena referenciada' : 'Cena de destino'}</label>
             <select
               value={conect.targetSceneId || ''}
               onChange={(e) => setProp('targetSceneId', e.target.value || null)}

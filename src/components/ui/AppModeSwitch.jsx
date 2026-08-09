@@ -36,6 +36,15 @@ export default function AppModeSwitch() {
       >
         UI
       </button>
+      <button
+        role="tab"
+        aria-selected={appMode === 'builders'}
+        className={appMode === 'builders' ? 'active' : ''}
+        onClick={() => setAppMode('builders')}
+        title="Construtores procedurais (edifícios, veículos)"
+      >
+        Construtores
+      </button>
     </div>
   )
 }

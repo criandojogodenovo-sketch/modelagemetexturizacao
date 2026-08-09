@@ -1000,6 +1000,22 @@ export const CONECT_TAXONOMY = [
       prop('children', 'Filhos', 'text', ''),
     ],
   },
+  {
+    type: 'ReferenceObject',
+    label: 'Reference Object (Referência)',
+    category: 'organization',
+    icon: '🔗',
+    description: 'Mostra o conteúdo de outra cena sem duplicar dados. Editar o original atualiza aqui.',
+    hasPhysics: false,
+    hasVisual: true,
+    flirScriptable: false,
+    defaults: {
+      targetSceneId: null,  // cena referenciada
+    },
+    properties: [
+      prop('targetSceneId', 'Cena referenciada', 'text', ''),
+    ],
+  },
 ]
 
 // Helpers
