@@ -116,14 +116,17 @@ const PlaceholderMesh = forwardRef(function PlaceholderMesh({ conect }, ref) {
   else if (conect.type === 'WeaponObject') color = '#8957e5'
   else if (conect.type === 'ItemObject') color = '#3fb950'
   var geometry
+  var castShadow = true
   if (conect.type === 'PersonalObject') {
     geometry = <capsuleGeometry args={[0.4, 1, 8, 16]} />
   } else if (conect.type === 'WeaponObject') {
-    // Arma: caixa alongada
     geometry = <boxGeometry args={[0.15, 0.2, 0.8]} />
   } else if (conect.type === 'ItemObject') {
-    // Item: esfera pequena
     geometry = <sphereGeometry args={[0.3, 16, 12]} />
+  } else if (conect.type === 'NpcObject') {
+    // OTIMIZAÇÃO: NPCs usam geometria mais simples e não projetam sombra
+    geometry = <capsuleGeometry args={[0.3, 1.2, 4, 8]} />
+    castShadow = false
   } else {
     geometry = <boxGeometry args={[1, 1, 1]} />
   }
@@ -134,7 +137,7 @@ const PlaceholderMesh = forwardRef(function PlaceholderMesh({ conect }, ref) {
       rotation={conect.rotation}
       scale={conect.scale}
       visible={conect.visible !== false}
-      castShadow
+      castShadow={castShadow}
       receiveShadow
       userData={{ conectInstanceId: conect.instanceId }}
     >

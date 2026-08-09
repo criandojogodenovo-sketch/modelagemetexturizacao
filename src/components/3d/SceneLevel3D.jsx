@@ -662,17 +662,43 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       }
     }
 
-    // FlirCode onTick
+    // OTIMIZAÇÃO: Frustum culling para animações e IA
+    // Calcular frustum uma vez por frame
+    const frustum = new THREE.Frustum()
+    frustum.setFromProjectionMatrix(
+      new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+    )
+    const camPos = camera.position
+    const CULL_DISTANCE = 80 // NPCs mais longe que isto não atualizam
+
+    // FlirCode onTick — sempre atualiza (scripts são leves)
     for (const rt of runtimesRef.current.values()) {
       rt.update(delta)
       rt.triggerEvent('tick', { deltaTime: delta })
     }
 
-    // Animation players
-    for (const player of animPlayersRef.current.values()) player.update(delta)
+    // Animation players — cull: só atualiza se o mesh estiver no frustum ou perto
+    for (const [id, player] of animPlayersRef.current) {
+      const mesh = meshRefs.current.get(id) || conectMeshRefs.current.get(id)
+      if (!mesh) { player.update(delta); continue }
+      // Verificar distância à câmara
+      const dist = mesh.position.distanceTo(camPos)
+      if (dist < CULL_DISTANCE) {
+        player.update(delta)
+      }
+      // NPCs muito longe: não atualizar animação (congelar num frame)
+    }
 
-    // NPC AI
-    for (const ai of npcAIsRef.current.values()) ai.update(delta)
+    // NPC AI — cull: só atualiza IA para NPCs no frustum ou perto
+    for (const [id, ai] of npcAIsRef.current) {
+      const mesh = meshRefs.current.get(id) || conectMeshRefs.current.get(id)
+      if (!mesh) { ai.update(delta); continue }
+      const dist = mesh.position.distanceTo(camPos)
+      if (dist < CULL_DISTANCE) {
+        ai.update(delta)
+      }
+      // NPCs muito longe: não atualizar IA (ficam parados)
+    }
 
     // Timers
     for (const [id, state] of timerStatesRef.current) {
@@ -887,12 +913,12 @@ export default function SceneLevel3D() {
             color={lights.directional.color}
             position={lights.directional.position}
             castShadow
-            shadow-mapSize-width={2048}
-            shadow-mapSize-height={2048}
-            shadow-camera-left={-20}
-            shadow-camera-right={20}
-            shadow-camera-top={20}
-            shadow-camera-bottom={-20}
+            shadow-mapSize-width={1024}
+            shadow-mapSize-height={1024}
+            shadow-camera-left={-30}
+            shadow-camera-right={30}
+            shadow-camera-top={30}
+            shadow-camera-bottom={-30}
           />
           <hemisphereLight intensity={0.3} groundColor="#1a1a2e" color="#ffffff" />
 
