@@ -199,3 +199,56 @@ Stage Summary:
 - P2.5: 5 bugs FlirCode corrigidos, todas as funções confirmadas
 - P3: syntax highlighting implementado com 7 cores
 - Build production OK
+
+---
+Task ID: P7
+Agent: main
+Task: Skinning real + Weight painting visual + Animação de ossos no runtime
+
+Work Log:
+- Lido o store Zustand, SceneObject, Scene3D, WeightPaintPanel, AnimationPanel,
+  ConectRenderer, SceneLevel3D, animationPlayer, sharedAnimationCache
+- Identificados 4 problemas críticos:
+  1. selectedId não era persistido no partialize
+  2. getBones no SceneLevel3D retornava null (animacoes nunca aplicadas aos bones)
+  3. PersonalObject usava PlaceholderMesh (cápsula) em vez de SceneObject
+  4. Weight painting não tinha visualização de mapa de calor no viewport
+- Implementadas correções:
+  - useStore.js: adicionado selectedId ao partialize, version bumpada para 4
+  - SceneLevel3D.jsx: getBones extrai THREE.Bone[] do SkinnedMesh; setupAnimationPlayer
+    usa inst.objectId (catálogo) em vez de inst.animations
+  - sharedAnimationCache.js + animationPlayer.js: applyPose procura bones por
+    userData.boneId (compatível com THREE.Bone)
+  - ConectRenderer.jsx: PersonalObject/NpcObject com sourceObjectId usam SceneObject
+  - taxonomy.js: adicionado sourceObjectId às defaults do PersonalObject e NpcObject
+  - SceneObject.jsx: adicionado weightMaterial (MeshBasicMaterial com vertexColors)
+    e useFrame que calcula vertex colors baseado em skinWeights
+  - WeightPaintPanel.jsx: corrigido bug em auto-peso (gen() retornava array,
+    não geometria)
+  - ConectPropertiesPanel.jsx: sourceObjectId usa o.objectId (catálogo) em vez
+    de o.instanceId
+
+Teste TPS completo com agent-browser:
+1. Criar cubo ✓
+2. Adicionar esqueleto humanoide (19 ossos) ✓
+3. Auto-peso (24 vértices com pesos) ✓
+4. Mapa de calor visível (azul→vermelho) ✓
+5. Adicionar keyframes para todos os ossos no tempo 0 ✓
+6. Adicionar keyframe para osso spine no tempo 5 ✓
+7. Criar PersonalObject com sourceObjectId apontando para o cubo ✓
+8. Executar jogo ✓
+9. Confirmar SkinnedMesh ativo (meshType=SkinnedMesh) ✓
+10. Confirmar animationPlayer a correr (clip=idle, time a avançar) ✓
+11. Confirmar applyPose a modificar bones (spinePos: 0→0.07→...→1.96→0) ✓
+
+Stage Summary:
+- Commit: 1bc249f
+- Push: sucesso (origin/main)
+- Skinning real FUNCIONA: SkinnedMesh renderiza, bones são atualizados,
+  applyPose aplica transformações corretamente
+- Mapa de calor FUNCIONA: vertex colors mostram influência do osso ativo
+- Animação FUNCIONA: keyframes interpolados, bones movem-se ao longo do tempo
+- LIMITAÇÃO: deformação visível do cubo é subtil porque o osso spine tem pesos
+  pequenos nos vértices do cubo (geometria não alinhada com esqueleto)
+- Para ver deformação óbvia, seria preciso um modelo FBX importado com
+  geometria alinhada ao esqueleto
