@@ -488,9 +488,12 @@ export function findClosestFace(geometry, raycaster, mesh) {
  *  1. Calcula o bounding box da geometria original
  *  2. Para cada vértice, mapeia a sua posição X (ao longo do eixo principal)
  *     para um parâmetro t ∈ [0, 1] ao longo da curva
- *  3. Obtém a posição na curva correspondente a t (com interpolação)
+ *  3. Obtém a posição na curva correspondente a t usando Catmull-Rom (curva suave)
  *  4. Translada o vértice para essa posição, mantendo Y/Z relativos
  *  5. Aplica rotação para alinhar com a tangente da curva
+ *
+ * Usa THREE.CatmullRomCurve3 para interpolação suave (passa por todos os pontos
+ * sem angulosidades), ao contrário da interpolação linear anterior.
  *
  * @param {THREE.BufferGeometry} geometry - geometria a deformar
  * @param {Array} pathPoints - array de [x,y,z] pontos da curva
@@ -515,36 +518,48 @@ export function curveDeform(geometry, pathPoints, options = {}) {
   // Normalizar pathPoints para THREE.Vector3
   const points = pathPoints.map(p => new THREE.Vector3(p[0], p[1], p[2]))
 
-  // Calcular comprimento total da curva
+  // Criar curva Catmull-Rom (suave — passa por todos os pontos sem angulosidades)
+  // Catmull-Rom precisa de pelo menos 2 pontos; com 2 pontos funciona como linear
+  // (mas não há nada a suavizar). Com 3+ pontos gera uma curva suave.
+  const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.5)
+
+  // Pré-calcular pontos amostrados ao longo da curva para obter comprimento
+  // e mapeamento t → distância
+  const sampleCount = Math.max(100, points.length * 20)
+  const samples = []
   let totalLength = 0
-  const segmentLengths = []
-  for (let i = 0; i < points.length - 1; i++) {
-    const len = points[i].distanceTo(points[i + 1])
-    segmentLengths.push(len)
-    totalLength += len
+  let prevPoint = null
+  for (let i = 0; i <= sampleCount; i++) {
+    const t = i / sampleCount
+    const pt = curve.getPoint(t)
+    if (prevPoint) {
+      totalLength += pt.distanceTo(prevPoint)
+    }
+    samples.push({ t, point: pt, dist: totalLength })
+    prevPoint = pt
   }
   if (totalLength === 0) return geometry
 
   // Função para obter ponto e tangente na curva em t ∈ [0, 1]
+  // Usa amostragem por distância (parametrização por arc-length)
   function getPointOnCurve(t) {
-    t = Math.max(0, Math.min(1, t))
+    t = Math.max(0, Math.min(1, t * stretch))
     const targetDist = t * totalLength
-    let accumDist = 0
-    for (let i = 0; i < segmentLengths.length; i++) {
-      if (accumDist + segmentLengths[i] >= targetDist) {
-        const localT = (targetDist - accumDist) / segmentLengths[i]
-        const p1 = points[i]
-        const p2 = points[i + 1]
-        const point = new THREE.Vector3().lerpVectors(p1, p2, localT)
-        const tangent = new THREE.Vector3().subVectors(p2, p1).normalize()
-        return { point, tangent }
-      }
-      accumDist += segmentLengths[i]
+    // Busca binária nos samples
+    let lo = 0, hi = samples.length - 1
+    while (lo < hi - 1) {
+      const mid = (lo + hi) >> 1
+      if (samples[mid].dist <= targetDist) lo = mid
+      else hi = mid
     }
-    // Fallback: último ponto
-    const lastIdx = points.length - 1
-    const tangent = new THREE.Vector3().subVectors(points[lastIdx], points[lastIdx - 1]).normalize()
-    return { point: points[lastIdx].clone(), tangent }
+    const s1 = samples[lo]
+    const s2 = samples[hi]
+    const segLen = s2.dist - s1.dist || 1
+    const localT = (targetDist - s1.dist) / segLen
+    const point = new THREE.Vector3().lerpVectors(s1.point, s2.point, localT)
+    // Tangente via derivative da curva Catmull-Rom
+    const tangent = curve.getTangent(t).normalize()
+    return { point, tangent }
   }
 
   // Para cada vértice, deformar
