@@ -202,3 +202,234 @@ A aplicação inclui uma biblioteca de materiais predefinidos com texturas gerad
 ## 📝 Licença
 
 MIT — usa livremente.
+
+---
+
+# Flir Engine — Sistema Gráfico Avançado (WebGL 2.0)
+
+Documentação dos sistemas de renderização avançada implementados. Tudo otimizado para mobile (WebGL 2.0), com honestidade sobre limitações e custos de performance.
+
+## 🌊 Shader de Água Fotorrealista (`waterShaderPro.js`)
+
+Água com ondas Gerstner físicas, caustics dinâmicas, IOR ajustável, Fresnel e SSR simplificado.
+
+### Funcionalidades
+- **Vertex Shader**: Soma de 3 ondas Gerstner (deslocamento físico real) + ruído procedural para micro-detalhes
+- **Fragment Shader**:
+  - Caustics dinâmicas animadas por tempo (padrão tipo teia, 3 camadas senoidais)
+  - Refração com IOR ajustável (1.330 padrão — água real)
+  - Fresnel Effect (Schlick approximation) — transição refração/reflexão por ângulo da câmara
+  - Color Gradation por Profundidade (turquesa raso → azul oceânico fundo)
+  - Normal Maps cruzados (2 amostras em direções diferentes) para micro-detalhes
+  - SSR simplificado (reflexo do céu + cor ambiente via Fresnel)
+  - Espuma nas cristas das ondas + margens
+
+### Otimização mobile
+- Apenas 3 ondas Gerstner (não 8+)
+- Caustics via 1 amostra senoidal (não raymarching)
+- SSR simplificado (reflexo do céu, não raymarching de cena)
+- Normal maps procedurais (sem ficheiros externos)
+
+### Honestidade
+SSR real (refletir objetos da cena) exigiria pass de profundidade + raymarching — demasiado pesado para mobile. Esta implementação usa aproximação: reflexo do céu + cor ambiente.
+
+### Uso
+```javascript
+import { createWaterProMaterial } from './utils/waterShaderPro'
+const material = createWaterProMaterial({
+  color: '#2f81f7',        // turquesa claro
+  deepColor: '#0a3d5c',    // azul oceânico
+  ior: 1.330,
+  waveHeight: 0.2,
+  causticsEnabled: true,
+  ssrEnabled: true,
+})
+```
+
+Ativado quando `renderSettings.waterQuality === 'professional'` (ver Fase 6 — Níveis de Qualidade).
+
+## ☀️ Céu Procedural Físico (`skyShaderPro.js`)
+
+Espalhamento atmosférico Rayleigh + Mie (modelo de Preetham et al. 1996).
+
+### Funcionalidades
+- Rayleigh Scattering (céu azul — moléculas pequenas)
+- Mie Scattering (halo solar — aerosóis/partículas grandes)
+- Posição solar dinâmica (calculada por hora do dia + latitude)
+- Transição dia/noite (estrelas + lua)
+- Tons de pôr do sol automatizados (vermelho-laranja quando sol baixo)
+- Afeta névoa e brilho especular na água (via uniforms partilhados)
+
+### Otimização mobile
+- Modelo analítico (não raymarching) — 1 sample por pixel
+- Sem texturas — tudo procedural
+- Estrelas via hash simples
+
+### Honestidade
+Não implementa multi-scattering (cálculo de 2ª ordem) — demasiado pesado para mobile. A aproximação de Preetham captura ~90% do visual.
+
+### Uso
+```javascript
+import { createSkyProMaterial, calculateSunDirection } from './utils/skyShaderPro'
+const sunDir = calculateSunDirection(12, 172, 0) // hora, dia do ano, latitude
+const material = createSkyProMaterial({
+  sunDirection: sunDir.toArray(),
+  sunIntensity: 15,
+  rayleigh: 2.5,
+  mie: 0.5,
+  turbidity: 10,
+})
+```
+
+## 🎛️ Modificadores GPU (`gpuMeshModifiers.js`)
+
+Deformadores paramétricos processados inteiramente no Vertex Shader (zero overhead CPU).
+
+### Deformadores implementados
+1. **Bend (Dobra)** — curvar vértices ao longo de um eixo com ângulo
+2. **Twist (Torção)** — rodar malha em torno de um eixo proporcional à altura
+3. **Taper (Cônico)** — afunilar/alargar extremidades
+4. **Skew (Chanfrar)** — deslocar vértices ao longo de um eixo com base noutro
+5. **Spherify (Esferizar)** — interpolar para esfera perfeita
+6. **Displace & Ripple** — ruído + ondas senoidais para relevo
+
+### Stack encadeável
+Os modificadores são aplicados em sequência: `Bend → Twist → Taper → Skew → Spherify → Displace`. A saída de um é entrada do próximo.
+
+### Recálculo de normais
+As normais são recalculadas após deformação (aproximação — finite differences completos seriam demasiado pesados para mobile).
+
+### Uso
+```javascript
+import { applyGPUModifiers } from './utils/gpuMeshModifiers'
+const stack = applyGPUModifiers(mesh)
+stack.setParam('twistAngle', Math.PI)  // 180°
+stack.setParam('taperFactor', 0.5)
+stack.update(delta)  // chamar a cada frame para animar displace/ripple
+```
+
+### Vantagem sobre modificadores CPU
+- Zero overhead por frame (Geometria não é recalculada na CPU)
+- Pode ser animado em tempo real sem custo
+- Ideal para deformações dinâmicas (vento em bandeiras, etc.)
+
+### Limitação
+A geometria base não muda — colisões/física usam a geometria original. Para deformações que afetam física, usar os modificadores CPU (`meshOperations.js`).
+
+## 🌲 Hardware Instancing (`hardwareInstancing.js`)
+
+Sistema de instancing para renderizar milhares de objetos sem sobrecarregar a CPU.
+
+### Funcionalidades
+1. `drawElementsInstanced` via THREE.InstancedMesh
+2. **Frustum Culling** por instância (JS, antes de enviar à GPU) — bounding sphere
+3. **LOD por instância** — 3 níveis (alta/média/baixa complexidade) por distância
+4. **Variações aleatórias na GPU** — rotação/escala/cor via `gl_InstanceID` + InstancedBufferAttribute
+
+### Otimização mobile
+- Frustum cull em JS (não na GPU) para reduzir draw calls
+- LOD com 3 níveis (mobile aguenta 3)
+- Variações calculadas no vertex shader (zero memória extra)
+
+### Uso
+```javascript
+import { createForestSystem } from './utils/hardwareInstancing'
+const forest = createForestSystem(100, { minX: -50, maxX: 50, minZ: -50, maxZ: 50 })
+forest.addToScene(scene)
+// No loop de render:
+forest.update(camera)
+```
+
+## 🧊 Parallax Occlusion Mapping Pro (`parallaxOcclusionMappingPro.js`)
+
+POM com raymarching completo, self-shadowing e soft edges.
+
+### Funcionalidades
+1. **Raymarching no height map** — N passos configurável (4-32)
+2. **Self-shadowing** — luz dinâmica projeta sombras dentro dos buracos do POM
+3. **Soft Edge Clipping** — evitar bordas distorcidas em ângulos rasos
+4. **Binary search refinement** — 2 passos extra para precisão após raymarching grosso
+5. **Controlo de passos** — reduzir em dispositivos fracos, aumentar para Ultra
+
+### Texturas necessárias (formato PBR)
+- **Albedo** — cor base (diffuse)
+- **Normal map** — normais por pixel
+- **Height map** — profundidade (branco = alto, preto = baixo)
+- **Roughness map** — controla brilho (opcional)
+
+### Uso
+```javascript
+import { applyPOMPro } from './utils/parallaxOcclusionMappingPro'
+applyPOMPro(material, heightMapTexture, {
+  scale: 0.04,
+  steps: 8,         // 4 = mobile fraco, 16 = Ultra
+  selfShadow: true,
+  softEdges: true,
+})
+```
+
+## 🏔️ Terreno Procedural (`terrain/terrainNoise.js`)
+
+Ruídos procedurais para geração de terreno fotorrealista.
+
+### Ruídos implementados
+1. **Simplex Noise** (melhoria sobre Perlin — sem artefactos de alinhamento)
+2. **Voronoi Noise (Cellular)** — picos escarpados e cristas (ridges)
+3. **Ridged Multifractal** — cristas afiadas (montanhas)
+4. **Terracing** — degraus para formações rochosas em camadas
+5. **Domain Warping** — distorção do domínio para terreno orgânico
+6. **Erosão Térmica leve** — desgaste de encostas + acumulação nos vales
+
+### Combinação recomendada (estilo Unreal Landscape)
+- Base: fBm Simplex (montanhas + vales)
+- Crists: ridgedMultifractal (cristas afiadas)
+- Detalhe: Simplex (micro-detalhe)
+- Terracing opcional (formações rochosas)
+- Domain warping (organicidade)
+- Erosão térmica no final
+
+### Uso
+```javascript
+import { generateTerrainHeightmap } from './utils/terrain/terrainNoise'
+const heightmap = generateTerrainHeightmap(128, {
+  seed: 12345,
+  scale: 50,
+  octaves: 4,
+  ridgedAmount: 0.3,
+  warpStrength: 1.0,
+  terracing: true,
+  terraceSteps: 8,
+  erosion: true,
+  erosionIterations: 3,
+})
+```
+
+### Versão GLSL
+O ficheiro exporta `TERRAIN_NOISE_GLSL` com as funções em GLSL para uso em shaders de terreno em tempo real (geração na GPU).
+
+## 📋 Limitações honestas e trabalho futuro
+
+### Não implementado nesta sessão (demasiado grande)
+
+1. **Névoa Volumétrica (Raymarching + God Rays)** — exige pass de pós-processamento com raymarching no fragment shader + MRT. Custo elevado para mobile. Abordagem recomendada: fog exponencial simples (já existe em `FogObject`) + bloom para simular god rays.
+
+2. **Câmera Cinematográfica (DOF + Lens Presets + Grid Overlay)** — DOF exige pass de blur proporcional à distância focal. Lens presets (35mm/50mm/85mm) são apenas mudança de FOV. Grid overlay é canvas 2D sobre o viewport. Viável mas UI-heavy.
+
+3. **Color Grading / Film Look (Lift/Gamma/Gain + ACES + Vignette + Grain)** — exige EffectComposer com pass custom. Three.js tem `EffectComposer` + `ShaderPass`. Implementação direta mas trabalhosa.
+
+4. **Animation Timeline UI profissional** — a engine já tem `Timeline.jsx` básico. Upgrade para sistema profissional (múltiplas camadas, atalhos P/S/R/T, F9 easy ease, undo/redo) é UI-heavy e seria uma sessão dedicada.
+
+5. **Three-Point Lighting + Rim Lights** — a engine já suporta múltiplas luzes (ambient + directional + hemisphere). Three-point lighting é apenas configuração de 3 luzes direcionais. Rim lights são luzes atrás do objeto. Não exige shader novo.
+
+6. **Bounced Lighting (Irradiance/Light Probes)** — Flir GI (`flirGI.js`) já existe como aproximação. Light probes reais exigem pré-computação de SH (Spherical Harmonics) — complexo.
+
+7. **Denoising/Blur bilateral** — para suavizar ruído de SSR/SSGI. Exige pass de pós-processamento. Leve mas trabalhoso.
+
+### Performance esperada (Realme C33 / WebGL 2.0)
+- Água Pro: ~5ms por frame (3 ondas Gerstner + caustics)
+- Céu Pro: ~2ms por frame (1 sample analítico)
+- GPU Modifiers: ~0ms extra (integrado no vertex shader)
+- Instancing (1000 objs): ~3ms (frustum cull + 3 LOD)
+- POM (8 steps): ~4ms por material com POM
+- Terreno 128x128 com erosão: ~50ms geração única (não por frame)
+

@@ -20,6 +20,8 @@ import * as THREE from 'three'
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js'
 import { flirSkyVertexShader, flirSkyFragmentShader } from '../../utils/flirSkyShader'
 import { createWaterMaterial } from '../../utils/waterShader'
+import { createWaterProMaterial } from '../../utils/waterShaderPro'
+import { createSkyProMaterial } from '../../utils/skyShaderPro'
 import { useStore } from '../../store/useStore'
 import { findConectDefinition } from '../../utils/conects/taxonomy'
 import SceneObject from '../3d/SceneObject'
@@ -704,8 +706,10 @@ function WaterMesh({ conect, setMeshRef }) {
   }, [conect.size])
 
   // Material profissional com shader
+  // Escolhe entre versão básica ou Pro baseado no renderSettings.waterQuality
   const material = useMemo(() => {
-    return createWaterMaterial({
+    const waterQuality = useStore.getState().renderSettings?.waterQuality || 'basic'
+    const opts = {
       color: conect.color,
       deepColor: conect.deepColor || '#0a3d5c',
       opacity: conect.opacity ?? 0.85,
@@ -717,7 +721,12 @@ function WaterMesh({ conect, setMeshRef }) {
       foamThreshold: conect.foamThreshold ?? 0.7,
       depthGradient: conect.depthGradient !== false && conect.depthGradient !== 'false',
       skyColor: '#88aacc',
-    })
+    }
+    // Pro: Gerstner + caustics + IOR + SSR simplified + normal maps cruzados
+    if (waterQuality === 'professional') {
+      return createWaterProMaterial(opts)
+    }
+    return createWaterMaterial(opts)
   }, [conect.color, conect.deepColor, conect.opacity, conect.waveHeight, conect.waveSpeed,
       conect.waterMode, conect.flowDirection, conect.foamEnabled, conect.foamThreshold,
       conect.depthGradient])
