@@ -247,10 +247,43 @@ export function createPhysicsSystem(options = {}) {
   function jumpPersonal(instanceId) {
     const entry = bodies.get(instanceId)
     if (!entry || entry.type !== 'PersonalObject') return
-    if (!entry.grounded) return
+    // FASE 9: Coyote time + salto duplo configurável
+    const coyoteTime = entry.conect.coyoteTime ?? 0.15
+    const maxJumps = entry.conect.maxJumps ?? 1
+    // Inicializar estado de saltos se não existir
+    if (entry._jumpsUsed === undefined) entry._jumpsUsed = 0
+    if (entry._coyoteTimer === undefined) entry._coyoteTimer = 0
+    // Verificar se pode saltar
+    const canJumpNow = entry.grounded || (entry._coyoteTimer > 0) || (entry._jumpsUsed < maxJumps)
+    if (!canJumpNow) return
     const jumpForce = entry.conect.jumpForce ?? 8
     entry.body.velocity.y = jumpForce
+    // Se estava grounded ou em coyote time, é o 1º salto
+    if (entry.grounded || entry._coyoteTimer > 0) {
+      entry._jumpsUsed = 1
+    } else {
+      entry._jumpsUsed += 1
+    }
     entry.grounded = false
+    entry._coyoteTimer = 0
+  }
+
+  // FASE 9: Atualizar coyote timer — chamado a cada frame
+  function updatePersonalState(instanceId, deltaTime) {
+    const entry = bodies.get(instanceId)
+    if (!entry || entry.type !== 'PersonalObject') return
+    if (entry._coyoteTimer === undefined) entry._coyoteTimer = 0
+    if (entry._jumpsUsed === undefined) entry._jumpsUsed = 0
+    // Reset jumps quando toca o chão
+    if (entry.grounded) {
+      entry._jumpsUsed = 0
+      entry._coyoteTimer = entry.conect.coyoteTime ?? 0.15
+    } else {
+      // Decrementar coyote timer
+      if (entry._coyoteTimer > 0) {
+        entry._coyoteTimer = Math.max(0, entry._coyoteTimer - deltaTime)
+      }
+    }
   }
 
   // Atualiza o mundo e sincroniza transforms
@@ -372,6 +405,7 @@ export function createPhysicsSystem(options = {}) {
     applyForce,
     movePersonal,
     jumpPersonal,
+    updatePersonalState,
     addJoint,
     update,
     dispose,

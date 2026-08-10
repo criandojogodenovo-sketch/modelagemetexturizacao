@@ -22,6 +22,15 @@ import {
   arrayGeometry,
   solidifyGeometry,
   curveDeform,
+  elevationDisplace,
+  displaceGeometry,
+  taperGeometry,
+  twistGeometry,
+  bendGeometry,
+  smoothGeometry,
+  decimateGeometry,
+  createLinePathGeometry,
+  contactIllumination,
 } from '../../utils/meshOperations'
 import { compositeTextureLayers } from '../../utils/textureCompositor'
 import { computeVertexAO, applyVertexAO } from '../../utils/vertexAO'
@@ -78,6 +87,77 @@ function applyModifiers(geometry, modifiers, pathLookup) {
           })
           break
         }
+        // === FASE 2: Novos modificadores ===
+        case 'elevation':
+          result = elevationDisplace(result, {
+            strength: mod.params.strength || 0.5,
+            scale: mod.params.scale || 1.0,
+            axis: mod.params.axis || 'y',
+            seed: mod.params.seed || 0,
+          })
+          break
+        case 'displace':
+          result = displaceGeometry(result, {
+            strength: mod.params.strength || 0.3,
+            scale: mod.params.scale || 1.0,
+            seed: mod.params.seed || 0,
+          })
+          break
+        case 'taper':
+          result = taperGeometry(result, {
+            factor: mod.params.factor || 0.5,
+            axis: mod.params.axis || 'y',
+          })
+          break
+        case 'twist':
+          result = twistGeometry(result, {
+            angle: mod.params.angle || 3.14,
+            axis: mod.params.axis || 'y',
+          })
+          break
+        case 'bend':
+          result = bendGeometry(result, {
+            angle: mod.params.angle || 0.52,
+            axis: mod.params.axis || 'y',
+            bendAxis: mod.params.bendAxis || 'z',
+          })
+          break
+        case 'smooth':
+          result = smoothGeometry(result, {
+            iterations: mod.params.iterations || 2,
+            factor: mod.params.factor || 0.5,
+          })
+          break
+        case 'decimate':
+          result = decimateGeometry(result, {
+            ratio: mod.params.ratio || 0.5,
+          })
+          break
+        case 'linePath': {
+          // Cria geometria nova (tubo) ao longo de um PathObject
+          if (!mod.params.pathId) break
+          const linePoints = pathLookup?.(mod.params.pathId)
+          if (!linePoints || linePoints.length < 2) break
+          const tube = createLinePathGeometry(linePoints, {
+            radius: mod.params.radius || 0.1,
+            tubularSegments: mod.params.tubularSegments || 64,
+            radialSegments: mod.params.radialSegments || 8,
+            closed: mod.params.closed || false,
+          })
+          if (tube) result = tube
+          break
+        }
+        case 'contactIllum':
+          result = contactIllumination(result, {
+            strength: mod.params.strength || 0.5,
+            height: mod.params.height || 1.0,
+          })
+          // Contact illumination adiciona vertex colors — ativar no material
+          if (meshRef?.current?.material) {
+            meshRef.current.material.vertexColors = true
+            meshRef.current.material.needsUpdate = true
+          }
+          break
         default:
           break
       }
@@ -127,6 +207,10 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       if (obj.customGeometry.uvs) {
         base.setAttribute('uv', new THREE.Float32BufferAttribute(obj.customGeometry.uvs, 2))
       }
+      // Vertex colors (de buildingGenerator ou edit mode)
+      if (obj.customGeometry.colors) {
+        base.setAttribute('color', new THREE.Float32BufferAttribute(obj.customGeometry.colors, 3))
+      }
       // Suportar índices (FBX importado pode ter)
       if (obj.customGeometry.indices) {
         base.setIndex(obj.customGeometry.indices)
@@ -171,8 +255,11 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       wireframe: m.wireframe || false,
       flatShading: m.flatShading || false,
       side: obj.type === 'plane' ? THREE.DoubleSide : THREE.FrontSide,
-      // Ativar vertexColors se Vertex AO estiver ativo (para mostrar o AO)
-      vertexColors: vertexAOEnabled,
+      // Ativar vertexColors se:
+      // - Vertex AO estiver ativo (mostra o AO), OU
+      // - A geometria tem cores próprias (ex: buildingGenerator com janelas coloridas), OU
+      // - O material explicitamente pede vertexColors
+      vertexColors: vertexAOEnabled || !!(obj.customGeometry && obj.customGeometry.colors) || !!m.vertexColors,
     })
 
     // Emissive

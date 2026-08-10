@@ -14,7 +14,7 @@
  */
 import { Suspense, useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
-import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-three/drei'
+import { OrbitControls, Grid, TransformControls, ContactShadows, Html } from '@react-three/drei'
 import * as THREE from 'three'
 import SceneObject from './SceneObject'
 import ConectRenderer from '../panels/ConectRenderer'
@@ -82,6 +82,75 @@ function SceneBackgroundSolid({ background, hasSkyObject }) {
 }
 
 // ===== Componente que aplica FogObject à cena =====
+// ===== FASE 7: World Space UI — renderiza telas de UI no mundo 3D =====
+// Cada UIScreen com renderMode='world' é renderizada como um billboard no mundo 3D,
+// seguindo um Conect alvo (ex: NpcObject para barra de vida sobre NPC).
+function WorldSpaceUI({ uiScreens, conects, conectMeshRefs }) {
+  const { camera } = useThree()
+  useFrame(() => {
+    // Forçar o billboard a olhar para a câmara em cada frame
+    // (aplicado via Html do drei com sprite=true)
+  })
+  const worldScreens = uiScreens.filter(
+    (sc) => sc.visible !== false && sc.renderMode === 'world'
+  )
+  if (worldScreens.length === 0) return null
+
+  return (
+    <>
+      {worldScreens.map((screen) => {
+        // Se tem followTarget, seguir esse Conect; senão usar worldOffset como posição absoluta
+        let position = screen.worldOffset || [0, 2, 0]
+        if (screen.worldFollowTarget) {
+          const targetMesh = conectMeshRefs.current.get(screen.worldFollowTarget)
+          if (targetMesh) {
+            position = [
+              targetMesh.position.x + (screen.worldOffset?.[0] || 0),
+              targetMesh.position.y + (screen.worldOffset?.[1] || 2),
+              targetMesh.position.z + (screen.worldOffset?.[2] || 0),
+            ]
+          }
+        }
+        return (
+          <Html
+            key={screen.id}
+            position={position}
+            center
+            distanceFactor={screen.worldScale ? 1 / screen.worldScale : 100}
+            sprite={screen.worldBillboard !== false}
+            zIndexRange={[10, 0]}
+            style={{ pointerEvents: 'none' }}
+          >
+            <div style={{
+              background: 'rgba(0,0,0,0.5)',
+              padding: '8px 12px',
+              borderRadius: 6,
+              fontFamily: '-apple-system, sans-serif',
+              color: '#e6edf3',
+              minWidth: 80,
+              textAlign: 'center',
+            }}>
+              {screen.elements.map((el) => {
+                if (el.type === 'Button') {
+                  return <div key={el.id} style={{ padding: '4px 8px', background: el.color || '#2f81f7', color: el.textColor || '#fff', borderRadius: 4, fontSize: 12, margin: 2 }}>{el.label || 'Botão'}</div>
+                }
+                if (el.type === 'Label' || el.type === 'Text') {
+                  return <div key={el.id} style={{ color: el.color || '#fff', fontSize: 12, margin: 2 }}>{el.text || el.label || ''}</div>
+                }
+                if (el.type === 'Panel') {
+                  return <div key={el.id} style={{ background: el.color || '#1c2128', opacity: el.opacity ?? 0.8, width: 60, height: 8, borderRadius: 4, margin: 2 }} />
+                }
+                return null
+              })}
+              {screen.elements.length === 0 && <span style={{ fontSize: 10, opacity: 0.5 }}>{screen.name}</span>}
+            </div>
+          </Html>
+        )
+      })}
+    </>
+  )
+}
+
 function FogApplier({ conects }) {
   const { scene } = useThree()
   const fogConect = (conects || []).find(c => c.type === 'FogObject')
@@ -320,6 +389,16 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         return 0
       },
       isTouching: () => joystickRef.current.active,
+      // FASE 8: Funções de câmara para FPS/BR
+      getCameraRotation: () => {
+        if (window._flirCameraRotation) {
+          return { yaw: window._flirCameraRotation.yaw, pitch: window._flirCameraRotation.pitch }
+        }
+        return { yaw: 0, pitch: 0 }
+      },
+      setCameraSensitivity: (value) => {
+        if (window._flirCameraRotation) window._flirCameraRotation.sensitivity = value
+      },
       // Fase 5: Multiplayer functions
       sendMessage: (data) => {
         try {
@@ -586,6 +665,27 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           debugLog(`Sequência "${name}" disparada como sinal`, 'log', 'Sequence')
         }
       },
+
+      // ===== FASE 9: Roguelike — run progress (reinicia ao morrer) =====
+      _runState: { runId: 0, seed: 0, started: false },
+      startNewRun: () => {
+        // Gerar nova seed aleatória
+        const newSeed = Math.floor(Math.random() * 99999) + 1
+        gameContext._runState.runId += 1
+        gameContext._runState.seed = newSeed
+        gameContext._runState.started = true
+        debugLog(`Nova run iniciada — Run #${gameContext._runState.runId}, Seed: ${newSeed}`, 'log', 'Roguelike')
+        // Disparar sinal para RoguelikeGenerator gerar salas
+        gameContext.emitSignal('roguelike:generate', { runId: gameContext._runState.runId, seed: newSeed })
+        return gameContext._runState
+      },
+      getRunSeed: () => gameContext._runState.seed,
+      getRunId: () => gameContext._runState.runId,
+      endRun: () => {
+        debugLog(`Run #${gameContext._runState.runId} terminada`, 'log', 'Roguelike')
+        gameContext._runState.started = false
+        gameContext.emitSignal('roguelike:end', { runId: gameContext._runState.runId })
+      },
     }
     window._flirGameContext = gameContext
 
@@ -821,6 +921,10 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           mesh.position.copy(entry.body.position)
           mesh.quaternion.copy(entry.body.quaternion)
         }
+        // FASE 9: Atualizar estado de PersonalObject (coyote timer)
+        if (entry.type === 'PersonalObject') {
+          physicsRef.current.updatePersonalState(id, delta)
+        }
       }
     }
 
@@ -944,6 +1048,8 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     // Câmara: ViewObject ativa — usar setupScene (ref) para consistência
     const viewConects = (setupScene?.conects || []).filter((c) => c.type === 'ViewObject')
     const activeView = viewConects.find((c) => c.cameraRole === 'player') || viewConects.find((c) => c.cameraRole === 'primary') || viewConects[0]
+    // FASE 8: Verificar se há CameraTouchZone na cena
+    const hasCameraZone = (setupScene?.conects || []).some((c) => c.type === 'CameraTouchZone')
     if (activeView) {
       // Se cameraRole='player' e não tem followTarget, seguir PersonalObject
       let targetId = activeView.followTarget
@@ -958,8 +1064,20 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           const dist = activeView.followDistance || 6
           const height = activeView.followHeight || 3
           if (mode === 'third') {
-            camera.position.lerp(new THREE.Vector3(targetMesh.position.x, targetMesh.position.y + height, targetMesh.position.z + dist), 0.1)
-            camera.lookAt(targetMesh.position)
+            // FASE 8: Se há CameraTouchZone, orbitar à volta do jogador com yaw/pitch do toque
+            if (hasCameraZone && window._flirCameraRotation) {
+              const yaw = window._flirCameraRotation.yaw
+              const pitch = window._flirCameraRotation.pitch
+              const cosP = Math.cos(pitch)
+              const px = targetMesh.position.x + Math.sin(yaw) * cosP * dist
+              const py = targetMesh.position.y + height + Math.sin(pitch) * dist
+              const pz = targetMesh.position.z + Math.cos(yaw) * cosP * dist
+              camera.position.lerp(new THREE.Vector3(px, py, pz), 0.2)
+              camera.lookAt(targetMesh.position)
+            } else {
+              camera.position.lerp(new THREE.Vector3(targetMesh.position.x, targetMesh.position.y + height, targetMesh.position.z + dist), 0.1)
+              camera.lookAt(targetMesh.position)
+            }
           } else if (mode === 'top') {
             camera.position.lerp(new THREE.Vector3(targetMesh.position.x, targetMesh.position.y + dist, targetMesh.position.z), 0.1)
             camera.lookAt(targetMesh.position)
@@ -971,9 +1089,14 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       } else {
         // Câmara estática na posição da ViewObject
         camera.position.set(...(activeView.position || [5, 4, 6]))
-        // Sempre olhar para a origem (ou para o centro dos objetos da cena)
-        // a menos que followMode esteja definido
-        camera.lookAt(0, 0, 0)
+        // FASE 8: Se há CameraTouchZone, aplicar rotação da câmara
+        if (hasCameraZone && window._flirCameraRotation) {
+          camera.rotation.set(window._flirCameraRotation.pitch, window._flirCameraRotation.yaw, 0, 'YXZ')
+        } else {
+          // Sempre olhar para a origem (ou para o centro dos objetos da cena)
+          // a menos que followMode esteja definido
+          camera.lookAt(0, 0, 0)
+        }
       }
     }
   })
@@ -989,6 +1112,8 @@ export default function SceneLevel3D() {
   const background = useStore((s) => s.background)
   const grid = useStore((s) => s.grid)
   const lights = useStore((s) => s.lights)
+  // FASE 7: UI Screens para World Space UI
+  const uiScreens = useStore((s) => s.uiScreens)
   const transformMode = useStore((s) => s.transformMode)
   const updateSceneInstance = useStore((s) => s.updateSceneInstance)
   const updateConect = useStore((s) => s.updateConect)
@@ -1117,6 +1242,8 @@ export default function SceneLevel3D() {
         <Suspense fallback={null}>
           <SceneBackgroundSolid background={background} hasSkyObject={!!(activeScene?.conects || []).find(c => c.type === 'SkyObject')} />
           <FogApplier conects={activeScene?.conects} />
+          {/* FASE 7: World Space UI — renderiza telas no mundo 3D */}
+          <WorldSpaceUI uiScreens={uiScreens} conects={activeScene?.conects} conectMeshRefs={conectMeshRefs} />
 
           <ambientLight intensity={lights.ambient.intensity} color={lights.ambient.color} />
           <directionalLight

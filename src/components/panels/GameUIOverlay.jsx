@@ -1,16 +1,131 @@
 /**
  * GameUIOverlay — renderiza elementos de UI sobre o canvas 3D durante o jogo.
  *
- * **Fase 6 (corrigido)**: Cada elemento é renderizado diretamente com
- * pointer-events: auto. Botões disparam onClick, inputs disparam onChange.
- * Não há botões invisíveis separados — o próprio elemento é clicável.
+ * **Fase 1 (corrigido)**: Renderiza TODOS os Conects de UI da cena ativa:
+ *  - ButtonObject (botões clicáveis que disparam onClick)
+ *  - TextObject (texto/pontuação/vida)
+ *  - ImageObject (imagens/ícones)
+ *  - PanelObject (painéis de fundo)
+ *  - JoystickObject (joystick virtual touch)
  *
- * **Fase 5**: Adiciona JoystickObject rendering — joystick virtual touch
- * que controla o PersonalObject via joystickRef.
+ * Também renderiza os elementos do UI Editor (uiScreens).
+ *
+ * Cada elemento é renderizado diretamente com pointer-events: auto.
+ * Botões disparam onClick, inputs disparam onChange.
  */
 import { useStore } from '../../store/useStore'
 import { debugLog } from '../../utils/debug/debugStore'
 import JoystickControl from '../ui/JoystickControl'
+import { useEffect, useRef, useState } from 'react'
+
+/**
+ * CameraTouchZoneControl — zona de toque para rodar a câmara (pitch/yaw).
+ *
+ * Estilo COD Mobile / Fortnite: arrastar o dedo nesta zona roda a câmara.
+ * É independente do JoystickObject (que controla movimento).
+ * É invisível (transparente) mas captura eventos de toque.
+ *
+ * Funciona em conjunto com window._flirCameraRotation — o SceneLevel3D lê
+ * estes valores e aplica à câmara em cada frame.
+ */
+function CameraTouchZoneControl({ zone, sensitivity, invertY, minPitch, maxPitch }) {
+  const touchIdRef = useRef(null)
+  const lastPosRef = useRef(null)
+  // Garantir que window._flirCameraRotation existe
+  useEffect(() => {
+    if (!window._flirCameraRotation) {
+      window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: sensitivity }
+    }
+    window._flirCameraRotation.sensitivity = sensitivity
+  }, [sensitivity])
+
+  const z = zone || { x: 50, y: 0, w: 50, h: 100 }
+  const zoneStyle = {
+    position: 'fixed',
+    left: `${z.x}%`,
+    top: `${z.y}%`,
+    width: `${z.w}%`,
+    height: `${z.h}%`,
+    zIndex: 88, // abaixo dos botões/joystick (91+)
+    touchAction: 'none',
+    background: 'transparent',
+    pointerEvents: 'auto',
+  }
+
+  const onTouchStart = (e) => {
+    // Só capturar se o toque começou nesta zona
+    const touch = e.changedTouches[0]
+    touchIdRef.current = touch.identifier
+    lastPosRef.current = { x: touch.clientX, y: touch.clientY }
+  }
+  const onTouchMove = (e) => {
+    if (touchIdRef.current === null) return
+    for (const touch of e.changedTouches) {
+      if (touch.identifier === touchIdRef.current) {
+        const dx = touch.clientX - lastPosRef.current.x
+        const dy = touch.clientY - lastPosRef.current.y
+        lastPosRef.current = { x: touch.clientX, y: touch.clientY }
+        // Atualizar rotação da câmara (window._flirCameraRotation)
+        if (window._flirCameraRotation) {
+          const sens = sensitivity * 0.005
+          window._flirCameraRotation.yaw -= dx * sens
+          const pitchDelta = invertY ? dy * sens : -dy * sens
+          window._flirCameraRotation.pitch = Math.max(
+            minPitch,
+            Math.min(maxPitch, window._flirCameraRotation.pitch + pitchDelta)
+          )
+        }
+        break
+      }
+    }
+  }
+  const onTouchEnd = (e) => {
+    for (const touch of e.changedTouches) {
+      if (touch.identifier === touchIdRef.current) {
+        touchIdRef.current = null
+        lastPosRef.current = null
+        break
+      }
+    }
+  }
+
+  // Mouse para desktop testing
+  const onMouseDown = (e) => {
+    e.preventDefault()
+    lastPosRef.current = { x: e.clientX, y: e.clientY }
+    const move = (ev) => {
+      const dx = ev.clientX - lastPosRef.current.x
+      const dy = ev.clientY - lastPosRef.current.y
+      lastPosRef.current = { x: ev.clientX, y: ev.clientY }
+      if (window._flirCameraRotation) {
+        const sens = sensitivity * 0.005
+        window._flirCameraRotation.yaw -= dx * sens
+        const pitchDelta = invertY ? dy * sens : -dy * sens
+        window._flirCameraRotation.pitch = Math.max(
+          minPitch,
+          Math.min(maxPitch, window._flirCameraRotation.pitch + pitchDelta)
+        )
+      }
+    }
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
+  return (
+    <div
+      style={zoneStyle}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchEnd}
+      onMouseDown={onMouseDown}
+    />
+  )
+}
 
 export default function GameUIOverlay() {
   const uiScreens = useStore((s) => s.uiScreens)
@@ -19,10 +134,19 @@ export default function GameUIOverlay() {
   const visibleScreens = uiScreens.filter((sc) => sc.visible !== false)
 
   const activeScene = scenes.find((s) => s.id === activeSceneId)
-  // Procurar JoystickObjects na cena ativa
-  const joysticks = (activeScene?.conects || []).filter((c) => c.type === 'JoystickObject')
+  // Procurar TODOS os Conects de UI na cena ativa
+  const uiConects = (activeScene?.conects || []).filter((c) =>
+    c.type === 'ButtonObject' || c.type === 'JoystickObject' ||
+    c.type === 'TextObject' || c.type === 'ImageObject' || c.type === 'PanelObject' ||
+    c.type === 'CameraTouchZone'
+  )
+  const joysticks = uiConects.filter((c) => c.type === 'JoystickObject')
+  const cameraZones = uiConects.filter((c) => c.type === 'CameraTouchZone')
+  const otherUiConects = uiConects.filter((c) =>
+    c.type !== 'JoystickObject' && c.type !== 'CameraTouchZone'
+  )
 
-  if (visibleScreens.length === 0 && joysticks.length === 0) return null
+  if (visibleScreens.length === 0 && uiConects.length === 0) return null
 
   const handleEvent = (element, eventType, value) => {
     debugLog(`UI Event: ${element.name}.${eventType}`, 'log', 'UI')
@@ -57,8 +181,88 @@ export default function GameUIOverlay() {
     }
   }
 
+  // Renderiza um Conect de UI (ButtonObject, TextObject, etc.)
+  const renderUiConect = (conect) => {
+    const pos = conect.position || [10, 10]
+    const size = conect.size || [120, 40]
+    const baseStyle = {
+      position: 'absolute',
+      left: `${pos[0]}%`,
+      top: `${pos[1]}%`,
+      width: size[0],
+      height: size[1],
+      transform: 'translate(-50%, -50%)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: conect.color || 'transparent',
+      color: conect.textColor || '#e6edf3',
+      fontSize: (conect.fontSize || 14) + 'px',
+      borderRadius: 4,
+      padding: 0,
+      opacity: conect.opacity ?? 1,
+      pointerEvents: 'auto',
+      userSelect: 'none',
+      fontFamily: '-apple-system, sans-serif',
+      boxSizing: 'border-box',
+      zIndex: 91,
+    }
+
+    switch (conect.type) {
+      case 'ButtonObject':
+        return (
+          <button
+            key={conect.instanceId}
+            style={{ ...baseStyle, cursor: 'pointer', border: 'none', borderRadius: 6 }}
+            onClick={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+              handleEvent(conect, conect.eventName || 'onClick')
+            }}
+            onTouchStart={(e) => { e.stopPropagation() }}
+          >
+            {conect.label || 'Botão'}
+          </button>
+        )
+
+      case 'TextObject':
+        return (
+          <div
+            key={conect.instanceId}
+            style={{
+              ...baseStyle,
+              textAlign: conect.align || 'center',
+              background: 'transparent',
+              width: 'auto',
+              height: 'auto',
+              padding: '4px 8px',
+              textShadow: '0 1px 3px rgba(0,0,0,0.8)',
+            }}
+          >
+            {conect.text || conect.label || ''}
+          </div>
+        )
+
+      case 'ImageObject':
+        return (
+          <div key={conect.instanceId} style={{ ...baseStyle, overflow: 'hidden' }}>
+            {conect.url ? (
+              <img src={conect.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+            ) : null}
+          </div>
+        )
+
+      case 'PanelObject':
+        return <div key={conect.instanceId} style={baseStyle} />
+
+      default:
+        return null
+    }
+  }
+
   return (
     <div className="game-ui-overlay" style={{ pointerEvents: 'none' }}>
+      {/* Elementos do UI Editor */}
       {visibleScreens.map((screen) =>
         screen.elements.map((element) => {
           const pos = element.position || [50, 50]
@@ -189,6 +393,9 @@ export default function GameUIOverlay() {
         })
       )}
 
+      {/* Conects de UI da cena ativa (ButtonObject, TextObject, ImageObject, PanelObject) */}
+      {otherUiConects.map(renderUiConect)}
+
       {/* Joysticks virtuais — renderizados a partir de JoystickObjects na cena */}
       {joysticks.map((js) => (
         <JoystickControl
@@ -199,6 +406,18 @@ export default function GameUIOverlay() {
           deadzone={js.deadzone ?? 0.1}
           onMove={handleJoystickMove}
           onEnd={handleJoystickEnd}
+        />
+      ))}
+
+      {/* FASE 8: Zonas de toque para rodar câmara (FPS/BR-style) */}
+      {cameraZones.map((cz) => (
+        <CameraTouchZoneControl
+          key={cz.instanceId}
+          zone={cz.zone}
+          sensitivity={cz.sensitivity ?? 1.0}
+          invertY={cz.invertY || false}
+          minPitch={cz.minPitch ?? -1.4}
+          maxPitch={cz.maxPitch ?? 1.4}
         />
       ))}
 

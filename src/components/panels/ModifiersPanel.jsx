@@ -255,6 +255,205 @@ function ModifierParams({ mod, onChange }) {
         </>
       )
     }
+    // === FASE 2: Novos modificadores ===
+    case 'elevation':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Força: {params.strength}</label>
+            <input type="range" min="0" max="3" step="0.05" value={params.strength}
+              onChange={(e) => onChange({ strength: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Escala: {params.scale}</label>
+            <input type="range" min="0.1" max="5" step="0.1" value={params.scale}
+              onChange={(e) => onChange({ scale: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Eixo</label>
+            <select value={params.axis} onChange={(e) => onChange({ axis: e.target.value })}>
+              <option value="x">X</option>
+              <option value="y">Y (terreno)</option>
+              <option value="z">Z</option>
+            </select>
+          </div>
+          <div className="prop-row">
+            <label>Seed: {params.seed}</label>
+            <input type="range" min="0" max="100" step="1" value={params.seed}
+              onChange={(e) => onChange({ seed: Number(e.target.value) })} />
+          </div>
+        </>
+      )
+    case 'displace':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Força: {params.strength}</label>
+            <input type="range" min="0" max="2" step="0.05" value={params.strength}
+              onChange={(e) => onChange({ strength: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Escala: {params.scale}</label>
+            <input type="range" min="0.1" max="5" step="0.1" value={params.scale}
+              onChange={(e) => onChange({ scale: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Seed: {params.seed}</label>
+            <input type="range" min="0" max="100" step="1" value={params.seed}
+              onChange={(e) => onChange({ seed: Number(e.target.value) })} />
+          </div>
+        </>
+      )
+    case 'taper':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Fator: {params.factor}</label>
+            <input type="range" min="-1" max="1" step="0.05" value={params.factor}
+              onChange={(e) => onChange({ factor: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Eixo</label>
+            <select value={params.axis} onChange={(e) => onChange({ axis: e.target.value })}>
+              <option value="x">X</option>
+              <option value="y">Y</option>
+              <option value="z">Z</option>
+            </select>
+          </div>
+        </>
+      )
+    case 'twist':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Ângulo: {params.angle?.toFixed(2)} rad</label>
+            <input type="range" min="0" max="6.28" step="0.05" value={params.angle}
+              onChange={(e) => onChange({ angle: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Eixo</label>
+            <select value={params.axis} onChange={(e) => onChange({ axis: e.target.value })}>
+              <option value="x">X</option>
+              <option value="y">Y</option>
+              <option value="z">Z</option>
+            </select>
+          </div>
+        </>
+      )
+    case 'bend':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Ângulo: {params.angle?.toFixed(2)} rad</label>
+            <input type="range" min="-1.57" max="1.57" step="0.05" value={params.angle}
+              onChange={(e) => onChange({ angle: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Eixo primário</label>
+            <select value={params.axis} onChange={(e) => onChange({ axis: e.target.value })}>
+              <option value="x">X</option>
+              <option value="y">Y</option>
+              <option value="z">Z</option>
+            </select>
+          </div>
+          <div className="prop-row">
+            <label>Eixo de dobra</label>
+            <select value={params.bendAxis} onChange={(e) => onChange({ bendAxis: e.target.value })}>
+              <option value="x">X</option>
+              <option value="y">Y</option>
+              <option value="z">Z</option>
+            </select>
+          </div>
+        </>
+      )
+    case 'smooth':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Iterações: {params.iterations}</label>
+            <input type="range" min="1" max="10" step="1" value={params.iterations}
+              onChange={(e) => onChange({ iterations: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Fator: {params.factor}</label>
+            <input type="range" min="0" max="1" step="0.05" value={params.factor}
+              onChange={(e) => onChange({ factor: Number(e.target.value) })} />
+          </div>
+        </>
+      )
+    case 'decimate':
+      return (
+        <div className="prop-row">
+          <label>Manter: {Math.round((params.ratio || 0.5) * 100)}%</label>
+          <input type="range" min="0.1" max="1" step="0.05" value={params.ratio}
+            onChange={(e) => onChange({ ratio: Number(e.target.value) })} />
+        </div>
+      )
+    case 'linePath': {
+      const scenes = useStore.getState().scenes || []
+      const pathOptions = []
+      for (const scene of scenes) {
+        for (const conect of scene.conects || []) {
+          if (conect.type === 'PathObject' && conect.points?.length >= 2) {
+            pathOptions.push({
+              id: conect.instanceId,
+              label: `${conect.name || 'Path'} (${conect.points.length} pts)`,
+            })
+          }
+        }
+      }
+      return (
+        <>
+          <div className="prop-row">
+            <label>Path (caminho)</label>
+            <select value={params.pathId || ''}
+              onChange={(e) => onChange({ pathId: e.target.value || null })}>
+              <option value="">— Selecionar Path —</option>
+              {pathOptions.map((opt) => (
+                <option key={opt.id} value={opt.id}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="prop-row">
+            <label>Espessura: {params.radius}</label>
+            <input type="range" min="0.01" max="1" step="0.01" value={params.radius}
+              onChange={(e) => onChange({ radius: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Segmentos tubulares: {params.tubularSegments}</label>
+            <input type="range" min="8" max="256" step="8" value={params.tubularSegments}
+              onChange={(e) => onChange({ tubularSegments: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Segmentos radiais: {params.radialSegments}</label>
+            <input type="range" min="3" max="32" step="1" value={params.radialSegments}
+              onChange={(e) => onChange({ radialSegments: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label className="checkbox-row">
+              <input type="checkbox" checked={params.closed || false}
+                onChange={(e) => onChange({ closed: e.target.checked })} />
+              Fechado (anel)
+            </label>
+          </div>
+        </>
+      )
+    }
+    case 'contactIllum':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Força: {params.strength}</label>
+            <input type="range" min="0" max="1" step="0.05" value={params.strength}
+              onChange={(e) => onChange({ strength: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Altura: {params.height}</label>
+            <input type="range" min="0.1" max="5" step="0.1" value={params.height}
+              onChange={(e) => onChange({ height: Number(e.target.value) })} />
+          </div>
+        </>
+      )
     default:
       return null
   }

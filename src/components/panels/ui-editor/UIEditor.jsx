@@ -407,6 +407,7 @@ export default function UIEditor() {
               >
                 <span className="icon-dot" />
                 <span style={{ flex: 1 }}>{sc.name}</span>
+                <span style={{ fontSize: 9, color: '#8b949e' }}>{sc.renderMode === 'world' ? '🌍' : '📺'}</span>
                 <button
                   className="icon"
                   style={{ padding: '2px 4px', minWidth: 'auto' }}
@@ -418,6 +419,33 @@ export default function UIEditor() {
               </div>
             ))}
           </div>
+
+          {/* FASE 7: Modo de renderização da tela ativa (Ecrã / Mundo) */}
+          {activeScreen && (
+            <div className="prop-row" style={{ marginTop: 6 }}>
+              <label>Modo de renderização</label>
+              <select
+                value={activeScreen.renderMode || 'screen'}
+                onChange={(e) => {
+                  const newMode = e.target.value
+                  useStore.setState((s) => ({
+                    uiScreens: s.uiScreens.map((sc) =>
+                      sc.id === activeScreen.id ? { ...sc, renderMode: newMode } : sc
+                    ),
+                  }))
+                }}
+              >
+                <option value="screen">📺 Ecrã (screen-space)</option>
+                <option value="world">🌍 Mundo (world-space, billboard)</option>
+              </select>
+            </div>
+          )}
+          {activeScreen && activeScreen.renderMode === 'world' && (
+            <div className="small muted" style={{ marginTop: 4, padding: '0 4px' }}>
+              💡 Em modo Mundo, a tela segue um Conect (ex: NPC) como billboard.
+              Define a posição 3D com worldOffset.
+            </div>
+          )}
         </div>
 
         {/* Tipos de elementos */}

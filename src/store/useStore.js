@@ -98,6 +98,7 @@ const initialScene = {
   },
   // Renderização avançada (recursos pesados — off por defeito)
   renderSettings: {
+    qualityLevel: 'balanced', // performance | balanced | realista | super-realista | hiper-realista
     flirGI: false,        // Iluminação global em tempo real (aproximação)
     flirAdaptiveMesh: false, // Geometria adaptativa (LOD automático por distância)
     // Otimização de sombras (ativa por defeito — reduz custo de shadow passes)
@@ -106,6 +107,9 @@ const initialScene = {
     shadowMapSize: 1024,         // 1024 (performance) ou 2048 (qualidade)
     vertexAO: false,             // Ambient Occlusion pré-calculado por vértice (custo zero em runtime)
     pom: false,                  // Parallax Occlusion Mapping (relevo sem polígonos)
+    postProcessing: false,       // Bloom, SSAO, DOF via EffectComposer
+    waterQuality: 'basic',       // basic | professional (Gerstner + foam + depth)
+    pixelRatio: 1,               // 1 (perf) | 1.5 (balanced) | 2 (alta qualidade)
   },
   // Sistema de Camadas (Layers)
   layers: [
@@ -151,6 +155,61 @@ export const MODIFIER_TYPES = {
     defaultParams: { pathId: null, twist: 0, stretch: 1 },
     description: 'Deforma a geometria ao longo de um PathObject (curva)',
   },
+  // === FASE 2: Novos modificadores ===
+  elevation: {
+    label: 'Elevação (Heightmap)',
+    icon: 'subdivide',
+    defaultParams: { strength: 0.5, scale: 1.0, axis: 'y', seed: 0 },
+    description: 'Eleva/rebaixa vértices com base num mapa de ruído (terreno)',
+  },
+  displace: {
+    label: 'Deslocar (Ruído)',
+    icon: 'subdivide',
+    defaultParams: { strength: 0.3, scale: 1.0, seed: 0 },
+    description: 'Desloca vértices ao longo das normais com ruído orgânico',
+  },
+  taper: {
+    label: 'Afunilar',
+    icon: 'mirror',
+    defaultParams: { factor: 0.5, axis: 'y' },
+    description: 'Estreita uma ponta do objeto gradualmente',
+  },
+  twist: {
+    label: 'Torcer',
+    icon: 'mirror',
+    defaultParams: { angle: 3.14, axis: 'y' },
+    description: 'Roda a geometria progressivamente ao longo de um eixo',
+  },
+  bend: {
+    label: 'Dobrar',
+    icon: 'curve',
+    defaultParams: { angle: 0.52, axis: 'y', bendAxis: 'z' },
+    description: 'Dobra o objeto num ângulo, como vergar um tubo',
+  },
+  smooth: {
+    label: 'Suavizar (Laplaciano)',
+    icon: 'subdivide',
+    defaultParams: { iterations: 2, factor: 0.5 },
+    description: 'Suaviza a geometria (Laplacian smoothing)',
+  },
+  decimate: {
+    label: 'Reduzir Polígonos',
+    icon: 'array',
+    defaultParams: { ratio: 0.5 },
+    description: 'Reduz a contagem de triângulos mantendo a forma geral',
+  },
+  linePath: {
+    label: 'Linha/Caminho (Tubo)',
+    icon: 'curve',
+    defaultParams: { pathId: null, radius: 0.1, tubularSegments: 64, radialSegments: 8, closed: false },
+    description: 'Cria um tubo/cabo/corda que segue um PathObject (geometria nova)',
+  },
+  contactIllum: {
+    label: 'Iluminação de Contacto',
+    icon: 'solidify',
+    defaultParams: { strength: 0.5, height: 1.0 },
+    description: 'Escurece zonas de contacto com o solo (contact shadows local)',
+  },
 }
 
 // Tipos de operações booleanas
@@ -159,6 +218,100 @@ export const BOOLEAN_OPS = [
   { id: 'subtract', label: 'Subtração', description: 'A − B' },
   { id: 'intersect', label: 'Interseção', description: 'A ∩ B' },
 ]
+
+// ============================================================
+//  FASE 6: NÍVEIS DE QUALIDADE GRÁFICA
+// ============================================================
+// Cada preset ativa progressivamente mais recursos pesados.
+// Custo estimado em FPS (Realme C33 / WebGL2):
+//  - performance:    ~60 FPS (qualquer dispositivo)
+//  - balanced:       ~50 FPS (maioria dos dispositivos)
+//  - realista:       ~40 FPS (mid-range moderno)
+//  - super-realista: ~30 FPS (high-end)
+//  - hiper-realista: ~20-25 FPS (apenas para captura de vídeo/screenshots)
+
+export const QUALITY_PRESETS = {
+  performance: {
+    label: 'Performance (fraco)',
+    description: 'Dispositivos fracos. Sem recursos pesados. ~60 FPS',
+    settings: {
+      flirGI: false,
+      flirAdaptiveMesh: false,
+      shadowOptimizations: true,
+      shadowDistance: 15,
+      shadowMapSize: 512,
+      vertexAO: false,
+      pom: false,
+      postProcessing: false,
+      waterQuality: 'basic',
+      pixelRatio: 0.75,
+    },
+  },
+  balanced: {
+    label: 'Equilibrado (padrão)',
+    description: 'Bom equilíbrio entre qualidade e performance. ~50 FPS',
+    settings: {
+      flirGI: false,
+      flirAdaptiveMesh: false,
+      shadowOptimizations: true,
+      shadowDistance: 20,
+      shadowMapSize: 1024,
+      vertexAO: true,
+      pom: false,
+      postProcessing: false,
+      waterQuality: 'basic',
+      pixelRatio: 1,
+    },
+  },
+  realista: {
+    label: 'Realista',
+    description: 'Ativa Vertex AO + sombras 2048 + água profissional. ~40 FPS',
+    settings: {
+      flirGI: false,
+      flirAdaptiveMesh: true,
+      shadowOptimizations: true,
+      shadowDistance: 30,
+      shadowMapSize: 2048,
+      vertexAO: true,
+      pom: true,
+      postProcessing: false,
+      waterQuality: 'professional',
+      pixelRatio: 1,
+    },
+  },
+  'super-realista': {
+    label: 'Super-Realista',
+    description: 'Ativa Flir GI + POM + pós-processamento. ~30 FPS (high-end)',
+    settings: {
+      flirGI: true,
+      flirAdaptiveMesh: true,
+      shadowOptimizations: true,
+      shadowDistance: 40,
+      shadowMapSize: 2048,
+      vertexAO: true,
+      pom: true,
+      postProcessing: true,
+      waterQuality: 'professional',
+      pixelRatio: 1.5,
+    },
+  },
+  'hiper-realista': {
+    label: 'Hiper-Realista',
+    description: 'Todos os recursos máximos. ~20-25 FPS (captura de vídeo)',
+    settings: {
+      flirGI: true,
+      flirAdaptiveMesh: true,
+      shadowOptimizations: false, // sem otimizações — máxima qualidade
+      shadowDistance: 60,
+      shadowMapSize: 4096,
+      vertexAO: true,
+      pom: true,
+      postProcessing: true,
+      waterQuality: 'professional',
+      pixelRatio: 2,
+    },
+  },
+}
 
 function newProjectState() {
   return {
@@ -920,6 +1073,15 @@ export const useStore = create(
         renderSettings: { ...s.renderSettings, ...patch },
       })),
 
+      // FASE 6: Aplicar preset de qualidade (ativa/desativa múltiplos recursos)
+      setQualityLevel: (level) => {
+        const preset = QUALITY_PRESETS[level]
+        if (!preset) return
+        set((s) => ({
+          renderSettings: { ...s.renderSettings, ...preset.settings, qualityLevel: level },
+        }))
+      },
+
       // ---------- Sistema de Camadas (Layers) ----------
       addLayer: (name, color = '#888888') => {
         get()._pushHistory()
@@ -1069,6 +1231,12 @@ export const useStore = create(
           name,
           elements: [],
           visible: true,
+          // FASE 7: Modo de renderização — Ecrã (screen-space) ou Mundo (world-space)
+          renderMode: 'screen', // 'screen' | 'world'
+          worldFollowTarget: null, // instanceId do Conect a seguir (ex: NpcObject)
+          worldOffset: [0, 2, 0], // offset 3D do alvo
+          worldScale: 0.01, // escala do HTML no mundo 3D
+          worldBillboard: true, // sempre virado para a câmara
         }
         set((s) => ({
           uiScreens: [...s.uiScreens, screen],

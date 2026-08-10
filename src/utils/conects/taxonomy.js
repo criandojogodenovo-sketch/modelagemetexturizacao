@@ -148,6 +148,12 @@ export const CONECT_TAXONOMY = [
       grounded: false,
       fixedRotation: true,
       sourceObjectId: null, // referência a um objeto do catálogo (com esqueleto/animações)
+      // FASE 9: Plataforma 3D
+      coyoteTime: 0.15, // segundos para ainda saltar após sair de plataforma
+      maxJumps: 1, // 1 = salto normal, 2 = salto duplo, etc.
+      // Estado interno (não editável)
+      _coyoteTimer: 0,
+      _jumpsUsed: 0,
     },
     properties: [
       prop('moveSpeed', 'Velocidade de movimento', 'number', 5, { min: 0.5, max: 20, step: 0.5 }),
@@ -155,6 +161,8 @@ export const CONECT_TAXONOMY = [
       prop('canJump', 'Pode saltar', 'boolean', true),
       prop('fixedRotation', 'Fixar rotação', 'boolean', true),
       prop('sourceObjectId', 'Modelo do catálogo (com esqueleto)', 'objectRef', null),
+      prop('coyoteTime', 'Coyote time (seg)', 'number', 0.15, { min: 0, max: 1, step: 0.05 }),
+      prop('maxJumps', 'Máx. saltos (1=normal, 2=duplo)', 'number', 1, { min: 1, max: 5, step: 1 }),
     ],
   },
   {
@@ -501,6 +509,32 @@ export const CONECT_TAXONOMY = [
       prop('followHeight', 'Altura', 'number', 3, { min: 0, max: 20, step: 0.5 }),
     ],
   },
+  // FASE 8: Zona de toque para rodar câmara (FPS/BR-style)
+  {
+    type: 'CameraTouchZone',
+    label: 'Camera Touch Zone (Rodar Câmara)',
+    category: 'ui',
+    icon: '🖱️',
+    description: 'Zona do ecrã para arrastar e rodar a câmara (pitch/yaw). Independente do joystick. Estilo COD Mobile/Fortnite.',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      // Zona do ecrã (em % do ecrã): default = metade direita
+      zone: { x: 50, y: 0, w: 50, h: 100 },
+      sensitivity: 1.0,
+      invertY: false,
+      // Limites de pitch (radianos)
+      minPitch: -1.4, // ~-80°
+      maxPitch: 1.4,  // ~+80°
+    },
+    properties: [
+      prop('sensitivity', 'Sensibilidade', 'number', 1.0, { min: 0.1, max: 5, step: 0.1 }),
+      prop('invertY', 'Inverter Y', 'boolean', false),
+      prop('minPitch', 'Pitch mínimo (rad)', 'number', -1.4, { min: -3.14, max: 0, step: 0.05 }),
+      prop('maxPitch', 'Pitch máximo (rad)', 'number', 1.4, { min: 0, max: 3.14, step: 0.05 }),
+    ],
+  },
   {
     type: 'SoundObject',
     label: 'Sound Object (Som)',
@@ -597,23 +631,36 @@ export const CONECT_TAXONOMY = [
     label: 'Water Object (Água)',
     category: 'environment',
     icon: '🌊',
-    description: 'Plano de água com efeito visual simples (reflexo/transparência)',
+    description: 'Água profissional com ondas Gerstner, espuma, profundidade e lago/rio',
     hasPhysics: false,
     hasVisual: true,
     flirScriptable: false,
     defaults: {
       size: [20, 20],
       color: '#2f81f7',
-      opacity: 0.6,
-      waveHeight: 0.1,
+      deepColor: '#0a3d5c',
+      opacity: 0.85,
+      waveHeight: 0.2,
       waveSpeed: 0.5,
+      waterMode: 'lake', // lake | river
+      flowDirection: 0, // 0..360 graus (apenas rio)
+      foamEnabled: true,
+      foamThreshold: 0.7,
+      // Profundidade variável
+      depthGradient: true,
     },
     properties: [
       prop('size', 'Tamanho (X,Z)', 'vec2', [20, 20]),
-      prop('color', 'Cor', 'color', '#2f81f7'),
-      prop('opacity', 'Opacidade', 'number', 0.6, { min: 0, max: 1, step: 0.05 }),
-      prop('waveHeight', 'Altura das ondas', 'number', 0.1, { min: 0, max: 1, step: 0.05 }),
+      prop('color', 'Cor superficial', 'color', '#2f81f7'),
+      prop('deepColor', 'Cor profunda', 'color', '#0a3d5c'),
+      prop('opacity', 'Opacidade', 'number', 0.85, { min: 0, max: 1, step: 0.05 }),
+      prop('waveHeight', 'Altura das ondas', 'number', 0.2, { min: 0, max: 1, step: 0.05 }),
       prop('waveSpeed', 'Velocidade', 'number', 0.5, { min: 0, max: 5, step: 0.1 }),
+      prop('waterMode', 'Modo', 'select', 'lake', { options: ['lake', 'river'] }),
+      prop('flowDirection', 'Direção fluxo (graus)', 'number', 0, { min: 0, max: 360, step: 15 }),
+      prop('foamEnabled', 'Espuma', 'select', 'true', { options: ['true', 'false'] }),
+      prop('foamThreshold', 'Limiar espuma', 'number', 0.7, { min: 0, max: 1, step: 0.05 }),
+      prop('depthGradient', 'Gradiente profundidade', 'select', 'true', { options: ['true', 'false'] }),
     ],
   },
   {
@@ -980,6 +1027,34 @@ export const CONECT_TAXONOMY = [
     },
     properties: [
       prop('prefabData', 'Dados do prefab', 'text', ''),
+    ],
+  },
+
+  // ============ FASE 9: ROGUELIKE ============
+  {
+    type: 'RoguelikeGenerator',
+    label: 'Roguelike Generator (Salas por Seed)',
+    category: 'organization',
+    icon: '🎲',
+    description: 'Gera nível/salas baseado em seed. Reutiliza PrefabObjects para salas modulares. Reinicia em cada "run".',
+    hasPhysics: false,
+    hasVisual: false,
+    flirScriptable: true,
+    defaults: {
+      seed: 12345,
+      roomCount: 5,
+      gridSize: 12, // tamanho de cada sala em unidades
+      // Prefabs de salas modulares que se encaixam (ID de PrefabObject)
+      roomPrefabs: [], // array de sourcePrefabId
+      corridorPrefab: null, // prefab do corredor entre salas
+      // Estado interno da run atual
+      _currentRun: 0,
+      _generatedRooms: 0,
+    },
+    properties: [
+      prop('seed', 'Seed', 'number', 12345, { min: 1, max: 99999, step: 1 }),
+      prop('roomCount', 'Nº de salas', 'number', 5, { min: 1, max: 20, step: 1 }),
+      prop('gridSize', 'Tamanho sala (unidades)', 'number', 12, { min: 4, max: 40, step: 1 }),
     ],
   },
 

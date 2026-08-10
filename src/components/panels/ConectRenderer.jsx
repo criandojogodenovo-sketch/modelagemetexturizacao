@@ -19,6 +19,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js'
 import { flirSkyVertexShader, flirSkyFragmentShader } from '../../utils/flirSkyShader'
+import { createWaterMaterial } from '../../utils/waterShader'
 import { useStore } from '../../store/useStore'
 import { findConectDefinition } from '../../utils/conects/taxonomy'
 import SceneObject from '../3d/SceneObject'
@@ -690,35 +691,44 @@ function TerrainMesh({ conect, setMeshRef }) {
   )
 }
 
-// ===== WaterObject (com ondas animadas via vertex displacement) =====
+// ===== WaterObject (com shader profissional: Gerstner waves, foam, depth, lake/river) =====
 function WaterMesh({ conect, setMeshRef }) {
   const meshRef = useRef()
-  const time = useRef(0)
 
-  // Geometria com subdivisões para ondas
+  // Geometria com subdivisões para ondas (mais densa para Gerstner)
   const geometry = useMemo(() => {
     const [w, h] = conect.size || [20, 20]
-    const g = new THREE.PlaneGeometry(w, h, 32, 32)
+    const g = new THREE.PlaneGeometry(w, h, 48, 48)
     g.rotateX(-Math.PI / 2)
     return g
   }, [conect.size])
 
-  // Animar ondas no useFrame
-  useFrame((_, delta) => {
-    time.current += delta * (conect.waveSpeed || 0.5)
+  // Material profissional com shader
+  const material = useMemo(() => {
+    return createWaterMaterial({
+      color: conect.color,
+      deepColor: conect.deepColor || '#0a3d5c',
+      opacity: conect.opacity ?? 0.85,
+      waveHeight: conect.waveHeight ?? 0.2,
+      waveSpeed: conect.waveSpeed ?? 0.5,
+      waterMode: conect.waterMode || 'lake',
+      flowDirection: conect.flowDirection || 0,
+      foamEnabled: conect.foamEnabled !== false && conect.foamEnabled !== 'false',
+      foamThreshold: conect.foamThreshold ?? 0.7,
+      depthGradient: conect.depthGradient !== false && conect.depthGradient !== 'false',
+      skyColor: '#88aacc',
+    })
+  }, [conect.color, conect.deepColor, conect.opacity, conect.waveHeight, conect.waveSpeed,
+      conect.waterMode, conect.flowDirection, conect.foamEnabled, conect.foamThreshold,
+      conect.depthGradient])
+
+  // Atualizar uTime e uCameraPos no useFrame
+  useFrame((state, delta) => {
     if (!meshRef.current) return
-    const pos = meshRef.current.geometry.attributes.position
-    const waveHeight = conect.waveHeight || 0.1
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i)
-      const z = pos.getZ(i)
-      // Ondas senoidais combinadas
-      const y = Math.sin(x * 0.5 + time.current) * waveHeight
-        + Math.cos(z * 0.5 + time.current * 0.7) * waveHeight * 0.5
-      pos.setY(i, y)
+    if (meshRef.current.material && meshRef.current.material.uniforms) {
+      meshRef.current.material.uniforms.uTime.value += delta
+      meshRef.current.material.uniforms.uCameraPos.value.copy(state.camera.position)
     }
-    pos.needsUpdate = true
-    meshRef.current.geometry.computeVertexNormals()
   })
 
   return (
@@ -729,15 +739,8 @@ function WaterMesh({ conect, setMeshRef }) {
       }}
       position={conect.position}
       geometry={geometry}
-    >
-      <meshStandardMaterial
-        color={conect.color}
-        transparent
-        opacity={conect.opacity}
-        roughness={0.1}
-        metalness={0.3}
-      />
-    </mesh>
+      material={material}
+    />
   )
 }
 

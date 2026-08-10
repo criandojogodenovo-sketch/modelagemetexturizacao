@@ -7,7 +7,7 @@
  * Acessível via Menu Principal → ⚙️ Configurações
  */
 import { useState } from 'react'
-import { useStore } from '../../store/useStore'
+import { useStore, QUALITY_PRESETS } from '../../store/useStore'
 import { IconClose } from '../ui/Icons'
 
 const HOTKEYS = [
@@ -24,6 +24,9 @@ const HOTKEYS = [
 export default function SettingsPanel({ onClose }) {
   const toast = useStore((s) => s.toast)
   const exportProjectJSON = useStore((s) => s.exportProjectJSON)
+  const renderSettings = useStore((s) => s.renderSettings)
+  const setRenderSettings = useStore((s) => s.setRenderSettings)
+  const setQualityLevel = useStore((s) => s.setQualityLevel)
   const [projectName, setProjectName] = useState(() => {
     try {
       const data = JSON.parse(localStorage.getItem('me3d.project.v1') || '{}')
@@ -72,6 +75,36 @@ export default function SettingsPanel({ onClose }) {
         </div>
 
         <div className="panel-body">
+          {/* FASE 6: Níveis de Qualidade Gráfica */}
+          <div className="panel-section">
+            <h4>🎨 Nível de Qualidade Gráfica</h4>
+            <div className="small muted mb-2">
+              Cada nível ativa progressivamente mais recursos pesados.
+              Valores de FPS estimados para Realme C33 / WebGL2.
+            </div>
+            {Object.entries(QUALITY_PRESETS).map(([key, preset]) => (
+              <button
+                key={key}
+                onClick={() => { setQualityLevel(key); toast(`Qualidade: ${preset.label}`, 'success') }}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  padding: '8px 12px',
+                  marginBottom: 6,
+                  borderRadius: 6,
+                  border: renderSettings.qualityLevel === key ? '2px solid #2f81f7' : '1px solid #30363d',
+                  background: renderSettings.qualityLevel === key ? '#161b22' : '#0d1117',
+                  color: '#e6edf3',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{preset.label}</div>
+                <div className="small muted">{preset.description}</div>
+              </button>
+            ))}
+          </div>
+
           {/* Configurações do Projeto */}
           <div className="panel-section">
             <h4>📦 Projeto</h4>
