@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-skills/
-node_modules/
-=======
 # Logs
 logs
 *.log
@@ -15,6 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
+skills/
 
 # Editor directories and files
 .vscode/*
@@ -31,4 +28,11 @@ dist-ssr
 .netlify
 .env
 .env.local
->>>>>>> 58644ffd648332134ac77b43097f8f36b918b149
+
+# Duplicados do submodule (não commitar no repo pai)
+src/
+public/
+index.html
+package.json
+package-lock.json
+vite.config.js
