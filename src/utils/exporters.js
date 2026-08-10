@@ -257,11 +257,17 @@ export async function importOBJ(file) {
 
 // Importa um ficheiro .fbx (binary ou ASCII) usando FBXLoader do three.js
 // Suporta modelos simples (só malha) e modelos com rigs/animações
-export async function importFBX(file) {
+// onProgress: callback opcional para reportar fase de importação
+export async function importFBX(file, onProgress) {
+  onProgress?.('A ler ficheiro FBX...')
   const arrayBuffer = await file.arrayBuffer()
   const THREE = await import('three')
   const { FBXLoader } = await import('three/examples/jsm/loaders/FBXLoader.js')
   const loader = new FBXLoader()
+
+  onProgress?.('A processar geometria FBX (pode demorar)...')
+  // Ceder controlo à UI antes do parse síncrono pesado
+  await new Promise(r => setTimeout(r, 50))
 
   let object
   try {
@@ -270,12 +276,17 @@ export async function importFBX(file) {
     throw new Error('Falha ao fazer parse do FBX: ' + err.message)
   }
 
+  onProgress?.('A extrair meshes...')
+  // Ceder controlo à UI
+  await new Promise(r => setTimeout(r, 50))
+
   // Extrair meshes
   const meshes = extractMeshes(object)
   const objects = meshes.map((mesh, i) => {
     const obj = meshToStoreObject(mesh, i)
     // FBX pode ter esqueleto e animações
     if (mesh.skeleton) {
+      onProgress?.('A processar esqueleto (' + mesh.skeleton.bones.length + ' ossos)...')
       obj.skeleton = {
         bones: mesh.skeleton.bones.map((bone, j) => ({
           id: bone.name || `bone_${j}`,
@@ -286,17 +297,26 @@ export async function importFBX(file) {
           parent: bone.parent ? (bone.parent.name || null) : null,
         })),
       }
+      // Corrigir: parentId em vez de parent (compatibilidade com SceneObject)
+      obj.skeleton.bones.forEach((bone, idx) => {
+        const parentName = bone.parent
+        delete bone.parent
+        bone.parentId = parentName
+          ? (obj.skeleton.bones.find(b => b.name === parentName)?.id || null)
+          : null
+      })
     }
     // Animações do FBX (THREE.AnimationClip[])
     if (object.animations && object.animations.length > 0) {
+      onProgress?.('A processar animações (' + object.animations.length + ' clips)...')
       obj.animations = {}
       for (const clip of object.animations) {
-        // Converter AnimationClip para formato do animationPlayer
         obj.animations[clip.name || `anim_${i}`] = clip
       }
     }
     return obj
   })
 
+  onProgress?.('A finalizar importação...')
   return objects
 }

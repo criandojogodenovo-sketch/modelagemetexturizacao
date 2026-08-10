@@ -137,32 +137,74 @@ export default function TopBar() {
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
-    setUI({ loading: true, loadingMessage: 'A importar modelo...' })
+
+    // Feedback de progresso com mensagens faseadas
+    const fileSizeMB = (file.size / 1024 / 1024).toFixed(1)
+    setUI({ loading: true, loadingMessage: `A ler ficheiro ${importType.toUpperCase()} (${fileSizeMB} MB)...` })
+
+    // Timeout: se demorar mais de 30 segundos, abortar
+    let timeoutId
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error('Timeout: a importação demorou demasiado (>30s). O ficheiro pode ser demasiado complexo para este dispositivo.'))
+      }, 30000)
+    })
+
+    // Progresso faseado (atualiza mensagem a cada 3 segundos)
+    let progressPhase = 0
+    const progressMessages = importType === 'fbx'
+      ? ['A ler ficheiro FBX...', 'A processar geometria...', 'A processar esqueleto...', 'A processar animações...', 'A finalizar importação...']
+      : ['A processar modelo...', 'A extrair meshes...', 'A finalizar importação...']
+    const progressInterval = setInterval(() => {
+      progressPhase = Math.min(progressPhase + 1, progressMessages.length - 1)
+      setUI({ loading: true, loadingMessage: progressMessages[progressPhase] })
+    }, 3000)
+
     try {
       let importedObjects = []
-      if (importType === 'glb') {
-        importedObjects = await importGLB(file)
-      } else if (importType === 'gltf') {
-        importedObjects = await importGLTF(file)
-      } else if (importType === 'obj') {
-        importedObjects = await importOBJ(file)
-      } else if (importType === 'fbx') {
-        importedObjects = await importFBX(file)
-      } else if (importType === 'json' || importType === 'flirengine') {
-        const text = await file.text()
-        loadProjectJSON(text)
-        toast('Projeto .flirengine carregado', 'success')
-        setUI({ loading: false })
-        e.target.value = ''
-        return
-      }
+      const importPromise = (async () => {
+        if (importType === 'glb') {
+          // Ceder controlo para a UI atualizar antes do parse síncrono
+          await new Promise(r => setTimeout(r, 50))
+          setUI({ loading: true, loadingMessage: 'A processar GLB...' })
+          return await importGLB(file)
+        } else if (importType === 'gltf') {
+          await new Promise(r => setTimeout(r, 50))
+          setUI({ loading: true, loadingMessage: 'A processar GLTF...' })
+          return await importGLTF(file)
+        } else if (importType === 'obj') {
+          await new Promise(r => setTimeout(r, 50))
+          setUI({ loading: true, loadingMessage: 'A processar OBJ...' })
+          return await importOBJ(file)
+        } else if (importType === 'fbx') {
+          // FBX é síncrono e pesado — ceder controlo à UI antes de iniciar
+          await new Promise(r => setTimeout(r, 100))
+          setUI({ loading: true, loadingMessage: 'A processar FBX (pode demorar)...' })
+          return await importFBX(file, (phase) => {
+            setUI({ loading: true, loadingMessage: phase })
+          })
+        } else if (importType === 'json' || importType === 'flirengine') {
+          const text = await file.text()
+          loadProjectJSON(text)
+          toast('Projeto .flirengine carregado', 'success')
+          setUI({ loading: false })
+          e.target.value = ''
+          return null
+        }
+      })()
 
-      // Adiciona cada objeto importado à cena
+      const result = await Promise.race([importPromise, timeoutPromise])
+      if (result === null) return // já tratado (flirengine)
+
+      importedObjects = result
       importedObjects.forEach((obj) => addImportedObject(obj))
       toast(`${importedObjects.length} objeto(s) importado(s)`, 'success')
     } catch (err) {
       toast('Erro ao importar: ' + err.message, 'error')
+      console.error('Erro de importação:', err)
     } finally {
+      clearTimeout(timeoutId)
+      clearInterval(progressInterval)
       setUI({ loading: false })
       e.target.value = ''
     }

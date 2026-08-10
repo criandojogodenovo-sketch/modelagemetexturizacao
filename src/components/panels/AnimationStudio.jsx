@@ -200,10 +200,26 @@ export default function AnimationStudio({ onClose }) {
       toast('Apenas ficheiros .fbx são suportados', 'error')
       return
     }
-    toast('A importar FBX...', 'info')
+
+    const fileSizeMB = (file.size / 1024 / 1024).toFixed(1)
+    toast(`A importar FBX (${fileSizeMB} MB)...`, 'info')
+
+    // Timeout de 30s
+    let timeoutId
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error('Timeout: FBX demasiado complexo (>30s)'))
+      }, 30000)
+    })
+
     try {
       const buffer = await fileToArrayBuffer(file)
-      const { skeleton: fbxSkeleton, animations: fbxAnimations, geometryData } = await parseFBX(buffer)
+      toast('A processar FBX (pode demorar)...', 'info')
+      // Ceder controlo à UI
+      await new Promise(r => setTimeout(r, 50))
+
+      const parsePromise = parseFBX(buffer)
+      const { skeleton: fbxSkeleton, animations: fbxAnimations, geometryData } = await Promise.race([parsePromise, timeoutPromise])
 
       // 1. Adicionar modelo ao catálogo (como objeto importado)
       if (geometryData) {
@@ -243,8 +259,10 @@ export default function AnimationStudio({ onClose }) {
     } catch (err) {
       console.error('Erro ao importar FBX:', err)
       toast('Erro ao importar FBX: ' + err.message, 'error')
+    } finally {
+      clearTimeout(timeoutId)
+      e.target.value = ''
     }
-    e.target.value = ''
   }
 
   const handleAddKeyframe = () => {
@@ -425,7 +443,11 @@ export default function AnimationStudio({ onClose }) {
                 e poderão ser usadas no Controlador de Animação ou via FlirScript.
               </div>
               <div className="file-input-wrap">
-                <button onClick={() => fileInputRef.current?.click()}>
+                <button
+                  onClick={(e) => { e.preventDefault(); fileInputRef.current?.click() }}
+                  onTouchStart={(e) => { e.preventDefault(); fileInputRef.current?.click() }}
+                  style={{ width: '100%', padding: '8px', touchAction: 'manipulation' }}
+                >
                   📁 Carregar ficheiro .fbx
                 </button>
                 <input
