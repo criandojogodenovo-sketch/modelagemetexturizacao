@@ -10,7 +10,7 @@
  *   <Icon name="cube" color="var(--accent)" />
  *
  * Para Conects (taxonomy.js), usar o nome do ícone em vez de emoji:
- *   icon: 'cube'  // em vez de '📦'
+ *   icon: 'cube'  // em vez de 'package'
  */
 
 import {

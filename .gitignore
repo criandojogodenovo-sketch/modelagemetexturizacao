@@ -28,11 +28,3 @@ skills/
 .netlify
 .env
 .env.local
-
-# Duplicados do submodule (não commitar no repo pai)
-src/
-public/
-index.html
-package.json
-package-lock.json
-vite.config.js

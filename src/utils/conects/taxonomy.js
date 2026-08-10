@@ -967,7 +967,7 @@ export const CONECT_TAXONOMY = [
       prop('itemName', 'Nome do item', 'text', 'Item'),
       prop('itemType', 'Tipo', 'select', 'generic', { options: ['generic', 'weapon', 'consumable', 'material'] }),
       prop('quantity', 'Quantidade', 'number', 1, { min: 1, max: 999, step: 1 }),
-      prop('icon', 'Ícone (emoji)', 'text', '📦'),
+      prop('icon', 'Ícone (emoji)', 'text', 'package'),
       prop('pickupRadius', 'Raio de apanha', 'number', 2, { min: 0.5, max: 10, step: 0.5 }),
       prop('autoPickup', 'Apanhar automático', 'boolean', true),
     ],

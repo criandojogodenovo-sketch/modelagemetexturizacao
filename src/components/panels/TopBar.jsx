@@ -372,9 +372,7 @@ export default function TopBar() {
         onClick={toggleMainMenu}
         title="Menu principal (UI, Shaders, Projeto, Debug...)"
         className="icon"
-      >
-        📋
-      </button>
+      ></button>
 
       <button
         className="icon drawer-toggle"
