@@ -16,6 +16,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useStore, useSelectedObject } from '../../store/useStore'
 import { IconClose, IconPlay, IconPause, IconKey, IconBone, IconTrash, IconPlus } from '../ui/Icons'
 import { fileToArrayBuffer } from '../../utils/helpers'
+import { parseFBXViaWorker } from '../../utils/fbxImportWorkerClient'
 
 // Parser simples para FBX — usa FBXLoader do three.js
 async function parseFBX(arrayBuffer) {
@@ -204,21 +205,22 @@ export default function AnimationStudio({ onClose }) {
     const fileSizeMB = (file.size / 1024 / 1024).toFixed(1)
     toast(`A importar FBX (${fileSizeMB} MB)...`, 'info')
 
-    // Timeout de 30s
+    // Timeout de 60s (worker é mais lento mas não bloqueia UI)
     let timeoutId
     const timeoutPromise = new Promise((_, reject) => {
       timeoutId = setTimeout(() => {
-        reject(new Error('Timeout: FBX demasiado complexo (>30s)'))
-      }, 30000)
+        reject(new Error('Timeout: FBX demasiado complexo (>60s)'))
+      }, 60000)
     })
 
     try {
-      const buffer = await fileToArrayBuffer(file)
-      toast('A processar FBX (pode demorar)...', 'info')
-      // Ceder controlo à UI
-      await new Promise(r => setTimeout(r, 50))
+      // FBX agora via Web Worker — NÃO bloqueia a main thread
+      // (buffer não é necessário aqui, parseFBXViaWorker lê o File internamente)
+      toast('A processar FBX via worker (UI continua responsiva)...', 'info')
 
-      const parsePromise = parseFBX(buffer)
+      const parsePromise = parseFBXViaWorker(file, (phase) => {
+        toast(phase, 'info')
+      })
       const { skeleton: fbxSkeleton, animations: fbxAnimations, geometryData } = await Promise.race([parsePromise, timeoutPromise])
 
       // 1. Adicionar modelo ao catálogo (como objeto importado)

@@ -14,6 +14,7 @@ import { useRef, useState } from 'react'
 import { useStore } from '../../store/useStore'
 import { HOTKEYS } from '../../hooks/useHotkeys'
 import { exportSceneAsGLB, exportSceneAsOBJ, importGLB, importGLTF, importOBJ, importFBX } from '../../utils/exporters'
+import { importFBXViaWorker } from '../../utils/fbxImportWorkerClient'
 import {
   IconMenu,
   IconUndo,
@@ -177,10 +178,10 @@ export default function TopBar() {
           setUI({ loading: true, loadingMessage: 'A processar OBJ...' })
           return await importOBJ(file)
         } else if (importType === 'fbx') {
-          // FBX é síncrono e pesado — ceder controlo à UI antes de iniciar
-          await new Promise(r => setTimeout(r, 100))
-          setUI({ loading: true, loadingMessage: 'A processar FBX (pode demorar)...' })
-          return await importFBX(file, (phase) => {
+          // FBX agora via Web Worker — NÃO bloqueia a main thread
+          // O progresso é reportado por mensagens REAIS do worker (não setTimeout)
+          setUI({ loading: true, loadingMessage: 'A iniciar worker FBX...' })
+          return await importFBXViaWorker(file, (phase) => {
             setUI({ loading: true, loadingMessage: phase })
           })
         } else if (importType === 'json' || importType === 'flirengine') {
