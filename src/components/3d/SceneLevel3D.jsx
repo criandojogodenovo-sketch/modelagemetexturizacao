@@ -106,6 +106,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   const inventoryRef = useRef({})
   const weaponStateRef = useRef({ equipped: false, ammo: 0, maxAmmo: 0, damage: 0, fireRate: 0.3, range: 50, reloadTime: 2, lastShot: 0 })
   const collisionEventsRef = useRef(new Map()) // instanceId → Set de otherIds em contacto
+  const checkpointRef = useRef(null) // último checkpoint registado
 
   // Expor meshRefs globalmente para TrailObject poder seguir objetos
   useEffect(() => {
@@ -428,6 +429,31 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       setCameraSensitivity: (value) => {
         if (window._flirCameraRotation) window._flirCameraRotation.sensitivity = value
       },
+
+      // ===== Checkpoint — respawn =====
+      respawnAtCheckpoint: () => {
+        if (!checkpointRef.current) {
+          // Tentar carregar do localStorage
+          try {
+            const saved = localStorage.getItem('flir_checkpoint')
+            if (saved) checkpointRef.current = JSON.parse(saved)
+          } catch (e) {}
+        }
+        if (checkpointRef.current) {
+          const player = (setupScene?.conects || []).find((c) => c.type === 'PersonalObject')
+          if (player) {
+            const playerMesh = conectMeshRefs.current.get(player.instanceId)
+            if (playerMesh) {
+              playerMesh.position.set(...checkpointRef.current.position)
+              if (physicsRef.current) {
+                physicsRef.current.bodies.get(player.instanceId)?.body?.position.set(...checkpointRef.current.position)
+              }
+              debugLog('Respawn no checkpoint!', 'log', 'Checkpoint')
+            }
+          }
+        }
+      },
+      getLastCheckpoint: () => checkpointRef.current,
 
       // ===== Roguelike — run progress + geração de salas =====
       _runState: { runId: 0, seed: 0, started: false },
@@ -893,8 +919,36 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       }
     }
 
-    // NavigatorObject — transporta jogador para outra cena quando próximo
+    // CheckpointObject — registar checkpoint quando jogador toca
     const player3 = (setupScene?.conects || []).find((c) => c.type === 'PersonalObject')
+    if (player3) {
+      const playerMesh = conectMeshRefs.current.get(player3.instanceId)
+      if (playerMesh) {
+        for (const cp of setupScene?.conects || []) {
+          if (cp.type === 'CheckpointObject') {
+            const cpMesh = conectMeshRefs.current.get(cp.instanceId)
+            if (cpMesh && cpMesh.visible !== false) {
+              const dist = playerMesh.position.distanceTo(cpMesh.position)
+              if (dist <= (cp.triggerRadius || 2)) {
+                // Registar checkpoint
+                checkpointRef.current = {
+                  position: [cpMesh.position.x, cpMesh.position.y, cpMesh.position.z],
+                  sceneId: setupScene.id,
+                }
+                // Guardar no localStorage
+                try {
+                  localStorage.setItem('flir_checkpoint', JSON.stringify(checkpointRef.current))
+                } catch (e) {}
+                // Disparar evento
+                const rt = runtimesRef.current.get(cp.instanceId)
+                if (rt) rt.triggerEvent('onCheckpoint', { position: checkpointRef.current.position })
+                debugLog('Checkpoint atingido!', 'log', 'Checkpoint')
+              }
+            }
+          }
+        }
+      }
+    }
     if (player3) {
       const playerMesh = conectMeshRefs.current.get(player3.instanceId)
       if (playerMesh) {

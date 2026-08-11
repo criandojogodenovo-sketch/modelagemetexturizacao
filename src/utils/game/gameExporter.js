@@ -1,16 +1,19 @@
 /**
  * gameExporter.js — gera um build jogável autónomo a partir do projeto.
  *
- * **Fase 6 (reconstruído)**: O HTML exportado inclui:
+ * O HTML exportado inclui:
  *  - Runtime completo como <script> embutido (de gameRuntime.js)
- *  - Three.js + cannon-es via CDN
- *  - FlirCode parser + runtime
+ *  - Three.js + cannon-es via importmap (CDN com fallback)
+ *  - FlirCode parser + runtime (com if/else/switch/case)
  *  - Física ativa com Conects
  *  - GameUIOverlay com todos os ecrãs
  *  - Câmara do ViewObject ativo
  *  - Eventos: onStart, onTick, onCollide, onClick, onChange, etc.
  *
- * O HTML exportado é funcionalmente idêntico ao "Executar Jogo" do editor.
+ * Nota: O HTML usa importmap para carregar three.js e cannon-es.
+ * Requer conexão à internet na primeira execução (CDN jsdelivr).
+ * Para uso 100% offline, copiar three.module.js e cannon-es.js para
+ * a mesma pasta e alterar o importmap para caminhos relativos.
  */
 import { downloadText } from '../helpers'
 import gameRuntimeSource from './gameRuntime.js?raw'

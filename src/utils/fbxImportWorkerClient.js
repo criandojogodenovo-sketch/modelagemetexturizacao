@@ -14,6 +14,7 @@
  */
 import * as THREE from 'three'
 import { defaultMaterial } from './primitives'
+import { serializeAnimations } from './animationSerializer'
 
 let workerInstance = null
 
@@ -183,12 +184,13 @@ function reconstructObjectsFromWorkerData(data) {
       }
     }
 
-    // Animações (THREE.AnimationClip[] reconstruídos)
+    // Animações — serializar para JSON plain (persistência via localStorage)
     if (threeAnimations && threeAnimations.length > 0) {
-      obj.animations = {}
+      const animDict = {}
       for (const clip of threeAnimations) {
-        obj.animations[clip.name || `anim_${i}`] = clip
+        animDict[clip.name || `anim_${i}`] = clip
       }
+      obj.animations = serializeAnimations(animDict)
     }
 
     return obj

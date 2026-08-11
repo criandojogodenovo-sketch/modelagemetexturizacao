@@ -22,6 +22,7 @@ import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js'
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js'
 import { PRIMITIVES, defaultMaterial } from './primitives'
 import { downloadBlob } from './helpers'
+import { serializeAnimations } from './animationSerializer'
 
 // ============ EXPORT ============
 
@@ -306,13 +307,14 @@ export async function importFBX(file, onProgress) {
           : null
       })
     }
-    // Animações do FBX (THREE.AnimationClip[])
+    // Animações do FBX — serializar para JSON plain (persistência)
     if (object.animations && object.animations.length > 0) {
       onProgress?.('A processar animações (' + object.animations.length + ' clips)...')
-      obj.animations = {}
+      const animDict = {}
       for (const clip of object.animations) {
-        obj.animations[clip.name || `anim_${i}`] = clip
+        animDict[clip.name || `anim_${i}`] = clip
       }
+      obj.animations = serializeAnimations(animDict)
     }
     return obj
   })

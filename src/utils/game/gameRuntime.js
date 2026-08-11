@@ -85,7 +85,42 @@ function createFlirCodeRuntime(src, gc) {
     var m
     if (m = s.t.match(/^var\s+(\w+)\s*=\s*(.+)$/)) { vars[m[1]] = evalVal(m[2], vars, gc); return }
     if (m = s.t.match(/^(\w+)\s*=\s*(.+)$/)) { vars[m[1]] = evalVal(m[2], vars, gc); return }
-    if (m = s.t.match(/^if\s*\((.+)\)$/)) { if (evalCond(m[1], vars, gc)) { /* procurar begincode seguinte */ } return }
+    if (m = s.t.match(/^if\s*\((.+)\)$/)) {
+      var cond = evalCond(m[1], vars, gc)
+      if (cond) {
+        // Procurar o begincode seguinte e executar o bloco
+        var bi = s.l // linha atual
+        // Procurar begincode nas linhas seguintes
+        for (var j = 0; j < cl.length; j++) {
+          if (cl[j].l > bi && cl[j].t === 'begincode') {
+            // Encontrar endcode correspondente
+            var depth = 1
+            var blockStmts = []
+            for (var k = j + 1; k < cl.length && depth > 0; k++) {
+              if (cl[k].t === 'begincode') depth++
+              else if (cl[k].t === 'endcode') depth--
+              else if (depth === 1) blockStmts.push(cl[k])
+            }
+            // Executar bloco
+            for (var bi2 = 0; bi2 < blockStmts.length; bi2++) {
+              try { execS(blockStmts[bi2], params) } catch (e) { dbg('Erro: ' + e.message, 'error') }
+            }
+            return
+          }
+        }
+      }
+      return
+    }
+    // else if
+    if (m = s.t.match(/^else\s+if\s*\((.+)\)$/)) {
+      // Processado no contexto do if anterior — ignorar aqui
+      return
+    }
+    // else
+    if (s.t === 'else') {
+      // Processado no contexto do if anterior — ignorar aqui
+      return
+    }
     if (m = s.t.match(/^(\w+)\s*\(([^)]*)\)$/)) {
       execBuiltin(m[1], m[2].split(',').map(function (a) { return evalVal(a.trim(), vars, gc) }), params)
       return
