@@ -1,0 +1,1285 @@
+     1→/**
+     2→ * SceneLevel3D — viewport 3D para o editor de cenas E para o modo de jogo.
+     3→ *
+     4→ * **Fase 6 (reescrito)**: Um único Canvas WebGL para editor e jogo.
+     5→ * Quando scenePreviewOpen é true, o modo "jogo" é activado:
+     6→ *  - Gizmos e OrbitControls desactivados
+     7→ *  - Física cannon-es activada
+     8→ *  - FlirCode runtimes iniciados
+     9→ *  - ViewObject ativa usada como câmara
+    10→ *  - GameUIOverlay renderizado sobre o canvas
+    11→ *
+    12→ * Isto elimina o problema de WebGL context loss que ocorria quando
+    13→ * dois Canvas WebGL coexistiam.
+    14→ */
+    15→import { Suspense, useEffect, useRef, useState, useCallback, useMemo } from 'react'
+    16→import { Canvas, useThree, useFrame } from '@react-three/fiber'
+    17→import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-three/drei'
+    18→import * as THREE from 'three'
+    19→import SceneObject from './SceneObject'
+    20→import ConectRenderer from '../panels/ConectRenderer'
+    21→import { useStore } from '../../store/useStore'
+    22→import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
+    23→import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
+    24→import { createFlirCodeRuntime } from '../../utils/flirscript/flircode'
+    25→import { createAnimationPlayer } from '../../utils/animationPlayer'
+    26→import { createNPCAI } from '../../utils/conects/npcAI'
+    27→import { debugLog } from '../../utils/debug/debugStore'
+    28→
+    29→function PlayerMarker({ position }) {
+    30→  return (
+    31→    <group position={position}>
+    32→      <mesh position={[0, 1.5, 0]}>
+    33→        <coneGeometry args={[0.2, 0.4, 16]} />
+    34→        <meshBasicMaterial color="#3fb950" />
+    35→      </mesh>
+    36→      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+    37→        <ringGeometry args={[0.6, 0.7, 32]} />
+    38→        <meshBasicMaterial color="#3fb950" transparent opacity={0.6} side={THREE.DoubleSide} />
+    39→      </mesh>
+    40→    </group>
+    41→  )
+    42→}
+    43→
+    44→function GameCameraGizmo({ camera }) {
+    45→  if (!camera) return null
+    46→  return (
+    47→    <group position={camera.position} rotation={camera.rotation}>
+    48→      <mesh>
+    49→        <boxGeometry args={[0.4, 0.3, 0.5]} />
+    50→        <meshBasicMaterial color="#f4a261" wireframe />
+    51→      </mesh>
+    52→    </group>
+    53→  )
+    54→}
+    55→
+    56→// Componente interno que aplica o fundo da cena
+    57→function SceneBackgroundSolid({ background }) {
+    58→  const { scene } = useThree()
+    59→  useEffect(() => {
+    60→    if (background.type === 'gradient') {
+    61→      const canvas = document.createElement('canvas')
+    62→      canvas.width = 2; canvas.height = 256
+    63→      const ctx = canvas.getContext('2d')
+    64→      const grad = ctx.createLinearGradient(0, 0, 0, 256)
+    65→      grad.addColorStop(0, background.gradientTop)
+    66→      grad.addColorStop(1, background.gradientBottom)
+    67→      ctx.fillStyle = grad; ctx.fillRect(0, 0, 2, 256)
+    68→      const tex = new THREE.CanvasTexture(canvas)
+    69→      tex.colorSpace = THREE.SRGBColorSpace
+    70→      scene.background = tex
+    71→      return () => tex.dispose()
+    72→    } else {
+    73→      scene.background = new THREE.Color(background.color)
+    74→    }
+    75→  }, [background, scene])
+    76→  return null
+    77→}
+    78→
+    79→// ===== FogApplier — aplica FogObject à cena 3D =====
+    80→function FogApplier({ conects }) {
+    81→  const { scene } = useThree()
+    82→  const fogConect = (conects || []).find(c => c.type === 'FogObject')
+    83→  useEffect(() => {
+    84→    if (!fogConect) {
+    85→      scene.fog = null
+    86→      return
+    87→    }
+    88→    if (fogConect.fogType === 'exponential') {
+    89→      scene.fog = new THREE.FogExp2(fogConect.color || '#a0a0a0', fogConect.density || 0.02)
+    90→    } else {
+    91→      scene.fog = new THREE.Fog(fogConect.color || '#a0a0a0', fogConect.near || 5, fogConect.far || 50)
+    92→    }
+    93→  }, [fogConect?.fogType, fogConect?.color, fogConect?.near, fogConect?.far, fogConect?.density, scene])
+    94→  return null
+    95→}
+    96→
+    97→// ===== Componente que gere o modo jogo dentro do canvas =====
+    98→function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }) {
+    99→  const { camera } = useThree()
+   100→  const physicsRef = useRef(null)
+   101→  const runtimesRef = useRef(new Map())
+   102→  const animPlayersRef = useRef(new Map())
+   103→  const npcAIsRef = useRef(new Map())
+   104→  const timerStatesRef = useRef(new Map())
+   105→  const joystickRef = useRef({ x: 0, z: 0, active: false })
+   106→  const inventoryRef = useRef({})
+   107→  const weaponStateRef = useRef({ equipped: false, ammo: 0, maxAmmo: 0, damage: 0, fireRate: 0.3, range: 50, reloadTime: 2, lastShot: 0 })
+   108→  const collisionEventsRef = useRef(new Map()) // instanceId → Set de otherIds em contacto
+   109→  const checkpointRef = useRef(null) // último checkpoint registado
+   110→
+   111→  // Expor meshRefs globalmente para TrailObject poder seguir objetos
+   112→  useEffect(() => {
+   113→    window._flirConectMeshRefs = conectMeshRefs
+   114→    window._flirMeshRefs = meshRefs
+   115→    return () => {
+   116→      window._flirConectMeshRefs = null
+   117→      window._flirMeshRefs = null
+   118→    }
+   119→  }, [conectMeshRefs, meshRefs])
+   120→
+   121→  // P2.5 fix: armazenar a cena ativa num ref para que modificações feitas pelo
+   122→  // FlirCode (createObject, etc.) NÃO reiniciem o jogo (evita loop infinito).
+   123→  // O useEffect só deve correr quando isGameMode muda (true→false ou false→true),
+   124→  // não quando activeScene é modificado por spawnObject.
+   125→  const activeSceneRef = useRef(activeScene)
+   126→  const objectsRef = useRef(objects)
+   127→  const gameStartedRef = useRef(false)
+   128→
+   129→  // Expor joystickRef globalmente para o GameUIOverlay poder atualizá-lo
+   130→  useEffect(() => {
+   131→    window._flirJoystick = joystickRef.current
+   132→    return () => { window._flirJoystick = null }
+   133→  }, [])
+   134→
+   135→  // Use o ref para o setup
+   136→  const setupScene = activeSceneRef.current
+   137→
+   138→  // Fase 5: Expor multiplayer globalmente e configurar sync de estado do PersonalObject
+   139→  useEffect(() => {
+   140→    if (!isGameMode) return
+   141→    let mp
+   142→    import('../../utils/multiplayer/multiplayerManager').then(({ multiplayer }) => {
+   143→      mp = multiplayer
+   144→      window._multiplayer = mp
+   145→      // Configurar getter de estado local (posição do PersonalObject)
+   146→      mp.setLocalStateGetter(() => {
+   147→        for (const conect of setupScene?.conects || []) {
+   148→          if (conect.type === 'PersonalObject') {
+   149→            const mesh = conectMeshRefs.current.get(conect.instanceId)
+   150→            if (mesh) {
+   151→              return {
+   152→                position: [mesh.position.x, mesh.position.y, mesh.position.z],
+   153→                rotation: [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
+   154→                playerId: mp.playerId,
+   155→              }
+   156→            }
+   157→          }
+   158→        }
+   159→        return null
+   160→      })
+   161→      // Registar callbacks para eventos multiplayer → FlirCode
+   162→      mp.on('playerJoin', (playerId) => {
+   163→        for (const rt of runtimesRef.current.values()) {
+   164→          rt.triggerEvent('onPlayerJoin', { playerId })
+   165→        }
+   166→      })
+   167→      mp.on('playerLeave', (playerId) => {
+   168→        for (const rt of runtimesRef.current.values()) {
+   169→          rt.triggerEvent('onPlayerLeave', { playerId })
+   170→        }
+   171→      })
+   172→      mp.on('message', (playerId, data) => {
+   173→        for (const rt of runtimesRef.current.values()) {
+   174→          rt.triggerEvent('onMessage', { playerId, data })
+   175→        }
+   176→      })
+   177→    })
+   178→    return () => {
+   179→      window._multiplayer = null
+   180→    }
+   181→  }, [isGameMode, setupScene])
+   182→
+   183→  // Atualizar refs sem re-disparar o useEffect
+   184→  useEffect(() => {
+   185→    // Só atualizar o ref se o jogo ainda não começou OU se a cena mudou de verdade
+   186→    // (não por spawnObject, mas por mudança de cena manual via changeScene)
+   187→    if (!gameStartedRef.current || (activeScene && activeScene.id !== activeSceneRef.current?.id)) {
+   188→      activeSceneRef.current = activeScene
+   189→      objectsRef.current = objects
+   190→    } else {
+   191→      // Jogo em curso: manter o snapshot antigo, mas atualizar objects (para spawn)
+   192→      objectsRef.current = objects
+   193→    }
+   194→  }, [activeScene, objects])
+   195→
+   196→  // Setup quando o modo jogo é activado
+   197→  useEffect(() => {
+   198→    if (!isGameMode || !setupScene) return
+   199→    gameStartedRef.current = true
+   200→
+   201→    debugLog('Jogo iniciado', 'log', 'Game')
+   202→
+   203→    // Criar gameContext
+   204→    const gameContext = {
+   205→      globalVars: { _score: 0 },
+   206→      // P2.5: setVar/getVar — expostos no gameContext para o FlirCode
+   207→      setVar: (name, value) => { gameContext.globalVars[name] = value },
+   208→      getVar: (name) => gameContext.globalVars[name] ?? 0,
+   209→      moveObject: (instanceId, direction, speed) => {
+   210→        const mesh = meshRefs.current.get(instanceId) || conectMeshRefs.current.get(instanceId)
+   211→        if (mesh) {
+   212→          mesh.position.x += direction[0] * speed * 0.016
+   213→          mesh.position.y += direction[1] * speed * 0.016
+   214→          mesh.position.z += direction[2] * speed * 0.016
+   215→        }
+   216→      },
+   217→      rotateObject: (instanceId, rotation) => {
+   218→        const mesh = meshRefs.current.get(instanceId) || conectMeshRefs.current.get(instanceId)
+   219→        if (mesh) {
+   220→          mesh.rotation.x += THREE.MathUtils.degToRad(rotation[0]) * 0.016
+   221→          mesh.rotation.y += THREE.MathUtils.degToRad(rotation[1]) * 0.016
+   222→          mesh.rotation.z += THREE.MathUtils.degToRad(rotation[2]) * 0.016
+   223→        }
+   224→      },
+   225→      playAnimation: (instanceId, clip) => {
+   226→        const player = animPlayersRef.current.get(instanceId)
+   227→        if (player) {
+   228→          // Usar blendTime do AnimationBoostObject se existir
+   229→          const boost = (setupScene?.conects || []).find((c) => c.type === 'AnimationBoostObject')
+   230→          player.play(clip, { loop: true, blendTime: boost?.blendTime ?? 0.3 })
+   231→        }
+   232→      },
+   233→      playSound: (url) => { try { new Audio(url).play() } catch {} },
+   234→      playSoundByName: (name) => {
+   235→        const sc = (setupScene.conects || []).find((c) => c.type === 'SoundObject' && c.name === name)
+   236→        if (sc && sc.url) { try { const a = new Audio(sc.url); a.volume = sc.volume ?? 1; a.loop = sc.loop || false; a.play() } catch {} }
+   237→      },
+   238→      destroyObject: (instanceId) => {
+   239→        const mesh = meshRefs.current.get(instanceId) || conectMeshRefs.current.get(instanceId)
+   240→        if (mesh) mesh.visible = false
+   241→      },
+   242→      spawnObject: (objectName, position) => {
+   243→        const obj = objectsRef.current.find((o) => o.name === objectName)
+   244→        if (obj) useStore.getState().addObjectToScene(obj.id, position)
+   245→      },
+   246→      changeScene: (sceneName) => {
+   247→        const scenes = useStore.getState().scenes
+   248→        const target = scenes.find((s) => s.name === sceneName)
+   249→        if (target) useStore.getState().setActiveScene(target.id)
+   250→      },
+   251→      setVisible: (instanceId, visible) => {
+   252→        const mesh = meshRefs.current.get(instanceId) || conectMeshRefs.current.get(instanceId)
+   253→        if (mesh) mesh.visible = visible
+   254→      },
+   255→      applyForce: (instanceId, force) => physicsRef.current?.applyForce(instanceId, force),
+   256→      jumpPlayer: (instanceId) => physicsRef.current?.jumpPersonal(instanceId),
+   257→      showUIScreen: (name) => {
+   258→        const s = useStore.getState().uiScreens.find((s) => s.name === name)
+   259→        if (s) useStore.getState().setUIScreenVisible(s.id, true)
+   260→      },
+   261→      hideUIScreen: (name) => {
+   262→        const s = useStore.getState().uiScreens.find((s) => s.name === name)
+   263→        if (s) useStore.getState().setUIScreenVisible(s.id, false)
+   264→      },
+   265→      getUIValue: (name) => {
+   266→        // Procurar em uiScreens
+   267→        for (const s of useStore.getState().uiScreens) {
+   268→          const el = s.elements.find((e) => e.name === name)
+   269→          if (el) return el.value ?? el.text ?? ''
+   270→        }
+   271→        // Procurar em Conects de UI (TextObject, ButtonObject)
+   272→        const scene = useStore.getState().scenes.find((s) => s.id === useStore.getState().activeSceneId)
+   273→        const conect = (scene?.conects || []).find((c) => c.name === name && (c.type === 'TextObject' || c.type === 'ButtonObject'))
+   274→        if (conect) return conect.text ?? conect.label ?? conect.value ?? ''
+   275→        return ''
+   276→      },
+   277→      setUIValue: (name, val) => {
+   278→        // Procurar em uiScreens
+   279→        for (const s of useStore.getState().uiScreens) {
+   280→          const el = s.elements.find((e) => e.name === name)
+   281→          if (el) { useStore.getState().updateUIElement(el.id, { value: val, text: val, label: val }); return }
+   282→        }
+   283→        // Procurar em Conects de UI (TextObject, ButtonObject)
+   284→        const state = useStore.getState()
+   285→        const scene = state.scenes.find((s) => s.id === state.activeSceneId)
+   286→        if (scene) {
+   287→          const conect = (scene.conects || []).find((c) => c.name === name && (c.type === 'TextObject' || c.type === 'ButtonObject'))
+   288→          if (conect) {
+   289→            state.updateConect(conect.instanceId, { text: String(val), label: String(val) })
+   290→            return
+   291→          }
+   292→        }
+   293→      },
+   294→      triggerUIEvent: (eventName, payload) => {
+   295→        for (const rt of runtimesRef.current.values()) rt.triggerEvent(eventName, payload)
+   296→      },
+   297→      collidingWith: (instanceId, type) => {
+   298→        if (!physicsRef.current) return false
+   299→        // Usar contactos reais do cannon-es em vez de distância
+   300→        const contacts = physicsRef.current.getContacts?.(instanceId)
+   301→        if (contacts && contacts.length > 0) {
+   302→          for (const otherId of contacts) {
+   303→            const otherEntry = physicsRef.current.bodies.get(otherId)
+   304→            if (!otherEntry) continue
+   305→            if (otherEntry.conect.type === type || otherEntry.conect.name === type) {
+   306→              return true
+   307→            }
+   308→          }
+   309→          return false
+   310→        }
+   311→        // Fallback: usar eventos de colisão registados
+   312→        const collisionSet = collisionEventsRef.current.get(instanceId)
+   313→        if (collisionSet && collisionSet.size > 0) {
+   314→          for (const otherId of collisionSet) {
+   315→            const otherEntry = physicsRef.current.bodies.get(otherId)
+   316→            if (!otherEntry) continue
+   317→            if (otherEntry.conect.type === type || otherEntry.conect.name === type) {
+   318→              return true
+   319→            }
+   320→          }
+   321→        }
+   322→        return false
+   323→      },
+   324→      distanceTo: (instanceId, targetName) => {
+   325→        // P2.5: procurar em objects E conects da cena ativa
+   326→        for (const inst of setupScene.objects || []) {
+   327→          const obj = objectsRef.current.find((o) => o.id === inst.objectId)
+   328→          if (obj && (obj.name === targetName || inst.name === targetName)) {
+   329→            const target = meshRefs.current.get(inst.instanceId)
+   330→            const source = meshRefs.current.get(instanceId) || conectMeshRefs.current.get(instanceId)
+   331→            if (source && target) return source.position.distanceTo(target.position)
+   332→          }
+   333→        }
+   334→        for (const conect of setupScene.conects || []) {
+   335→          if (conect.name === targetName) {
+   336→            const target = conectMeshRefs.current.get(conect.instanceId)
+   337→            const source = meshRefs.current.get(instanceId) || conectMeshRefs.current.get(instanceId)
+   338→            if (source && target) return source.position.distanceTo(target.position)
+   339→          }
+   340→        }
+   341→        return 0
+   342→      },
+   343→      isTouching: () => joystickRef.current.active,
+   344→      // Fase 5: Multiplayer functions
+   345→      sendMessage: (data) => {
+   346→        try {
+   347→          const mp = window._multiplayer
+   348→          if (mp && mp.connected) mp.sendMessage(data)
+   349→        } catch {}
+   350→      },
+   351→      getPlayers: () => {
+   352→        const mp = window._multiplayer
+   353→        return mp && mp.connected ? mp.getOtherPlayers().length + 1 : 1
+   354→      },
+   355→      getPlayerState: (playerId) => {
+   356→        const mp = window._multiplayer
+   357→        return mp && mp.connected ? mp.getPlayerState(playerId) : null
+   358→      },
+   359→
+   360→      // ===== Inventário (ItemObject auto-pickup) =====
+   361→      addToInventory: (itemName, qty = 1) => {
+   362→        inventoryRef.current[itemName] = (inventoryRef.current[itemName] || 0) + qty
+   363→        window._flirInventory = inventoryRef.current
+   364→        debugLog(`Item "${itemName}" adicionado (total: ${inventoryRef.current[itemName]})`, 'log', 'Inventory')
+   365→      },
+   366→      removeFromInventory: (itemName, qty = 1) => {
+   367→        if (!inventoryRef.current[itemName]) return
+   368→        inventoryRef.current[itemName] = Math.max(0, inventoryRef.current[itemName] - qty)
+   369→        if (inventoryRef.current[itemName] === 0) delete inventoryRef.current[itemName]
+   370→        window._flirInventory = inventoryRef.current
+   371→      },
+   372→      getInventoryCount: (itemName) => inventoryRef.current[itemName] || 0,
+   373→      hasItem: (itemName) => (inventoryRef.current[itemName] || 0) > 0,
+   374→
+   375→      // ===== Combate (WeaponObject) =====
+   376→      equipWeapon: (damage, ammo, fireRate, range, reloadTime) => {
+   377→        weaponStateRef.current = {
+   378→          equipped: true,
+   379→          ammo, maxAmmo: ammo,
+   380→          damage: damage || 10,
+   381→          fireRate: fireRate || 0.3,
+   382→          range: range || 50,
+   383→          reloadTime: reloadTime || 2,
+   384→          lastShot: 0,
+   385→        }
+   386→        window._flirCrosshair = true
+   387→        debugLog(`Arma equipada (dano: ${damage}, munições: ${ammo})`, 'log', 'Weapon')
+   388→      },
+   389→      shoot: () => {
+   390→        const w = weaponStateRef.current
+   391→        if (!w.equipped || w.ammo <= 0) return false
+   392→        const now = performance.now() / 1000
+   393→        if (now - w.lastShot < w.fireRate) return false
+   394→        w.lastShot = now
+   395→        w.ammo--
+   396→        // Raycast da câmara para detetar hit
+   397→        const raycaster = new THREE.Raycaster()
+   398→        raycaster.setFromCamera({ x: 0, y: 0 }, camera)
+   399→        raycaster.far = w.range
+   400→        debugLog(`Disparo! Munições restantes: ${w.ammo}`, 'log', 'Weapon')
+   401→        return true
+   402→      },
+   403→      reload: () => {
+   404→        const w = weaponStateRef.current
+   405→        if (!w.equipped) return
+   406→        w.ammo = w.maxAmmo
+   407→        debugLog('Arma recarregada', 'log', 'Weapon')
+   408→      },
+   409→      getAmmo: () => weaponStateRef.current.ammo,
+   410→
+   411→      // ===== Combate (saúde) =====
+   412→      takeDamage: (instanceId, amount) => {
+   413→        // Reduzir "saúde" via globalVar _health
+   414→        const health = gameContext.getVar('_health_' + instanceId)
+   415→        gameContext.setVar('_health_' + instanceId, Math.max(0, (health || 100) - amount))
+   416→        debugLog(`${instanceId} sofreu ${amount} de dano (saúde: ${gameContext.getVar('_health_' + instanceId)})`, 'log', 'Combat')
+   417→      },
+   418→      getHealth: (instanceId) => gameContext.getVar('_health_' + instanceId) || 100,
+   419→
+   420→      // ===== Sinais =====
+   421→      emitSignal: (name, data) => {
+   422→        for (const rt of runtimesRef.current.values()) {
+   423→          rt.triggerEvent('onSignal', { name, data })
+   424→        }
+   425→        debugLog(`Sinal "${name}" emitido`, 'log', 'Signal')
+   426→      },
+   427→
+   428→      // ===== Estado de jogo =====
+   429→      _gameState: 'menu',
+   430→      setGameState: (s) => { gameContext._gameState = s; debugLog('Game State: ' + s, 'log', 'GameState'); for (const rt of runtimesRef.current.values()) { rt.triggerEvent('onGameStateChange', { state: s }) } },
+   431→      getGameState: () => gameContext._gameState,
+   432→
+   433→      // ===== Save/Load =====
+   434→      saveProgress: (key, val) => { try { localStorage.setItem('flir_progress_' + key, JSON.stringify(val)); debugLog('Progresso guardado: ' + key, 'log', 'Save') } catch (e) {} },
+   435→      loadProgress: (key) => { try { const v = localStorage.getItem('flir_progress_' + key); return v ? JSON.parse(v) : null } catch (e) { return null } },
+   436→
+   437→      // ===== Sequenciador =====
+   438→      playSequence: (name) => { debugLog('Sequência "' + name + '" iniciada', 'log', 'Sequence') },
+   439→
+   440→      // ===== Câmara (FPS/BR) =====
+   441→      getCameraRotation: () => {
+   442→        if (window._flirCameraRotation) return { yaw: window._flirCameraRotation.yaw, pitch: window._flirCameraRotation.pitch }
+   443→        return { yaw: 0, pitch: 0 }
+   444→      },
+   445→      setCameraSensitivity: (value) => {
+   446→        if (window._flirCameraRotation) window._flirCameraRotation.sensitivity = value
+   447→      },
+   448→
+   449→      // ===== Checkpoint — respawn =====
+   450→      respawnAtCheckpoint: () => {
+   451→        if (!checkpointRef.current) {
+   452→          // Tentar carregar do localStorage
+   453→          try {
+   454→            const saved = localStorage.getItem('flir_checkpoint')
+   455→            if (saved) checkpointRef.current = JSON.parse(saved)
+   456→          } catch (e) {}
+   457→        }
+   458→        if (checkpointRef.current) {
+   459→          const player = (setupScene?.conects || []).find((c) => c.type === 'PersonalObject')
+   460→          if (player) {
+   461→            const playerMesh = conectMeshRefs.current.get(player.instanceId)
+   462→            if (playerMesh) {
+   463→              playerMesh.position.set(...checkpointRef.current.position)
+   464→              if (physicsRef.current) {
+   465→                physicsRef.current.bodies.get(player.instanceId)?.body?.position.set(...checkpointRef.current.position)
+   466→              }
+   467→              debugLog('Respawn no checkpoint!', 'log', 'Checkpoint')
+   468→            }
+   469→          }
+   470→        }
+   471→      },
+   472→      getLastCheckpoint: () => checkpointRef.current,
+   473→
+   474→      // ===== Roguelike — run progress + geração de salas =====
+   475→      _runState: { runId: 0, seed: 0, started: false },
+   476→      startNewRun: () => {
+   477→        const newSeed = Math.floor(Math.random() * 99999) + 1
+   478→        gameContext._runState.runId += 1
+   479→        gameContext._runState.seed = newSeed
+   480→        gameContext._runState.started = true
+   481→        debugLog(`Nova run iniciada — Run #${gameContext._runState.runId}, Seed: ${newSeed}`, 'log', 'Roguelike')
+   482→
+   483→        // Procurar RoguelikeGenerator na cena
+   484→        const roguelikeGen = (setupScene.conects || []).find((c) => c.type === 'RoguelikeGenerator')
+   485→        if (roguelikeGen) {
+   486→          // PRNG mulberry32 — determinístico por seed
+   487→          let _s = newSeed >>> 0
+   488→          const rng = () => {
+   489→            _s = (_s + 0x6D2B79F5) >>> 0
+   490→            let t = _s
+   491→            t = Math.imul(t ^ (t >>> 15), t | 1)
+   492→            t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+   493→            return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+   494→          }
+   495→          const roomCount = roguelikeGen.roomCount || 5
+   496→          const gridSize = roguelikeGen.gridSize || 12
+   497→          const roomPrefabs = roguelikeGen.roomPrefabs || []
+   498→
+   499→          debugLog(`A gerar ${roomCount} salas com seed ${newSeed}...`, 'log', 'Roguelike')
+   500→
+   501→          // Layout simples: salas em linha com corredores
+   502→          for (let i = 0; i < roomCount; i++) {
+   503→            const x = i * gridSize
+   504→            const z = (rng() - 0.5) * gridSize * 0.5 // variação Z
+   505→            // Se há prefabs de sala, instanciar um aleatório
+   506→            if (roomPrefabs.length > 0) {
+   507→              const prefabId = roomPrefabs[Math.floor(rng() * roomPrefabs.length)]
+   508→              const prefabObj = (setupScene.conects || []).find((c) => c.instanceId === prefabId)
+   509→              if (prefabObj && prefabObj.prefabData) {
+   510→                // Expandir prefab na posição gerada
+   511→                try {
+   512→                  const prefabData = typeof prefabObj.prefabData === 'string'
+   513→                    ? JSON.parse(prefabObj.prefabData)
+   514→                    : prefabObj.prefabData
+   515→                  for (const child of prefabData) {
+   516→                    useStore.getState().addConectToScene(child.type, [
+   517→                      x + (child.position?.[0] || 0),
+   518→                      child.position?.[1] || 0,
+   519→                      z + (child.position?.[2] || 0),
+   520→                    ])
+   521→                  }
+   522→                } catch (e) {}
+   523→              }
+   524→            } else {
+   525→              // Sem prefabs: gerar sala simples (cubo oco com porta)
+   526→              useStore.getState().addConectToScene('StaticObject', [x, 0, z])
+   527→            }
+   528→            // Corredor entre salas (exceto última)
+   529→            if (i < roomCount - 1) {
+   530→              useStore.getState().addConectToScene('StaticObject', [x + gridSize / 2, 0, z])
+   531→            }
+   532→          }
+   533→          debugLog(`Geração concluída: ${roomCount} salas + ${roomCount - 1} corredores`, 'log', 'Roguelike')
+   534→        }
+   535→
+   536→        gameContext.emitSignal('roguelike:generate', { runId: gameContext._runState.runId, seed: newSeed })
+   537→        return gameContext._runState
+   538→      },
+   539→      getRunSeed: () => gameContext._runState.seed,
+   540→      getRunId: () => gameContext._runState.runId,
+   541→      endRun: () => {
+   542→        debugLog(`Run #${gameContext._runState.runId} terminada`, 'log', 'Roguelike')
+   543→        gameContext._runState.started = false
+   544→        gameContext.emitSignal('roguelike:end', { runId: gameContext._runState.runId })
+   545→      },
+   546→
+   547→      // ===== linkTo — navegação (scene/screen/url) =====
+   548→      linkTo: (target, sub) => {
+   549→        if (target === 'scene') {
+   550→          const sc = (useStore.getState().scenes || []).find((s) => s.name === sub || s.id === sub)
+   551→          if (sc) {
+   552→            useStore.getState().setActiveScene(sc.id)
+   553→            debugLog(`linkTo: cena mudou para "${sc.name}"`, 'log', 'Links')
+   554→          } else {
+   555→            debugLog(`linkTo: cena "${sub}" não encontrada`, 'error', 'Links')
+   556→          }
+   557→        } else if (target === 'screen') {
+   558→          const screens = useStore.getState().uiScreens || []
+   559→          for (const s of screens) {
+   560→            s.visible = (s.name === sub || s.id === sub)
+   561→          }
+   562→          useStore.setState({ uiScreens: [...screens] })
+   563→          debugLog(`linkTo: tela "${sub}" visível`, 'log', 'Links')
+   564→        } else if (target === 'url') {
+   565→          window.open(sub, '_blank')
+   566→          debugLog(`linkTo: URL "${sub}" aberta`, 'log', 'Links')
+   567→        }
+   568→      },
+   569→
+   570→      // ===== Controlo de luzes por script =====
+   571→      setLightIntensity: (lightName, intensity) => {
+   572→        // Procurar luzes na cena com este nome
+   573→        for (const [id, mesh] of conectMeshRefs.current) {
+   574→          if (mesh && mesh.name === lightName) {
+   575→            // Procurar luzes dentro do mesh/group
+   576→            mesh.traverse((child) => {
+   577→              if (child.isDirectionalLight || child.isPointLight || child.isSpotLight || child.isAmbientLight) {
+   578→                child.intensity = intensity
+   579→              }
+   580→            })
+   581→            debugLog(`Luz "${lightName}" intensidade → ${intensity}`, 'log', 'Light')
+   582→            return
+   583→          }
+   584→        }
+   585→        // Também procurar por nome do conect
+   586→        const lightConect = (setupScene.conects || []).find((c) => c.name === lightName)
+   587→        if (lightConect) {
+   588→          const mesh = conectMeshRefs.current.get(lightConect.instanceId)
+   589→          if (mesh) {
+   590→            mesh.traverse((child) => {
+   591→              if (child.isDirectionalLight || child.isPointLight || child.isSpotLight || child.isAmbientLight) {
+   592→                child.intensity = intensity
+   593→              }
+   594→            })
+   595→            debugLog(`Luz "${lightName}" intensidade → ${intensity}`, 'log', 'Light')
+   596→          }
+   597→        }
+   598→      },
+   599→      setLightColor: (lightName, color) => {
+   600→        const c = new THREE.Color(color)
+   601→        for (const [id, mesh] of conectMeshRefs.current) {
+   602→          if (mesh && mesh.name === lightName) {
+   603→            mesh.traverse((child) => {
+   604→              if (child.isDirectionalLight || child.isPointLight || child.isSpotLight || child.isAmbientLight) {
+   605→                child.color.copy(c)
+   606→              }
+   607→            })
+   608→            debugLog(`Luz "${lightName}" cor → ${color}`, 'log', 'Light')
+   609→            return
+   610→          }
+   611→        }
+   612→        const lightConect = (setupScene.conects || []).find((c) => c.name === lightName)
+   613→        if (lightConect) {
+   614→          const mesh = conectMeshRefs.current.get(lightConect.instanceId)
+   615→          if (mesh) {
+   616→            mesh.traverse((child) => {
+   617→              if (child.isDirectionalLight || child.isPointLight || child.isSpotLight || child.isAmbientLight) {
+   618→                child.color.copy(c)
+   619→              }
+   620→            })
+   621→            debugLog(`Luz "${lightName}" cor → ${color}`, 'log', 'Light')
+   622→          }
+   623→        }
+   624→      },
+   625→      setLightVisible: (lightName, visible) => {
+   626→        for (const [id, mesh] of conectMeshRefs.current) {
+   627→          if (mesh && mesh.name === lightName) {
+   628→            mesh.traverse((child) => {
+   629→              if (child.isDirectionalLight || child.isPointLight || child.isSpotLight || child.isAmbientLight) {
+   630→                child.visible = visible
+   631→              }
+   632→            })
+   633→            return
+   634→          }
+   635→        }
+   636→        const lightConect = (setupScene.conects || []).find((c) => c.name === lightName)
+   637→        if (lightConect) {
+   638→          const mesh = conectMeshRefs.current.get(lightConect.instanceId)
+   639→          if (mesh) {
+   640→            mesh.traverse((child) => {
+   641→              if (child.isDirectionalLight || child.isPointLight || child.isSpotLight || child.isAmbientLight) {
+   642→                child.visible = visible
+   643→              }
+   644→            })
+   645→          }
+   646→        }
+   647→      },
+   648→    }
+   649→    window._flirGameContext = gameContext
+   650→    window._flirInventory = inventoryRef.current
+   651→
+   652→    // Física
+   653→    const gravity = setupScene.physics?.gravity || [0, -9.82, 0]
+   654→    physicsRef.current = createPhysicsSystem({ gravity: gravity[1] })
+   655→
+   656→    // Registar conects com física
+   657→    setTimeout(() => {
+   658→      if (!physicsRef.current) return
+   659→      for (const conect of setupScene.conects || []) {
+   660→        const mesh = conectMeshRefs.current.get(conect.instanceId)
+   661→        if (mesh) physicsRef.current.addConect(conect, mesh)
+   662→      }
+   663→      for (const conect of setupScene.conects || []) {
+   664→        if (conect.type === 'JointObject' && conect.targetA && conect.targetB) {
+   665→          physicsRef.current.addJoint(conect)
+   666→        }
+   667→      }
+   668→    }, 50)
+   669→
+   670→    // Eventos de física
+   671→    physicsRef.current.on('onCollision', ({ instanceId, otherInstanceId }) => {
+   672→      // Registar colisão para collidingWith()
+   673→      if (!collisionEventsRef.current.has(instanceId)) {
+   674→        collisionEventsRef.current.set(instanceId, new Set())
+   675→      }
+   676→      collisionEventsRef.current.get(instanceId).add(otherInstanceId)
+   677→      // Limitar tempo de vida do contacto (expira em 0.5s se não renovado)
+   678→      setTimeout(() => {
+   679→        const set = collisionEventsRef.current.get(instanceId)
+   680→        if (set) set.delete(otherInstanceId)
+   681→      }, 500)
+   682→
+   683→      const rt = runtimesRef.current.get(instanceId)
+   684→      if (rt) rt.triggerEvent('onCollision', { other: otherInstanceId })
+   685→    })
+   686→    physicsRef.current.on('onTriggerEnter', ({ instanceId, otherInstanceId }) => {
+   687→      const rt = runtimesRef.current.get(instanceId)
+   688→      if (rt) rt.triggerEvent('onEnterZone', { other: otherInstanceId })
+   689→    })
+   690→    physicsRef.current.on('onTriggerExit', ({ instanceId, otherInstanceId }) => {
+   691→      const rt = runtimesRef.current.get(instanceId)
+   692→      if (rt) rt.triggerEvent('onExitZone', { other: otherInstanceId })
+   693→    })
+   694→
+   695→    // FlirCode/FlirScript runtimes
+   696→    const setupRuntime = (instance, scriptData, scriptField) => {
+   697→      if (!scriptData) return
+   698→      try {
+   699→        let source = null
+   700→        if (typeof scriptData === 'string') {
+   701→          // Suportar ambos: "FLIRCODE:codigo" e código direto (flirCode field)
+   702→          if (scriptData.startsWith('FLIRCODE:')) {
+   703→            source = scriptData.slice(9)
+   704→          } else {
+   705→            source = scriptData
+   706→          }
+   707→        } else if (typeof scriptData === 'object') {
+   708→          // FlirScript (grafo de nós)
+   709→          const errors = validateGraph(scriptData)
+   710→          if (errors.length > 0) return
+   711→          const rt = createFlirScriptRuntime(scriptData, gameContext)
+   712→          rt.graph.nodes.forEach((n) => { n._instanceId = instance.instanceId })
+   713→          runtimesRef.current.set(instance.instanceId, rt)
+   714→          rt.triggerEvent('beginPlay')
+   715→          return
+   716→        }
+   717→        if (source) {
+   718→          const rt = createFlirCodeRuntime(source, { ...gameContext, _instanceId: instance.instanceId, mesh: conectMeshRefs.current.get(instance.instanceId) || meshRefs.current.get(instance.instanceId) })
+   719→          if (!rt.hasErrors) {
+   720→            runtimesRef.current.set(instance.instanceId, rt)
+   721→            rt.triggerEvent('beginPlay')
+   722→          } else {
+   723→            debugLog(`Erros no FlirCode de ${instance.name || instance.type}: ${rt.errors.length}`, 'warn', 'Script')
+   724→          }
+   725→        }
+   726→      } catch (err) {
+   727→        debugLog('Erro ao inicializar script: ' + err.message, 'error', 'Script')
+   728→      }
+   729→    }
+   730→    // Registar runtimes: tentar flirScript primeiro, depois flirCode
+   731→    for (const inst of setupScene.objects || []) {
+   732→      setupRuntime(inst, inst.flirScript || inst.flirCode)
+   733→    }
+   734→    for (const conect of setupScene.conects || []) {
+   735→      setupRuntime(conect, conect.flirScript || conect.flirCode)
+   736→    }
+   737→
+   738→    // Animation players — ler AnimationBoostObject para blendTime
+   739→    const boostConect = (setupScene.conects || []).find((c) => c.type === 'AnimationBoostObject')
+   740→    const boostBlendTime = boostConect?.blendTime ?? 0.3
+   741→    const boostQuality = boostConect?.interpolationQuality ?? 'normal'
+   742→    for (const inst of [...(setupScene.objects || []), ...(setupScene.conects || [])]) {
+   743→      if (inst.animations && Object.keys(inst.animations).length > 0) {
+   744→        const player = createAnimationPlayer(inst.animations, () => meshRefs.current.get(inst.instanceId) || conectMeshRefs.current.get(inst.instanceId), () => null)
+   745→        animPlayersRef.current.set(inst.instanceId, player)
+   746→        if (inst.animations.idle) player.play('idle', { loop: true, blendTime: boostBlendTime })
+   747→        else { const f = Object.keys(inst.animations)[0]; if (f) player.play(f, { loop: true, blendTime: boostBlendTime }) }
+   748→      }
+   749→    }
+   750→
+   751→    // NPC AI
+   752→    for (const conect of setupScene.conects || []) {
+   753→      if (conect.type === 'NpcObject') {
+   754→        const ai = createNPCAI(conect, {
+   755→          getPlayerPos: () => {
+   756→            const player = (setupScene.conects || []).find((c) => c.type === 'PersonalObject')
+   757→            if (!player) return null
+   758→            const pm = conectMeshRefs.current.get(player.instanceId)
+   759→            return pm ? [pm.position.x, pm.position.y, pm.position.z] : null
+   760→          },
+   761→          getPathPoints: (pathId) => {
+   762→            const path = (setupScene.conects || []).find((c) => c.instanceId === pathId)
+   763→            return path?.points || null
+   764→          },
+   765→          physicsMove: (id, dir, speed) => physicsRef.current?.movePersonal(id, dir, speed),
+   766→          physicsJump: (id) => physicsRef.current?.jumpPersonal(id),
+   767→          emitEvent: (en, payload) => {
+   768→            const rt = runtimesRef.current.get(conect.instanceId)
+   769→            if (rt) {
+   770→              if (en === 'OnSeePlayer') rt.triggerEvent('onSeePlayer', payload)
+   771→              else if (en === 'OnLoseSight') rt.triggerEvent('onLoseSight', payload)
+   772→            }
+   773→          },
+   774→        })
+   775→        npcAIsRef.current.set(conect.instanceId, ai)
+   776→      }
+   777→    }
+   778→
+   779→    // Timers
+   780→    for (const conect of setupScene.conects || []) {
+   781→      if (conect.type === 'TimerObject' && conect.autoStart) {
+   782→        timerStatesRef.current.set(conect.instanceId, { remaining: conect.duration || 5, loop: conect.loop || false, duration: conect.duration || 5 })
+   783→      }
+   784→    }
+   785→
+   786→    // PrefabObject — expandir prefabs na cena (instanciar objetos do prefabData)
+   787→    for (const conect of setupScene.conects || []) {
+   788→      if (conect.type === 'PrefabObject' && conect.prefabData && Array.isArray(conect.prefabData)) {
+   789→        try {
+   790→          const prefabData = typeof conect.prefabData === 'string'
+   791→            ? JSON.parse(conect.prefabData)
+   792→            : conect.prefabData
+   793→          for (const childConect of prefabData) {
+   794→            // Instanciar cada conect do prefab na posição relativa ao PrefabObject
+   795→            const newConect = {
+   796→              ...childConect,
+   797→              instanceId: `prefab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+   798→              position: [
+   799→                (conect.position?.[0] || 0) + (childConect.position?.[0] || 0),
+   800→                (conect.position?.[1] || 0) + (childConect.position?.[1] || 0),
+   801→                (conect.position?.[2] || 0) + (childConect.position?.[2] || 0),
+   802→              ],
+   803→            }
+   804→            // Adicionar à cena via store (para que ConectRenderer o renderize)
+   805→            useStore.getState().addConectToScene(newConect.type, newConect.position)
+   806→          }
+   807→          debugLog(`Prefab "${conect.name}" expandido (${prefabData.length} objetos)`, 'log', 'Prefab')
+   808→        } catch (e) {
+   809→          debugLog(`Erro ao expandir prefab: ${e.message}`, 'error', 'Prefab')
+   810→        }
+   811→      }
+   812→    }
+   813→
+   814→    // SkyObject — aplicar fundo do céu à cena
+   815→    const skyConect = (setupScene.conects || []).find((c) => c.type === 'SkyObject')
+   816→    if (skyConect) {
+   817→      // O SkyMesh no ConectRenderer trata do visual (esfera com shader)
+   818→      // Aqui garantimos que o background da cena não tapa o sky
+   819→      skyRef.current = skyConect
+   820→    }
+   821→
+   822→    // FogObject — aplicar névoa à cena (via FogApplier que já existe no render)
+   823→    const fogConect = (setupScene.conects || []).find((c) => c.type === 'FogObject')
+   824→    // FogApplier no render trata disto — basta existir na cena
+   825→
+   826→    // Joystick touch
+   827→    const onTouchStart = (e) => { if (e.touches.length === 1) { joystickRef.current.active = true } }
+   828→    const onTouchEnd = () => { joystickRef.current.active = false; joystickRef.current.x = 0; joystickRef.current.z = 0 }
+   829→    window.addEventListener('touchstart', onTouchStart)
+   830→    window.addEventListener('touchend', onTouchEnd)
+   831→
+   832→    // Teclado
+   833→    const keys = {}
+   834→    const onKeyDown = (e) => { keys[e.key.toLowerCase()] = true }
+   835→    const onKeyUp = (e) => { keys[e.key.toLowerCase()] = false }
+   836→    window.addEventListener('keydown', onKeyDown)
+   837→    window.addEventListener('keyup', onKeyUp)
+   838→    window._flirKeys = keys
+   839→
+   840→    return () => {
+   841→      for (const rt of runtimesRef.current.values()) rt.dispose()
+   842→      runtimesRef.current.clear()
+   843→      for (const ai of npcAIsRef.current.values()) ai.dispose()
+   844→      npcAIsRef.current.clear()
+   845→      for (const [, s] of timerStatesRef.current) { if (s.interval) clearInterval(s.interval); if (s.audio) s.audio.pause() }
+   846→      timerStatesRef.current.clear()
+   847→      animPlayersRef.current.clear()
+   848→      physicsRef.current?.dispose()
+   849→      physicsRef.current = null
+   850→      window.removeEventListener('touchstart', onTouchStart)
+   851→      window.removeEventListener('touchend', onTouchEnd)
+   852→      window.removeEventListener('keydown', onKeyDown)
+   853→      window.removeEventListener('keyup', onKeyUp)
+   854→      window._flirGameContext = null
+   855→      gameStartedRef.current = false
+   856→    }
+   857→  }, [isGameMode, setupScene])
+   858→
+   859→  // Loop do jogo
+   860→  useFrame((_, delta) => {
+   861→    if (!isGameMode) return
+   862→
+   863→    // Física
+   864→    if (physicsRef.current) {
+   865→      physicsRef.current.update(delta)
+   866→      // Sincronizar meshes com bodies
+   867→      for (const [id, entry] of physicsRef.current.bodies) {
+   868→        const mesh = meshRefs.current.get(id) || conectMeshRefs.current.get(id)
+   869→        if (mesh) {
+   870→          mesh.position.copy(entry.body.position)
+   871→          mesh.quaternion.copy(entry.body.quaternion)
+   872→        }
+   873→      }
+   874→    }
+   875→
+   876→    // Actualizar variáveis de posição do jogador para FlirCode
+   877→    const playerConect = (setupScene?.conects || []).find((c) => c.type === 'PersonalObject')
+   878→    if (playerConect) {
+   879→      const playerMesh = conectMeshRefs.current.get(playerConect.instanceId)
+   880→      if (playerMesh) {
+   881→        gameContext.setVar('_player_x', playerMesh.position.x)
+   882→        gameContext.setVar('_player_y', playerMesh.position.y)
+   883→        gameContext.setVar('_player_z', playerMesh.position.z)
+   884→        gameContext.setVar('_y_pos', playerMesh.position.y)
+   885→      }
+   886→    }
+   887→
+   888→    // FlirCode onTick
+   889→    for (const rt of runtimesRef.current.values()) {
+   890→      rt.update(delta)
+   891→      rt.triggerEvent('tick', { deltaTime: delta })
+   892→    }
+   893→
+   894→    // Animation players
+   895→    for (const player of animPlayersRef.current.values()) player.update(delta)
+   896→
+   897→    // NPC AI
+   898→    for (const ai of npcAIsRef.current.values()) ai.update(delta)
+   899→
+   900→    // Timers
+   901→    for (const [id, state] of timerStatesRef.current) {
+   902→      if (id.startsWith('_')) continue
+   903→      state.remaining -= delta
+   904→      if (state.remaining <= 0) {
+   905→        const rt = runtimesRef.current.get(id)
+   906→        if (rt) rt.triggerEvent('onTimer')
+   907→        if (state.loop) state.remaining = state.duration
+   908→        else timerStatesRef.current.delete(id)
+   909→      }
+   910→    }
+   911→
+   912→    // Joystick → PersonalObject
+   913→    const keys = window._flirKeys || {}
+   914→    if (joystickRef.current.active || keys['w'] || keys['a'] || keys['s'] || keys['d']) {
+   915→      for (const conect of activeScene.conects || []) {
+   916→        if (conect.type === 'PersonalObject') {
+   917→          const speed = conect.moveSpeed || 5
+   918→          let mx = 0, mz = 0
+   919→          if (joystickRef.current.active) { mx = joystickRef.current.x * speed; mz = joystickRef.current.z * speed }
+   920→          if (keys['w']) mz = -speed
+   921→          if (keys['s']) mz = speed
+   922→          if (keys['a']) mx = -speed
+   923→          if (keys['d']) mx = speed
+   924→          physicsRef.current?.movePersonal(conect.instanceId, [mx, 0, mz], 1)
+   925→          if ((keys[' '] || keys['space']) && conect.canJump) {
+   926→            physicsRef.current?.jumpPersonal(conect.instanceId)
+   927→          }
+   928→        }
+   929→      }
+   930→    }
+   931→
+   932→    // Câmara: ViewObject ativa
+   933→    const viewConects = (activeScene.conects || []).filter((c) => c.type === 'ViewObject')
+   934→    const activeView = viewConects.find((c) => c.cameraRole === 'player') || viewConects.find((c) => c.cameraRole === 'primary') || viewConects[0]
+   935→    if (activeView) {
+   936→      // Se cameraRole='player' e não tem followTarget, seguir PersonalObject
+   937→      let targetId = activeView.followTarget
+   938→      if (!targetId && activeView.cameraRole === 'player') {
+   939→        const player = (activeScene.conects || []).find((c) => c.type === 'PersonalObject')
+   940→        if (player) targetId = player.instanceId
+   941→      }
+   942→      if (targetId && activeView.followMode && activeView.followMode !== 'none') {
+   943→        const targetMesh = meshRefs.current.get(targetId) || conectMeshRefs.current.get(targetId)
+   944→        if (targetMesh) {
+   945→          const mode = activeView.followMode
+   946→          const dist = activeView.followDistance || 6
+   947→          const height = activeView.followHeight || 3
+   948→          if (mode === 'third') {
+   949→            camera.position.lerp(new THREE.Vector3(targetMesh.position.x, targetMesh.position.y + height, targetMesh.position.z + dist), 0.1)
+   950→            camera.lookAt(targetMesh.position)
+   951→          } else if (mode === 'top') {
+   952→            camera.position.lerp(new THREE.Vector3(targetMesh.position.x, targetMesh.position.y + dist, targetMesh.position.z), 0.1)
+   953→            camera.lookAt(targetMesh.position)
+   954→          } else if (mode === 'side') {
+   955→            camera.position.lerp(new THREE.Vector3(targetMesh.position.x + dist, targetMesh.position.y + height / 2, targetMesh.position.z), 0.1)
+   956→            camera.lookAt(targetMesh.position)
+   957→          }
+   958→        }
+   959→      } else {
+   960→        // Câmara estática na posição da ViewObject
+   961→        camera.position.set(...(activeView.position || [5, 4, 6]))
+   962→        if (activeView.rotation) camera.rotation.set(...activeView.rotation)
+   963→        else camera.lookAt(0, 0, 0)
+   964→      }
+   965→    }
+   966→
+   967→    // CheckpointObject — registar checkpoint quando jogador toca
+   968→    const player3 = (setupScene?.conects || []).find((c) => c.type === 'PersonalObject')
+   969→    if (player3) {
+   970→      const playerMesh = conectMeshRefs.current.get(player3.instanceId)
+   971→      if (playerMesh) {
+   972→        for (const cp of setupScene?.conects || []) {
+   973→          if (cp.type === 'CheckpointObject') {
+   974→            const cpMesh = conectMeshRefs.current.get(cp.instanceId)
+   975→            if (cpMesh && cpMesh.visible !== false) {
+   976→              const dist = playerMesh.position.distanceTo(cpMesh.position)
+   977→              if (dist <= (cp.triggerRadius || 2)) {
+   978→                // Registar checkpoint
+   979→                checkpointRef.current = {
+   980→                  position: [cpMesh.position.x, cpMesh.position.y, cpMesh.position.z],
+   981→                  sceneId: setupScene.id,
+   982→                }
+   983→                // Guardar no localStorage
+   984→                try {
+   985→                  localStorage.setItem('flir_checkpoint', JSON.stringify(checkpointRef.current))
+   986→                } catch (e) {}
+   987→                // Disparar evento
+   988→                const rt = runtimesRef.current.get(cp.instanceId)
+   989→                if (rt) rt.triggerEvent('onCheckpoint', { position: checkpointRef.current.position })
+   990→                debugLog('Checkpoint atingido!', 'log', 'Checkpoint')
+   991→              }
+   992→            }
+   993→          }
+   994→        }
+   995→      }
+   996→    }
+   997→    if (player3) {
+   998→      const playerMesh = conectMeshRefs.current.get(player3.instanceId)
+   999→      if (playerMesh) {
+  1000→        for (const nav of setupScene?.conects || []) {
+  1001→          if (nav.type === 'NavigatorObject' && nav.targetSceneId) {
+  1002→            const navMesh = conectMeshRefs.current.get(nav.instanceId)
+  1003→            if (navMesh && navMesh.visible !== false) {
+  1004→              const dist = playerMesh.position.distanceTo(navMesh.position)
+  1005→              if (dist <= (nav.triggerRadius || 2)) {
+  1006→                // Transportar para a cena de destino
+  1007→                debugLog(`Portal ativado! A mudar para cena ${nav.targetSceneId}`, 'log', 'Navigator')
+  1008→                useStore.getState().closeScenePreview()
+  1009→                setTimeout(() => {
+  1010→                  useStore.getState().setActiveScene(nav.targetSceneId)
+  1011→                  useStore.getState().openScenePreview()
+  1012→                }, (nav.transitionDuration || 0.5) * 1000)
+  1013→                break
+  1014→              }
+  1015→            }
+  1016→          }
+  1017→        }
+  1018→      }
+  1019→    }
+  1020→
+  1021→    // ItemObject — auto-pickup quando jogador próximo
+  1022→    if (player3) {
+  1023→      const playerMesh = conectMeshRefs.current.get(player3.instanceId)
+  1024→      if (playerMesh) {
+  1025→        for (const item of setupScene?.conects || []) {
+  1026→          if (item.type === 'ItemObject' && item.autoPickup !== false) {
+  1027→            const itemMesh = conectMeshRefs.current.get(item.instanceId)
+  1028→            if (itemMesh && itemMesh.visible !== false) {
+  1029→              const dist = playerMesh.position.distanceTo(itemMesh.position)
+  1030→              if (dist <= (item.pickupRadius || 2)) {
+  1031→                // Apanhar item
+  1032→                if (gameContext.addToInventory) {
+  1033→                  gameContext.addToInventory(item.itemName || 'Item', item.quantity || 1)
+  1034→                }
+  1035→                itemMesh.visible = false
+  1036→                debugLog(`Item "${item.itemName}" apanhado!`, 'log', 'Inventory')
+  1037→              }
+  1038→            }
+  1039→          }
+  1040→        }
+  1041→      }
+  1042→    }
+  1043→
+  1044→    // SpawnObject — spawning temporal de objetos
+  1045→    for (const spawn of setupScene?.conects || []) {
+  1046→      if (spawn.type === 'SpawnObject' && spawn.autoStart !== false && spawn.objectToSpawn) {
+  1047→        if (!timerStatesRef.current.has(spawn.instanceId + '_spawn')) {
+  1048→          timerStatesRef.current.set(spawn.instanceId + '_spawn', {
+  1049→            remaining: spawn.interval || 3,
+  1050→            duration: spawn.interval || 3,
+  1051→            loop: true,
+  1052→          })
+  1053→        }
+  1054→        const st = timerStatesRef.current.get(spawn.instanceId + '_spawn')
+  1055→        st.remaining -= delta
+  1056→        if (st.remaining <= 0) {
+  1057→          st.remaining = st.duration
+  1058→          // Spawn do objeto
+  1059→          const spawnMesh = conectMeshRefs.current.get(spawn.instanceId)
+  1060→          const spawnPos = spawnMesh
+  1061→            ? [spawnMesh.position.x, spawnMesh.position.y, spawnMesh.position.z]
+  1062→            : spawn.position || [0, 1, 0]
+  1063→          gameContext.spawnObject(spawn.objectToSpawn, spawnPos)
+  1064→          debugLog(`Spawn: "${spawn.objectToSpawn}" em ${spawnPos}`, 'log', 'Spawn')
+  1065→        }
+  1066→      }
+  1067→    }
+  1068→
+  1069→    // GroupObject — aplicar parenting
+  1070→    for (const grp of setupScene?.conects || []) {
+  1071→      if (grp.type === 'GroupObject' && grp.children && grp.children.length > 0) {
+  1072→        const groupMesh = conectMeshRefs.current.get(grp.instanceId)
+  1073→        if (groupMesh && !groupMesh.userData._grouped) {
+  1074→          for (const childId of grp.children) {
+  1075→            const childMesh = conectMeshRefs.current.get(childId) || meshRefs.current.get(childId)
+  1076→            if (childMesh && childMesh.parent !== groupMesh) {
+  1077→              groupMesh.attach(childMesh)
+  1078→            }
+  1079→          }
+  1080→          groupMesh.userData._grouped = true
+  1081→        }
+  1082→      }
+  1083→    }
+  1084→  })
+  1085→
+  1086→  return null
+  1087→}
+  1088→
+  1089→// ===== Componente principal =====
+  1090→export default function SceneLevel3D() {
+  1091→  const scenes = useStore((s) => s.scenes)
+  1092→  const activeSceneId = useStore((s) => s.activeSceneId)
+  1093→  const objects = useStore((s) => s.objects)
+  1094→  const background = useStore((s) => s.background)
+  1095→  const grid = useStore((s) => s.grid)
+  1096→  const lights = useStore((s) => s.lights)
+  1097→  const transformMode = useStore((s) => s.transformMode)
+  1098→  const updateSceneInstance = useStore((s) => s.updateSceneInstance)
+  1099→  const updateConect = useStore((s) => s.updateConect)
+  1100→  const addObjectToScene = useStore((s) => s.addObjectToScene)
+  1101→  const addConectToScene = useStore((s) => s.addConectToScene)
+  1102→  const selectConect = useStore((s) => s.selectConect)
+  1103→  const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
+  1104→
+  1105→  const [selectedInstanceId, setSelectedInstanceId] = useState(null)
+  1106→  const [selectedType, setSelectedType] = useState(null)
+  1107→  const orbitRef = useRef(null)
+  1108→  const meshRefs = useRef(new Map())
+  1109→  const conectMeshRefs = useRef(new Map())
+  1110→  const [selectedMesh, setSelectedMesh] = useState(null)
+  1111→
+  1112→  const activeScene = scenes.find((s) => s.id === activeSceneId)
+  1113→  const isGameMode = scenePreviewOpen
+  1114→
+  1115→  useEffect(() => {
+  1116→    if (selectedInstanceId && meshRefs.current.has(selectedInstanceId)) {
+  1117→      setSelectedMesh(meshRefs.current.get(selectedInstanceId))
+  1118→    } else if (selectedInstanceId && conectMeshRefs.current.has(selectedInstanceId)) {
+  1119→      setSelectedMesh(conectMeshRefs.current.get(selectedInstanceId))
+  1120→    } else {
+  1121→      setSelectedMesh(null)
+  1122→    }
+  1123→  }, [selectedInstanceId, activeScene])
+  1124→
+  1125→  const setMeshRef = useCallback((id, node) => {
+  1126→    if (node) meshRefs.current.set(id, node)
+  1127→    else meshRefs.current.delete(id)
+  1128→  }, [])
+  1129→
+  1130→  const setConectMeshRef = useCallback((id, node) => {
+  1131→    if (node) conectMeshRefs.current.set(id, node)
+  1132→    else conectMeshRefs.current.delete(id)
+  1133→  }, [])
+  1134→
+  1135→  const handleDrop = useCallback((e) => {
+  1136→    if (isGameMode) return
+  1137→    e.preventDefault()
+  1138→    const objectId = e.dataTransfer.getData('text/objectId')
+  1139→    const conectType = e.dataTransfer.getData('text/conectType')
+  1140→    const rect = e.currentTarget.getBoundingClientRect()
+  1141→    const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+  1142→    const y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+  1143→    const position = [x * 3, 0.5, -y * 3]
+  1144→    if (objectId) addObjectToScene(objectId, position)
+  1145→    else if (conectType) addConectToScene(conectType, position)
+  1146→  }, [addObjectToScene, addConectToScene, isGameMode])
+  1147→
+  1148→  const selectObject = useCallback((instanceId) => {
+  1149→    if (isGameMode) return
+  1150→    setSelectedInstanceId(instanceId)
+  1151→    setSelectedType('object')
+  1152→    selectConect(null)
+  1153→  }, [selectConect, isGameMode])
+  1154→
+  1155→  const selectConectInstance = useCallback((instanceId) => {
+  1156→    if (isGameMode) return
+  1157→    setSelectedInstanceId(instanceId)
+  1158→    setSelectedType('conect')
+  1159→    selectConect(instanceId)
+  1160→  }, [selectConect, isGameMode])
+  1161→
+  1162→  const handleTransformUpdate = useCallback(() => {
+  1163→    if (!selectedMesh || !selectedInstanceId) return
+  1164→    const transform = {
+  1165→      position: [selectedMesh.position.x, selectedMesh.position.y, selectedMesh.position.z],
+  1166→      rotation: [selectedMesh.rotation.x, selectedMesh.rotation.y, selectedMesh.rotation.z],
+  1167→      scale: [selectedMesh.scale.x, selectedMesh.scale.y, selectedMesh.scale.z],
+  1168→    }
+  1169→    if (selectedType === 'conect') updateConect(selectedInstanceId, transform)
+  1170→    else updateSceneInstance(selectedInstanceId, transform)
+  1171→  }, [selectedMesh, selectedInstanceId, selectedType, updateConect, updateSceneInstance])
+  1172→
+  1173→  if (!activeScene) {
+  1174→    return (
+  1175→      <div className="viewport" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+  1176→        <div className="empty-state">
+  1177→          <div style={{ fontSize: 32, opacity: 0.4 }}></div>
+  1178→          <div>Nenhuma cena ativa.</div>
+  1179→        </div>
+  1180→      </div>
+  1181→    )
+  1182→  }
+  1183→
+  1184→  return (
+  1185→    <div className="viewport" onDragOver={(e) => !isGameMode && e.preventDefault()} onDrop={handleDrop}>
+  1186→      <Canvas
+  1187→        shadows
+  1188→        dpr={[1, 2]}
+  1189→        camera={{ position: [8, 6, 10], fov: 50, near: 0.1, far: 200 }}
+  1190→        gl={{ antialias: true, preserveDrawingBuffer: true, alpha: false }}
+  1191→        onPointerMissed={() => {
+  1192→          if (!isGameMode) {
+  1193→            setSelectedInstanceId(null)
+  1194→            setSelectedType(null)
+  1195→            selectConect(null)
+  1196→          }
+  1197→        }}
+  1198→      >
+  1199→        <Suspense fallback={null}>
+  1200→          <SceneBackgroundSolid background={background} />
+  1201→          <FogApplier conects={activeScene?.conects} />
+  1202→
+  1203→          <ambientLight intensity={lights.ambient.intensity} color={lights.ambient.color} />
+  1204→          <directionalLight
+  1205→            intensity={lights.directional.intensity}
+  1206→            color={lights.directional.color}
+  1207→            position={lights.directional.position}
+  1208→            castShadow
+  1209→            shadow-mapSize-width={2048}
+  1210→            shadow-mapSize-height={2048}
+  1211→            shadow-camera-left={-20}
+  1212→            shadow-camera-right={20}
+  1213→            shadow-camera-top={20}
+  1214→            shadow-camera-bottom={-20}
+  1215→          />
+  1216→          <hemisphereLight intensity={0.3} groundColor="#1a1a2e" color="#ffffff" />
+  1217→
+  1218→          {/* Grelha — só no editor */}
+  1219→          {!isGameMode && grid.visible && (
+  1220→            <Grid position={[0, 0, 0]} args={[grid.size, grid.divisions]} cellColor={grid.color} sectionColor={grid.color} sectionThickness={1.2} cellThickness={0.6} fadeDistance={30} fadeStrength={1} />
+  1221→          )}
+  1222→          {!isGameMode && <ContactShadows position={[0, 0.001, 0]} opacity={0.35} scale={40} blur={2.5} far={5} />}
+  1223→
+  1224→          {/* Objetos do catálogo */}
+  1225→          {activeScene.objects.map((instance) => {
+  1226→            const obj = objects.find((o) => o.id === instance.objectId)
+  1227→            if (!obj) return null
+  1228→            const sceneObj = { ...obj, id: instance.instanceId, position: instance.position, rotation: instance.rotation, scale: instance.scale }
+  1229→            const isSelected = !isGameMode && instance.instanceId === selectedInstanceId
+  1230→            const isPlayer = instance.instanceId === activeScene.playerObjectId
+  1231→            return (
+  1232→              <group key={instance.instanceId}>
+  1233→                <SceneObject ref={(node) => setMeshRef(instance.instanceId, node)} obj={sceneObj} isSelected={isSelected} onSelect={() => selectObject(instance.instanceId)} />
+  1234→                {isPlayer && !isGameMode && <PlayerMarker position={instance.position} />}
+  1235→              </group>
+  1236→            )
+  1237→          })}
+  1238→
+  1239→          {/* Conects */}
+  1240→          {(activeScene.conects || []).map((conect) => (
+  1241→            <ConectSelectorWrapper key={conect.instanceId} conect={conect} objects={objects} isSelected={!isGameMode && conect.instanceId === selectedInstanceId} onSelect={() => selectConectInstance(conect.instanceId)} setMeshRef={(node) => setConectMeshRef(conect.instanceId, node)} isGameMode={isGameMode} />
+  1242→          ))}
+  1243→
+  1244→          {/* GameCamera gizmo — só no editor */}
+  1245→          {!isGameMode && !(activeScene.conects || []).some((c) => c.type === 'ViewObject') && (
+  1246→            <GameCameraGizmo camera={activeScene.gameCamera} />
+  1247→          )}
+  1248→
+  1249→          {/* TransformControls — só no editor */}
+  1250→          {!isGameMode && selectedMesh && selectedInstanceId && (
+  1251→            <TransformControls object={selectedMesh} mode={transformMode} size={1.2}
+  1252→              onMouseDown={() => { if (orbitRef.current) orbitRef.current.enabled = false }}
+  1253→              onMouseUp={() => { if (orbitRef.current) orbitRef.current.enabled = true; handleTransformUpdate() }}
+  1254→              onObjectChange={handleTransformUpdate}
+  1255→            />
+  1256→          )}
+  1257→
+  1258→          {/* OrbitControls — só no editor */}
+  1259→          {!isGameMode && (
+  1260→            <OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.08} minDistance={1} maxDistance={100} maxPolarAngle={Math.PI * 0.495}
+  1261→              touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
+  1262→            />
+  1263→          )}
+  1264→
+  1265→          {/* GameMode — activado quando scenePreviewOpen */}
+  1266→          <GameMode activeScene={activeScene} objects={objects} meshRefs={meshRefs} conectMeshRefs={conectMeshRefs} isGameMode={isGameMode} />
+  1267→        </Suspense>
+  1268→      </Canvas>
+  1269→    </div>
+  1270→  )
+  1271→}
+  1272→
+  1273→function ConectSelectorWrapper({ conect, objects, isSelected, onSelect, setMeshRef, isGameMode }) {
+  1274→  const handlePointerDown = (e) => {
+  1275→    if (isGameMode) return
+  1276→    e.stopPropagation()
+  1277→    onSelect()
+  1278→  }
+  1279→  return (
+  1280→    <group onPointerDown={handlePointerDown}>
+  1281→      <ConectRenderer conect={conect} objects={objects} setMeshRef={setMeshRef} />
+  1282→    </group>
+  1283→  )
+  1284→}
+  1285→
