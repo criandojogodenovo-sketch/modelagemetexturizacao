@@ -223,7 +223,11 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       },
       playAnimation: (instanceId, clip) => {
         const player = animPlayersRef.current.get(instanceId)
-        if (player) player.play(clip, { loop: true })
+        if (player) {
+          // Usar blendTime do AnimationBoostObject se existir
+          const boost = (setupScene?.conects || []).find((c) => c.type === 'AnimationBoostObject')
+          player.play(clip, { loop: true, blendTime: boost?.blendTime ?? 0.3 })
+        }
       },
       playSound: (url) => { try { new Audio(url).play() } catch {} },
       playSoundByName: (name) => {
@@ -424,6 +428,181 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       setCameraSensitivity: (value) => {
         if (window._flirCameraRotation) window._flirCameraRotation.sensitivity = value
       },
+
+      // ===== Roguelike — run progress + geração de salas =====
+      _runState: { runId: 0, seed: 0, started: false },
+      startNewRun: () => {
+        const newSeed = Math.floor(Math.random() * 99999) + 1
+        gameContext._runState.runId += 1
+        gameContext._runState.seed = newSeed
+        gameContext._runState.started = true
+        debugLog(`Nova run iniciada — Run #${gameContext._runState.runId}, Seed: ${newSeed}`, 'log', 'Roguelike')
+
+        // Procurar RoguelikeGenerator na cena
+        const roguelikeGen = (setupScene.conects || []).find((c) => c.type === 'RoguelikeGenerator')
+        if (roguelikeGen) {
+          // PRNG mulberry32 — determinístico por seed
+          let _s = newSeed >>> 0
+          const rng = () => {
+            _s = (_s + 0x6D2B79F5) >>> 0
+            let t = _s
+            t = Math.imul(t ^ (t >>> 15), t | 1)
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+          }
+          const roomCount = roguelikeGen.roomCount || 5
+          const gridSize = roguelikeGen.gridSize || 12
+          const roomPrefabs = roguelikeGen.roomPrefabs || []
+
+          debugLog(`A gerar ${roomCount} salas com seed ${newSeed}...`, 'log', 'Roguelike')
+
+          // Layout simples: salas em linha com corredores
+          for (let i = 0; i < roomCount; i++) {
+            const x = i * gridSize
+            const z = (rng() - 0.5) * gridSize * 0.5 // variação Z
+            // Se há prefabs de sala, instanciar um aleatório
+            if (roomPrefabs.length > 0) {
+              const prefabId = roomPrefabs[Math.floor(rng() * roomPrefabs.length)]
+              const prefabObj = (setupScene.conects || []).find((c) => c.instanceId === prefabId)
+              if (prefabObj && prefabObj.prefabData) {
+                // Expandir prefab na posição gerada
+                try {
+                  const prefabData = typeof prefabObj.prefabData === 'string'
+                    ? JSON.parse(prefabObj.prefabData)
+                    : prefabObj.prefabData
+                  for (const child of prefabData) {
+                    useStore.getState().addConectToScene(child.type, [
+                      x + (child.position?.[0] || 0),
+                      child.position?.[1] || 0,
+                      z + (child.position?.[2] || 0),
+                    ])
+                  }
+                } catch (e) {}
+              }
+            } else {
+              // Sem prefabs: gerar sala simples (cubo oco com porta)
+              useStore.getState().addConectToScene('StaticObject', [x, 0, z])
+            }
+            // Corredor entre salas (exceto última)
+            if (i < roomCount - 1) {
+              useStore.getState().addConectToScene('StaticObject', [x + gridSize / 2, 0, z])
+            }
+          }
+          debugLog(`Geração concluída: ${roomCount} salas + ${roomCount - 1} corredores`, 'log', 'Roguelike')
+        }
+
+        gameContext.emitSignal('roguelike:generate', { runId: gameContext._runState.runId, seed: newSeed })
+        return gameContext._runState
+      },
+      getRunSeed: () => gameContext._runState.seed,
+      getRunId: () => gameContext._runState.runId,
+      endRun: () => {
+        debugLog(`Run #${gameContext._runState.runId} terminada`, 'log', 'Roguelike')
+        gameContext._runState.started = false
+        gameContext.emitSignal('roguelike:end', { runId: gameContext._runState.runId })
+      },
+
+      // ===== linkTo — navegação (scene/screen/url) =====
+      linkTo: (target, sub) => {
+        if (target === 'scene') {
+          const sc = (useStore.getState().scenes || []).find((s) => s.name === sub || s.id === sub)
+          if (sc) {
+            useStore.getState().setActiveScene(sc.id)
+            debugLog(`linkTo: cena mudou para "${sc.name}"`, 'log', 'Links')
+          } else {
+            debugLog(`linkTo: cena "${sub}" não encontrada`, 'error', 'Links')
+          }
+        } else if (target === 'screen') {
+          const screens = useStore.getState().uiScreens || []
+          for (const s of screens) {
+            s.visible = (s.name === sub || s.id === sub)
+          }
+          useStore.setState({ uiScreens: [...screens] })
+          debugLog(`linkTo: tela "${sub}" visível`, 'log', 'Links')
+        } else if (target === 'url') {
+          window.open(sub, '_blank')
+          debugLog(`linkTo: URL "${sub}" aberta`, 'log', 'Links')
+        }
+      },
+
+      // ===== Controlo de luzes por script =====
+      setLightIntensity: (lightName, intensity) => {
+        // Procurar luzes na cena com este nome
+        for (const [id, mesh] of conectMeshRefs.current) {
+          if (mesh && mesh.name === lightName) {
+            // Procurar luzes dentro do mesh/group
+            mesh.traverse((child) => {
+              if (child.isDirectionalLight || child.isPointLight || child.isSpotLight || child.isAmbientLight) {
+                child.intensity = intensity
+              }
+            })
+            debugLog(`Luz "${lightName}" intensidade → ${intensity}`, 'log', 'Light')
+            return
+          }
+        }
+        // Também procurar por nome do conect
+        const lightConect = (setupScene.conects || []).find((c) => c.name === lightName)
+        if (lightConect) {
+          const mesh = conectMeshRefs.current.get(lightConect.instanceId)
+          if (mesh) {
+            mesh.traverse((child) => {
+              if (child.isDirectionalLight || child.isPointLight || child.isSpotLight || child.isAmbientLight) {
+                child.intensity = intensity
+              }
+            })
+            debugLog(`Luz "${lightName}" intensidade → ${intensity}`, 'log', 'Light')
+          }
+        }
+      },
+      setLightColor: (lightName, color) => {
+        const c = new THREE.Color(color)
+        for (const [id, mesh] of conectMeshRefs.current) {
+          if (mesh && mesh.name === lightName) {
+            mesh.traverse((child) => {
+              if (child.isDirectionalLight || child.isPointLight || child.isSpotLight || child.isAmbientLight) {
+                child.color.copy(c)
+              }
+            })
+            debugLog(`Luz "${lightName}" cor → ${color}`, 'log', 'Light')
+            return
+          }
+        }
+        const lightConect = (setupScene.conects || []).find((c) => c.name === lightName)
+        if (lightConect) {
+          const mesh = conectMeshRefs.current.get(lightConect.instanceId)
+          if (mesh) {
+            mesh.traverse((child) => {
+              if (child.isDirectionalLight || child.isPointLight || child.isSpotLight || child.isAmbientLight) {
+                child.color.copy(c)
+              }
+            })
+            debugLog(`Luz "${lightName}" cor → ${color}`, 'log', 'Light')
+          }
+        }
+      },
+      setLightVisible: (lightName, visible) => {
+        for (const [id, mesh] of conectMeshRefs.current) {
+          if (mesh && mesh.name === lightName) {
+            mesh.traverse((child) => {
+              if (child.isDirectionalLight || child.isPointLight || child.isSpotLight || child.isAmbientLight) {
+                child.visible = visible
+              }
+            })
+            return
+          }
+        }
+        const lightConect = (setupScene.conects || []).find((c) => c.name === lightName)
+        if (lightConect) {
+          const mesh = conectMeshRefs.current.get(lightConect.instanceId)
+          if (mesh) {
+            mesh.traverse((child) => {
+              if (child.isDirectionalLight || child.isPointLight || child.isSpotLight || child.isAmbientLight) {
+                child.visible = visible
+              }
+            })
+          }
+        }
+      },
     }
     window._flirGameContext = gameContext
     window._flirInventory = inventoryRef.current
@@ -497,13 +676,16 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     for (const inst of setupScene.objects || []) setupRuntime(inst, inst.flirScript)
     for (const conect of setupScene.conects || []) setupRuntime(conect, conect.flirScript)
 
-    // Animation players
+    // Animation players — ler AnimationBoostObject para blendTime
+    const boostConect = (setupScene.conects || []).find((c) => c.type === 'AnimationBoostObject')
+    const boostBlendTime = boostConect?.blendTime ?? 0.3
+    const boostQuality = boostConect?.interpolationQuality ?? 'normal'
     for (const inst of [...(setupScene.objects || []), ...(setupScene.conects || [])]) {
       if (inst.animations && Object.keys(inst.animations).length > 0) {
         const player = createAnimationPlayer(inst.animations, () => meshRefs.current.get(inst.instanceId) || conectMeshRefs.current.get(inst.instanceId), () => null)
         animPlayersRef.current.set(inst.instanceId, player)
-        if (inst.animations.idle) player.play('idle', { loop: true })
-        else { const f = Object.keys(inst.animations)[0]; if (f) player.play(f, { loop: true }) }
+        if (inst.animations.idle) player.play('idle', { loop: true, blendTime: boostBlendTime })
+        else { const f = Object.keys(inst.animations)[0]; if (f) player.play(f, { loop: true, blendTime: boostBlendTime }) }
       }
     }
 
