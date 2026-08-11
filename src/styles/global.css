@@ -4832,3 +4832,250 @@ label {
   --gizmo-size: 1.4;
 }
 
+/* =========================================================
+   OTIMIZAÇÃO PARA ECRÃS PEQUENOS (iPhone 7, Realme C33)
+   320px - 375px de largura
+   ========================================================= */
+
+@media (max-width: 375px) {
+  /* Rail vertical mais fino para dar mais espaço ao viewport */
+  .vertical-rail {
+    width: 36px;
+  }
+  .app-shell:not(.game-mode) .app-body {
+    margin-left: 36px;
+  }
+  .rail-btn {
+    width: 30px;
+    height: 30px;
+  }
+  .rail-btn svg,
+  .rail-btn .lucide {
+    width: 16px !important;
+    height: 16px !important;
+  }
+
+  /* TopBar mais compacta */
+  .topbar {
+    padding: 0 6px;
+    gap: 4px;
+  }
+  .topbar .brand .brand-text {
+    display: none;
+  }
+  .topbar .brand .logo {
+    width: 24px;
+    height: 24px;
+  }
+
+  /* AppModeSwitch mais compacto */
+  .app-mode-switch button {
+    font-size: 10px;
+    padding: 4px 8px;
+  }
+
+  /* BottomBar mais compacta */
+  .bottom-bar {
+    padding: 4px 4px;
+    gap: 2px;
+  }
+  .bb-btn {
+    padding: 4px 2px;
+    min-width: 44px;
+  }
+  .bb-btn .bb-label {
+    font-size: 9px;
+  }
+  .bb-btn svg {
+    width: 18px !important;
+    height: 18px !important;
+  }
+
+  /* Painéis laterais em ecrã cheio (não dividir) */
+  .panel.left.open,
+  .panel.right.open {
+    width: calc(100vw - 36px) !important;
+    max-width: 320px;
+  }
+
+  /* Prop-rows mais compactas */
+  .prop-row {
+    margin-bottom: 4px;
+  }
+  .prop-row label {
+    font-size: 10px;
+  }
+  .prop-row input[type="range"] {
+    height: 16px;
+  }
+  .prop-row input[type="number"],
+  .prop-row input[type="text"],
+  .prop-row select {
+    font-size: 10px;
+    padding: 2px 4px;
+  }
+
+  /* Tabs-grid mais compacta */
+  .tabs-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 2px;
+  }
+  .tab-btn {
+    padding: 4px 2px;
+    font-size: 9px;
+  }
+  .tab-btn svg {
+    width: 11px !important;
+    height: 11px !important;
+  }
+
+  /* Tool-grid mais compacta */
+  .tool-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 3px;
+  }
+  .tool-grid button {
+    padding: 4px 2px;
+    font-size: 9px;
+  }
+  .tool-grid button svg {
+    width: 12px !important;
+    height: 12px !important;
+  }
+
+  /* Panel-header mais compacto */
+  .panel-header {
+    padding: 6px 8px;
+    font-size: 11px;
+  }
+
+  /* Collapse-header mais compacto */
+  .collapse-header {
+    padding: 5px 8px;
+    font-size: 10px;
+  }
+  .collapse-body {
+    padding: 2px 8px 6px;
+  }
+
+  /* Outliner mais compacto */
+  .outliner-item {
+    padding: 3px 4px;
+    font-size: 10px;
+  }
+  .outliner-action-btn {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* Timeline mais compacta */
+  .timeline-track-row {
+    height: 18px;
+  }
+  .timeline-track-label {
+    width: 50px;
+    font-size: 8px;
+  }
+  .timeline-controls {
+    gap: 4px;
+  }
+  .timeline-time {
+    font-size: 10px;
+  }
+
+  /* Vec3-input mais compacto */
+  .vec3-input {
+    gap: 2px;
+  }
+  .vec3-input .axis {
+    font-size: 8px;
+  }
+  .vec3-input input {
+    padding: 2px 3px;
+    font-size: 10px;
+  }
+
+  /* MainMenu mais compacto */
+  .mm-item {
+    padding: 8px 10px;
+  }
+  .mm-icon {
+    width: 32px;
+    height: 32px;
+  }
+  .mm-label {
+    font-size: 12px;
+  }
+  .mm-desc {
+    font-size: 10px;
+  }
+
+  /* ConectsWindow mais compacta */
+  .conect-item {
+    padding: 6px 8px;
+  }
+  .conect-label {
+    font-size: 11px;
+  }
+  .conect-desc {
+    font-size: 9px;
+  }
+
+  /* Home mais compacta */
+  .home-content {
+    padding: 12px;
+  }
+  .home-features {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px;
+  }
+  .feature-card {
+    padding: 10px;
+  }
+  .feature-icon {
+    width: 36px;
+    height: 36px;
+  }
+  .feature-card h3 {
+    font-size: 11px;
+  }
+  .feature-card p {
+    font-size: 9px;
+  }
+
+  /* Modal mais compacto */
+  .modal {
+    width: 95vw !important;
+    max-width: 95vw !important;
+    padding: 12px;
+  }
+}
+
+/* Extra-small: 320px (iPhone SE 1st gen, alguns Android antigos) */
+@media (max-width: 340px) {
+  .vertical-rail {
+    width: 32px;
+  }
+  .app-shell:not(.game-mode) .app-body {
+    margin-left: 32px;
+  }
+  .rail-btn {
+    width: 28px;
+    height: 28px;
+  }
+  .bottom-bar .bb-label {
+    display: none;
+  }
+  .bottom-bar .bb-btn {
+    min-width: 36px;
+    padding: 6px 2px;
+  }
+  .app-mode-switch button {
+    font-size: 9px;
+    padding: 3px 6px;
+  }
+  .home-features {
+    grid-template-columns: 1fr !important;
+  }
+}
+

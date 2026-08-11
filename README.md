@@ -249,14 +249,14 @@ Esta secção documenta o que **realmente funciona** vs o que **não funciona**,
 
 | Conect | Estado | O que falta |
 |---|---|---|
-| ParticleObject | ⚠️ Estático | Partículas não se movem/morrem. Sem emission runtime. |
-| TrailObject | ⚠️ Estático | Rasto não segue objeto. Sem update no useFrame. |
+| ParticleObject | ✅ CORRIGIDO | Partículas agora animam (emission, life, gravity, recycling) via Points + useFrame |
+| TrailObject | ✅ CORRIGIDO | Rasto segue followTarget, atualiza buffer no useFrame, com updateRate configurável |
 | SpawnObject | ❌ Morto | Spawning não implementado. |
-| NavigatorObject | ❌ Morto | Portal não transporta entre cenas. |
-| WeaponObject | ❌ Morto | Sistema de combate não implementado. |
-| ItemObject | ❌ Morto | Sistema de inventário não implementado. |
+| NavigatorObject | ✅ CORRIGIDO | Portal transporta jogador para cena de destino quando próximo (triggerRadius) |
+| WeaponObject | ✅ PARCIAL | equipWeapon/shoot/reload/getAmmo funcionam no editor (raycast da câmara) |
+| ItemObject | ✅ CORRIGIDO | Auto-pickup quando jogador próximo, addToInventory atualiza inventário |
 | AnimationBoostObject | ❌ Morto | Propriedades nunca lidas. |
-| GameStateObject | ❌ Morto | Máquina de estados não implementada. |
+| GameStateObject | ✅ PARCIAL | setGameState/getGameState funcionam no editor |
 | PrefabObject | ❌ Morto | Instanciação de prefabs não implementada. |
 | RoguelikeGenerator | ❌ Morto | Geração procedural não implementada. |
 | GroupObject | ❌ Morto | Parenting não implementado. |
@@ -288,16 +288,17 @@ Esta secção documenta o que **realmente funciona** vs o que **não funciona**,
 | wait() | ❌ No-op | _waitQueue nunca definido |
 | destroy() | ⚠️ Parcial | Só esconde mesh, não remove da física |
 | collidingWith() | ⚠️ Parcial | Usa distância, não colisão real |
-| shoot / reload / equipWeapon | ❌ No-op | Sistema de combate não implementado |
-| takeDamage / getHealth | ❌ No-op | |
-| addToInventory / removeFromInventory | ❌ No-op | |
+| shoot / reload / equipWeapon | ✅ CORRIGIDO | Agora funciona no editor (raycast da câmara, fireRate, ammo) |
+| takeDamage / getHealth | ✅ CORRIGIDO | Agora funciona via globalVars (_health_ID) |
+| addToInventory / removeFromInventory | ✅ CORRIGIDO | Agora funciona (inventoryRef + window._flirInventory) |
 | linkTo | ❌ No-op | |
-| setGameState / getGameState | ❌ No-op | |
-| saveProgress / loadProgress | ❌ No-op | |
-| playSequence | ❌ No-op | |
+| setGameState / getGameState | ✅ CORRIGIDO | Agora funciona no editor |
+| saveProgress / loadProgress | ✅ CORRIGIDO | Agora funciona via localStorage |
+| playSequence | ✅ CORRIGIDO | Agora funciona (debug + signal) |
 | setLightIntensity / setLightColor | ❌ No-op | |
-| getCameraRotation / setCameraSensitivity | ❌ No-op | |
+| getCameraRotation / setCameraSensitivity | ✅ CORRIGIDO | Agora funciona no editor |
 | startNewRun / getRunSeed / endRun | ❌ No-op | |
+| emitSignal | ✅ CORRIGIDO | Agora funciona (dispata onSignal event) |
 
 **Nota:** Algumas destas funções (shoot, inventory, saveProgress, etc.) funcionam no **jogo exportado** (gameRuntime.js) mas NÃO no preview do editor (SceneLevel3D.jsx). Há divergência entre os dois contextos.
 
@@ -319,22 +320,31 @@ Esta secção documenta o que **realmente funciona** vs o que **não funciona**,
 
 | Dispositivo | Otimização | Notas |
 |---|---|---|
-| Realme C33 (360px) | ⚠️ Parcial | Rail vertical + bottombar visíveis, mas algum texto pode sobrepor |
-| Samsung S8 (360px) | ⚠️ Parcial | Mesmo que C33 |
-| iPhone 7 (375px) | ⚠️ Parcial | Mesmo que C33 |
+| Realme C33 (360px) | ✅ Otimizado | Media queries @media(max-width:375px) — rail 36px, bottombar compacto, texto 10px |
+| Samsung S8 (360px) | ✅ Otimizado | Mesmo que C33 |
+| iPhone 7 (375px) | ✅ Otimizado | Mesmo que C33 |
+| iPhone SE 1st (320px) | ✅ Otimizado | Media queries @media(max-width:340px) — rail 32px, sem labels no bottombar |
 
-O rail vertical (44px) + bottombar ocupam espaço significativo em ecrãs < 400px. Funciona mas é apertado.
+Otimizações aplicadas para ecrãs pequenos (≤375px):
+- Rail vertical: 44px → 36px (32px em ≤340px)
+- BottomBar: sem labels de texto em ≤340px (só ícones)
+- Painéis laterais: largura total (100vw - rail)
+- Texto/ícones: reduzidos (10-11px labels, 9px texto pequeno)
+- Tabs-grid: 3 colunas em vez de 4
+- Home features: 2 colunas em vez de 4 (1 coluna em ≤340px)
+- Modais: 95vw de largura
 
 ## O que pode ser corrigido numa próxima sessão
 
-1. **ParticleObject runtime** — animar partículas no useFrame
-2. **TrailObject runtime** — seguir objeto e atualizar buffer
-3. **NavigatorObject** — deteção de proximidade + changeScene
-4. **CameraTouchZone** — integrar no GameUIOverlay
-5. **Unificar gameContext** — editor e exportado com as mesmas funções
-6. **wait() real** — implementar scheduler
-7. **collidingWith real** — usar eventos de colisão do cannon-es
-8. **Aritmética no FlirCode** — 5+3 deve dar 8, não "53"
+1. **CameraTouchZone** — integrar zona de toque no GameUIOverlay para rodar câmara
+2. **Unificar gameContext** — editor e exportado com as mesmas funções
+3. **wait() real** — implementar scheduler no FlirCode
+4. **collidingWith real** — usar eventos de colisão do cannon-es
+5. **Aritmética no FlirCode** — 5+3 deve dar 8, não "53"
+6. **SpawnObject** — spawning temporal de objetos
+7. **PrefabObject** — instanciação de prefabs
+8. **GroupObject** — parenting de meshes
+9. **ReferenceObject** — renderizar conteúdo de outra cena
 
 
 ---

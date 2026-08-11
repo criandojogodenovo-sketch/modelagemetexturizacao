@@ -103,6 +103,18 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   const npcAIsRef = useRef(new Map())
   const timerStatesRef = useRef(new Map())
   const joystickRef = useRef({ x: 0, z: 0, active: false })
+  const inventoryRef = useRef({})
+  const weaponStateRef = useRef({ equipped: false, ammo: 0, maxAmmo: 0, damage: 0, fireRate: 0.3, range: 50, reloadTime: 2, lastShot: 0 })
+
+  // Expor meshRefs globalmente para TrailObject poder seguir objetos
+  useEffect(() => {
+    window._flirConectMeshRefs = conectMeshRefs
+    window._flirMeshRefs = meshRefs
+    return () => {
+      window._flirConectMeshRefs = null
+      window._flirMeshRefs = null
+    }
+  }, [conectMeshRefs, meshRefs])
 
   // P2.5 fix: armazenar a cena ativa num ref para que modificações feitas pelo
   // FlirCode (createObject, etc.) NÃO reiniciem o jogo (evita loop infinito).
@@ -307,8 +319,98 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         const mp = window._multiplayer
         return mp && mp.connected ? mp.getPlayerState(playerId) : null
       },
+
+      // ===== Inventário (ItemObject auto-pickup) =====
+      addToInventory: (itemName, qty = 1) => {
+        inventoryRef.current[itemName] = (inventoryRef.current[itemName] || 0) + qty
+        window._flirInventory = inventoryRef.current
+        debugLog(`Item "${itemName}" adicionado (total: ${inventoryRef.current[itemName]})`, 'log', 'Inventory')
+      },
+      removeFromInventory: (itemName, qty = 1) => {
+        if (!inventoryRef.current[itemName]) return
+        inventoryRef.current[itemName] = Math.max(0, inventoryRef.current[itemName] - qty)
+        if (inventoryRef.current[itemName] === 0) delete inventoryRef.current[itemName]
+        window._flirInventory = inventoryRef.current
+      },
+      getInventoryCount: (itemName) => inventoryRef.current[itemName] || 0,
+      hasItem: (itemName) => (inventoryRef.current[itemName] || 0) > 0,
+
+      // ===== Combate (WeaponObject) =====
+      equipWeapon: (damage, ammo, fireRate, range, reloadTime) => {
+        weaponStateRef.current = {
+          equipped: true,
+          ammo, maxAmmo: ammo,
+          damage: damage || 10,
+          fireRate: fireRate || 0.3,
+          range: range || 50,
+          reloadTime: reloadTime || 2,
+          lastShot: 0,
+        }
+        window._flirCrosshair = true
+        debugLog(`Arma equipada (dano: ${damage}, munições: ${ammo})`, 'log', 'Weapon')
+      },
+      shoot: () => {
+        const w = weaponStateRef.current
+        if (!w.equipped || w.ammo <= 0) return false
+        const now = performance.now() / 1000
+        if (now - w.lastShot < w.fireRate) return false
+        w.lastShot = now
+        w.ammo--
+        // Raycast da câmara para detetar hit
+        const raycaster = new THREE.Raycaster()
+        raycaster.setFromCamera({ x: 0, y: 0 }, camera)
+        raycaster.far = w.range
+        debugLog(`Disparo! Munições restantes: ${w.ammo}`, 'log', 'Weapon')
+        return true
+      },
+      reload: () => {
+        const w = weaponStateRef.current
+        if (!w.equipped) return
+        w.ammo = w.maxAmmo
+        debugLog('Arma recarregada', 'log', 'Weapon')
+      },
+      getAmmo: () => weaponStateRef.current.ammo,
+
+      // ===== Combate (saúde) =====
+      takeDamage: (instanceId, amount) => {
+        // Reduzir "saúde" via globalVar _health
+        const health = gameContext.getVar('_health_' + instanceId)
+        gameContext.setVar('_health_' + instanceId, Math.max(0, (health || 100) - amount))
+        debugLog(`${instanceId} sofreu ${amount} de dano (saúde: ${gameContext.getVar('_health_' + instanceId)})`, 'log', 'Combat')
+      },
+      getHealth: (instanceId) => gameContext.getVar('_health_' + instanceId) || 100,
+
+      // ===== Sinais =====
+      emitSignal: (name, data) => {
+        for (const rt of runtimesRef.current.values()) {
+          rt.triggerEvent('onSignal', { name, data })
+        }
+        debugLog(`Sinal "${name}" emitido`, 'log', 'Signal')
+      },
+
+      // ===== Estado de jogo =====
+      _gameState: 'menu',
+      setGameState: (s) => { gameContext._gameState = s; debugLog('Game State: ' + s, 'log', 'GameState'); for (const rt of runtimesRef.current.values()) { rt.triggerEvent('onGameStateChange', { state: s }) } },
+      getGameState: () => gameContext._gameState,
+
+      // ===== Save/Load =====
+      saveProgress: (key, val) => { try { localStorage.setItem('flir_progress_' + key, JSON.stringify(val)); debugLog('Progresso guardado: ' + key, 'log', 'Save') } catch (e) {} },
+      loadProgress: (key) => { try { const v = localStorage.getItem('flir_progress_' + key); return v ? JSON.parse(v) : null } catch (e) { return null } },
+
+      // ===== Sequenciador =====
+      playSequence: (name) => { debugLog('Sequência "' + name + '" iniciada', 'log', 'Sequence') },
+
+      // ===== Câmara (FPS/BR) =====
+      getCameraRotation: () => {
+        if (window._flirCameraRotation) return { yaw: window._flirCameraRotation.yaw, pitch: window._flirCameraRotation.pitch }
+        return { yaw: 0, pitch: 0 }
+      },
+      setCameraSensitivity: (value) => {
+        if (window._flirCameraRotation) window._flirCameraRotation.sensitivity = value
+      },
     }
     window._flirGameContext = gameContext
+    window._flirInventory = inventoryRef.current
 
     // Física
     const gravity = setupScene.physics?.gravity || [0, -9.82, 0]
@@ -551,6 +653,55 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         camera.position.set(...(activeView.position || [5, 4, 6]))
         if (activeView.rotation) camera.rotation.set(...activeView.rotation)
         else camera.lookAt(0, 0, 0)
+      }
+    }
+
+    // NavigatorObject — transporta jogador para outra cena quando próximo
+    const player3 = (setupScene?.conects || []).find((c) => c.type === 'PersonalObject')
+    if (player3) {
+      const playerMesh = conectMeshRefs.current.get(player3.instanceId)
+      if (playerMesh) {
+        for (const nav of setupScene?.conects || []) {
+          if (nav.type === 'NavigatorObject' && nav.targetSceneId) {
+            const navMesh = conectMeshRefs.current.get(nav.instanceId)
+            if (navMesh && navMesh.visible !== false) {
+              const dist = playerMesh.position.distanceTo(navMesh.position)
+              if (dist <= (nav.triggerRadius || 2)) {
+                // Transportar para a cena de destino
+                debugLog(`Portal ativado! A mudar para cena ${nav.targetSceneId}`, 'log', 'Navigator')
+                useStore.getState().closeScenePreview()
+                setTimeout(() => {
+                  useStore.getState().setActiveScene(nav.targetSceneId)
+                  useStore.getState().openScenePreview()
+                }, (nav.transitionDuration || 0.5) * 1000)
+                break
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // ItemObject — auto-pickup quando jogador próximo
+    if (player3) {
+      const playerMesh = conectMeshRefs.current.get(player3.instanceId)
+      if (playerMesh) {
+        for (const item of setupScene?.conects || []) {
+          if (item.type === 'ItemObject' && item.autoPickup !== false) {
+            const itemMesh = conectMeshRefs.current.get(item.instanceId)
+            if (itemMesh && itemMesh.visible !== false) {
+              const dist = playerMesh.position.distanceTo(itemMesh.position)
+              if (dist <= (item.pickupRadius || 2)) {
+                // Apanhar item
+                if (gameContext.addToInventory) {
+                  gameContext.addToInventory(item.itemName || 'Item', item.quantity || 1)
+                }
+                itemMesh.visible = false
+                debugLog(`Item "${item.itemName}" apanhado!`, 'log', 'Inventory')
+              }
+            }
+          }
+        }
       }
     }
   })

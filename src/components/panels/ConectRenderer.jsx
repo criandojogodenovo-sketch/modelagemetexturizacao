@@ -376,31 +376,99 @@ function CheckpointMesh({ conect, setMeshRef }) {
 
 // ===== ParticleObject =====
 function ParticleMesh({ conect, setMeshRef }) {
-  const particles = useMemo(() => {
-    const arr = []
-    const count = Math.min(conect.maxParticles || 100, 500)
+  const groupRef = useRef()
+  const timeRef = useRef(0)
+
+  // Usar BufferGeometry + Points para performance (1 draw call em vez de N)
+  const count = Math.min(conect.maxParticles || 100, 300)
+  const positionsRef = useRef(new Float32Array(count * 3))
+  const velocitiesRef = useRef(new Float32Array(count * 3))
+  const lifeRef = useRef(new Float32Array(count))
+
+  // Inicializar partículas
+  useMemo(() => {
+    const spread = conect.spread || 1
+    const speed = conect.particleSpeed || 0.5
     for (let i = 0; i < count; i++) {
-      arr.push({
-        position: [
-          (Math.random() - 0.5) * (conect.spread || 1),
-          Math.random() * 0.5,
-          (Math.random() - 0.5) * (conect.spread || 1),
-        ],
-        size: 0.02 + Math.random() * (conect.particleSize || 0.1),
-      })
+      positionsRef.current[i * 3] = (Math.random() - 0.5) * spread
+      positionsRef.current[i * 3 + 1] = 0
+      positionsRef.current[i * 3 + 2] = (Math.random() - 0.5) * spread
+      velocitiesRef.current[i * 3] = (Math.random() - 0.5) * speed
+      velocitiesRef.current[i * 3 + 1] = Math.random() * speed + 0.2
+      velocitiesRef.current[i * 3 + 2] = (Math.random() - 0.5) * speed
+      lifeRef.current[i] = Math.random() * (conect.particleLife || 2)
     }
-    return arr
-  }, [conect.maxParticles, conect.particleSize, conect.spread])
+  }, [count, conect.spread, conect.particleSpeed, conect.particleLife])
+
+  const geometry = useMemo(() => {
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(positionsRef.current, 3))
+    return geo
+  }, [])
+
+  const material = useMemo(() => {
+    return new THREE.PointsMaterial({
+      color: conect.color || '#ffffff',
+      size: conect.particleSize || 0.1,
+      transparent: true,
+      opacity: 0.7,
+      sizeAttenuation: true,
+      depthWrite: false,
+    })
+  }, [conect.color, conect.particleSize])
+
+  // Animar partículas no useFrame
+  useFrame((_, delta) => {
+    timeRef.current += delta
+    const positions = positionsRef.current
+    const velocities = velocitiesRef.current
+    const life = lifeRef.current
+    const gravity = conect.gravity ?? -0.5
+    const maxLife = conect.particleLife || 2
+    const spread = conect.spread || 1
+
+    for (let i = 0; i < count; i++) {
+      // Atualizar vida
+      life[i] += delta
+      if (life[i] >= maxLife) {
+        // Reciclar partícula
+        positions[i * 3] = (Math.random() - 0.5) * spread
+        positions[i * 3 + 1] = 0
+        positions[i * 3 + 2] = (Math.random() - 0.5) * spread
+        velocities[i * 3] = (Math.random() - 0.5) * (conect.particleSpeed || 0.5)
+        velocities[i * 3 + 1] = Math.random() * (conect.particleSpeed || 0.5) + 0.2
+        velocities[i * 3 + 2] = (Math.random() - 0.5) * (conect.particleSpeed || 0.5)
+        life[i] = 0
+      } else {
+        // Mover partícula
+        positions[i * 3] += velocities[i * 3] * delta
+        positions[i * 3 + 1] += velocities[i * 3 + 1] * delta
+        positions[i * 3 + 2] += velocities[i * 3 + 2] * delta
+        // Aplicar gravidade
+        velocities[i * 3 + 1] += gravity * delta
+      }
+    }
+    geometry.attributes.position.needsUpdate = true
+  })
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      geometry.dispose()
+      material.dispose()
+    }
+  }, [geometry, material])
 
   return (
-    <group ref={setMeshRef} position={conect.position}>
-      {particles.map((p, i) => (
-        <mesh key={i} position={p.position}>
-          <sphereGeometry args={[p.size, 6, 6]} />
-          <meshBasicMaterial color={conect.color} transparent opacity={0.7} />
-        </mesh>
-      ))}
-    </group>
+    <points
+      ref={(node) => {
+        groupRef.current = node
+        if (typeof setMeshRef === 'function') setMeshRef(node)
+      }}
+      position={conect.position}
+      geometry={geometry}
+      material={material}
+    />
   )
 }
 
@@ -456,23 +524,69 @@ function ViewObjectMesh({ conect, setMeshRef }) {
 // Renderiza uma linha que segue a posição do objeto pai.
 // Em tempo de execução, o GameRunner atualiza as posições do trail.
 function TrailMesh({ conect, setMeshRef }) {
-  const points = useMemo(() => {
-    const arr = []
-    const len = conect.length || 30
-    for (let i = 0; i < len; i++) {
-      arr.push(new THREE.Vector3(conect.position[0], conect.position[1], conect.position[2]))
+  const groupRef = useRef()
+  const lineRef = useRef()
+  const maxPoints = conect.length || 30
+  const positionsRef = useRef(new Float32Array(maxPoints * 3))
+  const currentIndexRef = useRef(0)
+  const frameCountRef = useRef(0)
+
+  // Inicializar todas as posições na posição inicial do trail
+  useMemo(() => {
+    const px = conect.position?.[0] || 0
+    const py = conect.position?.[1] || 0
+    const pz = conect.position?.[2] || 0
+    for (let i = 0; i < maxPoints; i++) {
+      positionsRef.current[i * 3] = px
+      positionsRef.current[i * 3 + 1] = py
+      positionsRef.current[i * 3 + 2] = pz
     }
-    return arr
-  }, [conect.length])
+  }, [maxPoints, conect.position])
 
   const geometry = useMemo(() => {
-    const g = new THREE.BufferGeometry().setFromPoints(points)
-    return g
-  }, [points])
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(positionsRef.current, 3))
+    return geo
+  }, [])
+
+  // Seguir o followTarget e atualizar o trail
+  useFrame(() => {
+    if (!conect.followTarget) return
+    // Procurar o mesh do followTarget nos conectMeshRefs
+    const targetMesh = window._flirConectMeshRefs?.get(conect.followTarget)
+      || window._flirMeshRefs?.get(conect.followTarget)
+    if (!targetMesh) return
+
+    // Atualizar a cada N frames (não todos os frames — performance)
+    const updateInterval = Math.max(1, Math.floor(60 / (conect.updateRate || 30)))
+    frameCountRef.current++
+    if (frameCountRef.current < updateInterval) return
+    frameCountRef.current = 0
+
+    // Shift: mover todos os pontos uma posição para trás
+    const positions = positionsRef.current
+    for (let i = maxPoints - 1; i > 0; i--) {
+      positions[i * 3] = positions[(i - 1) * 3]
+      positions[i * 3 + 1] = positions[(i - 1) * 3 + 1]
+      positions[i * 3 + 2] = positions[(i - 1) * 3 + 2]
+    }
+    // Novo ponto na posição do target
+    positions[0] = targetMesh.position.x
+    positions[1] = targetMesh.position.y
+    positions[2] = targetMesh.position.z
+
+    geometry.attributes.position.needsUpdate = true
+    geometry.setDrawRange(0, maxPoints)
+  })
+
+  // Cleanup
+  useEffect(() => {
+    return () => { geometry.dispose() }
+  }, [geometry])
 
   return (
-    <group ref={setMeshRef} position={conect.position}>
-      <line geometry={geometry}>
+    <group ref={setMeshRef} position={[0, 0, 0]}>
+      <line ref={lineRef} geometry={geometry}>
         <lineBasicMaterial
           color={conect.color || '#2f81f7'}
           transparent
