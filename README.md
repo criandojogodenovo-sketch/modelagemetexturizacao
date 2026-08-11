@@ -378,6 +378,40 @@ Todos os itens anteriores foram resolvidos. O estado atual da engine é:
 - LOD automático em objetos (só terrain tem LOD)
 - FlirCode `else` no exportado (gameRuntime.js) — `else if` funciona mas `else` sozinho é stub
 - GLTF com .bin externo (browser File API não tem path)
+- GLTF sem DRACO/KTX2 support
+- GLTF perde skeleton/animações no import
+- Super-realismo (skyShaderPro, gpuMeshModifiers, POM Pro, hardwareInstancing, terrainNoise) — módulos existem mas não estão wired à UI
+- Marketplace precisa de backend (serverless functions) para funcionar
+
+---
+
+# Marketplace (Estrutura)
+
+## Estado atual
+- UI completa: MarketplacePanel com 4 abas (Assets, Jogos, Templates, Login)
+- Config do servidor Neon (PostgreSQL) em `src/utils/neonConfig.js`
+- Esquema SQL completo (users, assets, games, templates, purchases, sessions)
+- API client stub (`marketplaceAPI`) com todas as funções
+- Botão Marketplace no MainMenu
+- Estado no store (`marketplaceOpen`, `openMarketplace`, `closeMarketplace`)
+
+## O que falta (backend)
+Para o marketplace funcionar, precisa de serverless functions em `/api/marketplace/`:
+- `auth/register` — criar conta (hash password, gerar token)
+- `auth/login` — verificar credenciais, retornar token
+- `assets` — CRUD de assets (listar, criar, download)
+- `games` — CRUD de jogos (listar, publicar, download)
+- `templates` — CRUD de templates (listar, criar, download)
+
+Estas functions conectam ao Neon PostgreSQL usando a URL em `neonConfig.js`.
+
+## URL do servidor
+```
+postgresql://neondb_owner:npg_Yr7nld2jTpSW@ep-fragrant-pond-ayedmxhc-pooler.c-5.us-east-2.aws.neon.tech/neondb
+```
+
+## Esquema SQL
+Ver `NEON_SCHEMA` em `src/utils/neonConfig.js` — inclui tabelas para users, assets, games, templates, purchases e sessions.
 
 
 ---

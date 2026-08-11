@@ -19,6 +19,7 @@ import { useThree, useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useStore } from '../../store/useStore'
 import { findConectDefinition } from '../../utils/conects/taxonomy'
+import { createWaterProMaterial } from '../../utils/waterShaderPro'
 import SceneObject from '../3d/SceneObject'
 
 const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, setMeshRef }, meshRef) {
@@ -287,17 +288,48 @@ function TerrainMesh({ conect, setMeshRef }) {
 function WaterMesh({ conect, setMeshRef }) {
   const meshRef = useRef()
   const time = useRef(0)
+  const waterQuality = useStore((s) => s.renderSettings?.waterQuality || 'basic')
+
+  // Material Pro (Gerstner + caustics + IOR + Fresnel) quando quality = professional
+  const proMaterial = useMemo(() => {
+    if (waterQuality !== 'professional') return null
+    return createWaterProMaterial({
+      color: conect.color || '#2f81f7',
+      deepColor: conect.deepColor || '#0a3d5c',
+      opacity: conect.opacity ?? 0.85,
+      waveHeight: conect.waveHeight ?? 0.2,
+      waveSpeed: conect.waveSpeed ?? 0.5,
+      waterMode: conect.waterMode || 'lake',
+      flowDirection: conect.flowDirection || 0,
+      foamEnabled: conect.foamEnabled !== false,
+      foamThreshold: conect.foamThreshold ?? 0.7,
+      depthGradient: conect.depthGradient !== false,
+      skyColor: '#88aacc',
+    })
+  }, [waterQuality, conect.color, conect.deepColor, conect.opacity, conect.waveHeight,
+      conect.waveSpeed, conect.waterMode, conect.flowDirection, conect.foamEnabled,
+      conect.foamThreshold, conect.depthGradient])
 
   const geometry = useMemo(() => {
     const [w, h] = conect.size || [20, 20]
-    const g = new THREE.PlaneGeometry(w, h, 32, 32)
+    const segs = waterQuality === 'professional' ? 48 : 32
+    const g = new THREE.PlaneGeometry(w, h, segs, segs)
     g.rotateX(-Math.PI / 2)
     return g
-  }, [conect.size])
+  }, [conect.size, waterQuality])
 
-  // Animar ondas no useFrame
-  useFrame((_, delta) => {
+  // Animar ondas no useFrame (apenas para water básico; Pro usa shader)
+  useFrame((state, delta) => {
     if (!meshRef.current) return
+    if (proMaterial) {
+      // Pro: actualizar uniforms do shader
+      if (proMaterial.uniforms) {
+        proMaterial.uniforms.uTime.value += delta
+        proMaterial.uniforms.uCameraPos.value.copy(state.camera.position)
+      }
+      return
+    }
+    // Básico: animar vértices
     time.current += delta * (conect.waveSpeed || 0.5)
     const pos = meshRef.current.geometry.attributes.position
     const waveHeight = conect.waveHeight || 0.1
@@ -320,14 +352,17 @@ function WaterMesh({ conect, setMeshRef }) {
       }}
       position={conect.position}
       geometry={geometry}
+      material={proMaterial || undefined}
     >
-      <meshStandardMaterial
-        color={conect.color || '#2f81f7'}
-        transparent
-        opacity={conect.opacity ?? 0.6}
-        roughness={0.1}
-        metalness={0.3}
-      />
+      {!proMaterial && (
+        <meshStandardMaterial
+          color={conect.color || '#2f81f7'}
+          transparent
+          opacity={conect.opacity ?? 0.6}
+          roughness={0.1}
+          metalness={0.3}
+        />
+      )}
     </mesh>
   )
 }
@@ -624,37 +659,66 @@ function ReflectMesh({ conect, setMeshRef }) {
 function SkyMesh({ conect, setMeshRef }) {
   const { scene } = useThree()
 
+  // Ler propriedades com os nomes correctos da taxonomy
+  const skyType = conect.skyType || 'gradient'
+  const topColor = conect.topColor || conect.gradientTop || '#1a4d8f'
+  const bottomColor = conect.bottomColor || conect.gradientBottom || '#aac4e8'
+  const solidColor = conect.solidColor || conect.color || '#87ceeb'
+
   // Aplicar background à cena
   useEffect(() => {
     if (!scene) return
-    if (conect.skyType === 'procedural' || conect.skyType === 'gradient') {
+    if (skyType === 'procedural' || skyType === 'gradient') {
       // Gradiente via canvas
       const canvas = document.createElement('canvas')
       canvas.width = 2; canvas.height = 256
       const ctx = canvas.getContext('2d')
       const grad = ctx.createLinearGradient(0, 0, 0, 256)
-      grad.addColorStop(0, conect.gradientTop || '#4a90d9')
-      grad.addColorStop(1, conect.gradientBottom || '#b0d4f1')
+      grad.addColorStop(0, topColor)
+      grad.addColorStop(1, bottomColor)
       ctx.fillStyle = grad
       ctx.fillRect(0, 0, 2, 256)
       const tex = new THREE.CanvasTexture(canvas)
       tex.colorSpace = THREE.SRGBColorSpace
       scene.background = tex
       return () => { tex.dispose() }
+    } else if (skyType === 'hdri' && conect.hdriUrl) {
+      // HDRI via RGBELoader (lazy import)
+      import('three/examples/jsm/loaders/RGBELoader.js').then(({ RGBELoader }) => {
+        const loader = new RGBELoader()
+        loader.load(conect.hdriUrl, (texture) => {
+          texture.mapping = THREE.EquirectangularReflectionMapping
+          scene.background = texture
+          scene.environment = texture
+        })
+      }).catch(() => {
+        scene.background = new THREE.Color(solidColor)
+      })
     } else {
-      scene.background = new THREE.Color(conect.color || '#87CEEB')
+      // solid
+      scene.background = new THREE.Color(solidColor)
     }
-  }, [scene, conect.skyType, conect.color, conect.gradientTop, conect.gradientBottom])
+  }, [scene, skyType, topColor, bottomColor, solidColor, conect.hdriUrl])
 
-  // Esfera grande com material de céu (BackSide)
+  // Esfera grande com material de céu (BackSide) — só para solid/hdri
+  if (skyType === 'solid' || skyType === 'hdri') {
+    return (
+      <mesh ref={setMeshRef} scale={[100, 100, 100]}>
+        <sphereGeometry args={[1, 32, 16]} />
+        <meshBasicMaterial
+          color={solidColor}
+          side={THREE.BackSide}
+          fog={false}
+        />
+      </mesh>
+    )
+  }
+  // Para gradient/procedural: não renderizar esfera (o background já é o gradiente)
+  // Mas precisamos de um mesh para o setMeshRef (para física não quebrar)
   return (
-    <mesh ref={setMeshRef} scale={[100, 100, 100]}>
-      <sphereGeometry args={[1, 32, 16]} />
-      <meshBasicMaterial
-        color={conect.color || '#87CEEB'}
-        side={THREE.BackSide}
-        fog={false}
-      />
+    <mesh ref={setMeshRef} visible={false} scale={[0.001, 0.001, 0.001]}>
+      <sphereGeometry args={[1, 8, 8]} />
+      <meshBasicMaterial />
     </mesh>
   )
 }

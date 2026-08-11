@@ -78,6 +78,44 @@ const initialScene = {
     },
     hdri: null, // dataURL do HDRI ou null
   },
+  // Renderização avançada (recursos pesados — off por defeito)
+  renderSettings: {
+    qualityLevel: 'balanced', // performance | balanced | realista | super-realista | hiper-realista
+    flirGI: false,
+    flirAdaptiveMesh: false,
+    shadowOptimizations: true,
+    shadowDistance: 20,
+    shadowMapSize: 1024,
+    vertexAO: false,
+    pom: false,
+    postProcessing: false,
+    waterQuality: 'basic', // basic | professional
+    pixelRatio: 1,
+  },
+}
+
+// Níveis de Qualidade Gráfica
+export const QUALITY_PRESETS = {
+  performance: {
+    label: 'Performance (fraco)',
+    settings: { flirGI: false, flirAdaptiveMesh: false, shadowOptimizations: true, shadowDistance: 15, shadowMapSize: 512, vertexAO: false, pom: false, postProcessing: false, waterQuality: 'basic', pixelRatio: 0.75 },
+  },
+  balanced: {
+    label: 'Equilibrado (padrão)',
+    settings: { flirGI: false, flirAdaptiveMesh: false, shadowOptimizations: true, shadowDistance: 20, shadowMapSize: 1024, vertexAO: true, pom: false, postProcessing: false, waterQuality: 'basic', pixelRatio: 1 },
+  },
+  realista: {
+    label: 'Realista',
+    settings: { flirGI: false, flirAdaptiveMesh: true, shadowOptimizations: true, shadowDistance: 30, shadowMapSize: 2048, vertexAO: true, pom: true, postProcessing: false, waterQuality: 'professional', pixelRatio: 1 },
+  },
+  'super-realista': {
+    label: 'Super-Realista',
+    settings: { flirGI: true, flirAdaptiveMesh: true, shadowOptimizations: true, shadowDistance: 40, shadowMapSize: 2048, vertexAO: true, pom: true, postProcessing: true, waterQuality: 'professional', pixelRatio: 1.5 },
+  },
+  'hiper-realista': {
+    label: 'Hiper-Realista',
+    settings: { flirGI: true, flirAdaptiveMesh: true, shadowOptimizations: false, shadowDistance: 60, shadowMapSize: 4096, vertexAO: true, pom: true, postProcessing: true, waterQuality: 'professional', pixelRatio: 2 },
+  },
 }
 
 // Modos da aplicação
@@ -1382,9 +1420,26 @@ export const useStore = create(
       openPostProcessing: () => set({ postProcessingOpen: true }),
       closePostProcessing: () => set({ postProcessingOpen: false }),
 
+      // Render settings + quality presets
+      setRenderSettings: (patch) => set((s) => ({
+        renderSettings: { ...s.renderSettings, ...patch },
+      })),
+      setQualityLevel: (level) => {
+        const preset = QUALITY_PRESETS[level]
+        if (!preset) return
+        set((s) => ({
+          renderSettings: { ...s.renderSettings, ...preset.settings, qualityLevel: level },
+        }))
+      },
+
       animStudioOpen: false,
       openAnimStudio: () => set({ animStudioOpen: true }),
       closeAnimStudio: () => set({ animStudioOpen: false }),
+
+      // Marketplace
+      marketplaceOpen: false,
+      openMarketplace: () => set({ marketplaceOpen: true }),
+      closeMarketplace: () => set({ marketplaceOpen: false }),
 
       homeVisible: true,
       showHome: () => set({ homeVisible: true }),

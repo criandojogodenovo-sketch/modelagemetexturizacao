@@ -107,6 +107,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   const weaponStateRef = useRef({ equipped: false, ammo: 0, maxAmmo: 0, damage: 0, fireRate: 0.3, range: 50, reloadTime: 2, lastShot: 0 })
   const collisionEventsRef = useRef(new Map()) // instanceId → Set de otherIds em contacto
   const checkpointRef = useRef(null) // último checkpoint registado
+  const skyRef = useRef(null) // referência ao SkyObject ativo
 
   // Expor meshRefs globalmente para TrailObject poder seguir objetos
   useEffect(() => {
