@@ -11,6 +11,10 @@
  * O runtime é funcionalmente idêntico ao "Executar Jogo" do editor.
  */
 
+// ===== Imports (para módulo ES no HTML exportado) =====
+import * as THREE from 'three'
+import * as CANNON from 'cannon-es'
+
 // ===== FlirCode Parser (inline, sem dependências) =====
 function parseFlirCode(src) {
   var errors = [], fns = {}, lines = src.split('\n'), cl = []
@@ -196,7 +200,7 @@ function startGame() {
   renderer.shadowMap.enabled = true
 
   var scene3d = new THREE.Scene()
-  var bg = data.scene.background
+  var bg = scene.background
   if (bg && bg.type === 'gradient') {
     var c = document.createElement('canvas'); c.width = 2; c.height = 256
     var ctx = c.getContext('2d')
@@ -337,7 +341,7 @@ function startGame() {
 
   // Objects
   (scene.objects || []).forEach(function (inst) {
-    var obj = (data.scene.objects || []).find(function (o) { return o.id === inst.objectId })
+    var obj = (scene.objects || []).find(function (o) { return o.id === inst.objectId })
     if (!obj) return
     var mesh = setupMesh(obj, inst.position, inst.rotation, inst.scale)
     meshMap[inst.instanceId] = mesh

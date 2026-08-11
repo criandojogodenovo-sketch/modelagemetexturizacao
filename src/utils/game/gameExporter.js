@@ -107,14 +107,20 @@ export function generateGameHTML(projectData, options = {}) {
     <div id="debug-body"></div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+    }
+  }
+  </script>
 
   <script>
     window.__GAME_DATA__ = ${dataStr};
   </script>
 
-  <script>
+  <script type="module">
 ${gameRuntimeSource}
   </script>
 </body>

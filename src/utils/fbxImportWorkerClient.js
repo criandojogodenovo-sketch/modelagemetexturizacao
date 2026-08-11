@@ -132,7 +132,11 @@ function reconstructObjectsFromWorkerData(data) {
         bufferGeometry.setAttribute('skinWeight', new THREE.BufferAttribute(new Float32Array(g.skinWeight), 4))
       }
       if (g.indices) {
-        bufferGeometry.setIndex(new THREE.BufferAttribute(new Uint16Array(g.indices) || new Uint32Array(g.indices), 1))
+        // Detectar automaticamente Uint16 vs Uint32 baseado no número de vértices
+        const indexArray = g.positionCount > 65535
+          ? new Uint32Array(g.indices)
+          : new Uint16Array(g.indices)
+        bufferGeometry.setIndex(new THREE.BufferAttribute(indexArray, 1))
       }
       bufferGeometry.computeBoundingBox()
       bufferGeometry.computeBoundingSphere()
