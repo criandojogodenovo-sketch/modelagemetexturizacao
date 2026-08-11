@@ -16,6 +16,7 @@ import { useRef } from 'react'
 import { useStore } from '../../store/useStore'
 import { fileToDataURL } from '../../utils/helpers'
 import { IconImage, IconTrash } from '../ui/Icons'
+import CollapseSection from '../ui/CollapseSection'
 
 const SWATCHES = [
   '#ffffff', '#cccccc', '#888888', '#444444', '#000000',
@@ -70,137 +71,133 @@ export default function MaterialEditor({ obj }) {
   }
 
   return (
-    <div className="panel-section">
-      <h4>Material</h4>
-
-      {/* Cor base */}
-      <div className="prop-row">
-        <label>Cor Base</label>
-        <input
-          type="color"
-          value={m.color}
-          onFocus={_pushHistory}
-          onChange={(e) => set({ color: e.target.value })}
-          onBlur={(e) => commit({ color: e.target.value })}
-        />
-        <div className="swatch-row mt-2">
-          {SWATCHES.map((c) => (
-            <div
-              key={c}
-              className="swatch"
-              style={{ background: c }}
-              onClick={() => { _pushHistory(); commit({ color: c }) }}
-              title={c}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* Roughness */}
-      <div className="prop-row">
-        <label>Brilho (Roughness): {m.roughness.toFixed(2)}</label>
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          value={m.roughness}
-          onFocus={_pushHistory}
-          onChange={(e) => set({ roughness: Number(e.target.value) })}
-          onMouseUp={(e) => commit({ roughness: Number(e.target.value) })}
-        />
-        <div className="small muted row between">
-          <span>Mate</span>
-          <span>Espelhado</span>
-        </div>
-      </div>
-
-      {/* Metalness */}
-      <div className="prop-row">
-        <label>Metalicidade: {m.metalness.toFixed(2)}</label>
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          value={m.metalness}
-          onFocus={_pushHistory}
-          onChange={(e) => set({ metalness: Number(e.target.value) })}
-          onMouseUp={(e) => commit({ metalness: Number(e.target.value) })}
-        />
-        <div className="small muted row between">
-          <span>Dielétrico</span>
-          <span>Metal</span>
-        </div>
-      </div>
-
-      {/* Opacidade */}
-      <div className="prop-row">
-        <label>Opacidade: {m.opacity.toFixed(2)}</label>
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          value={m.opacity}
-          onFocus={_pushHistory}
-          onChange={(e) => set({ opacity: Number(e.target.value), transparent: Number(e.target.value) < 1 })}
-          onMouseUp={(e) => commit({ opacity: Number(e.target.value), transparent: Number(e.target.value) < 1 })}
-        />
-      </div>
-
-      {/* Flags */}
-      <div className="prop-row">
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={m.wireframe}
-              onChange={(e) => { _pushHistory(); commit({ wireframe: e.target.checked }) }}
-            />
-            Wireframe
-          </label>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={m.flatShading}
-              onChange={(e) => { _pushHistory(); commit({ flatShading: e.target.checked }) }}
-            />
-            Flat shading
-          </label>
-        </div>
-      </div>
-
-      {/* Emissive */}
-      <div className="prop-row">
-        <label>Emissive (cor de emissão)</label>
-        <input
-          type="color"
-          value={m.emissive || '#000000'}
-          onChange={(e) => set({ emissive: e.target.value })}
-          onBlur={(e) => commit({ emissive: e.target.value })}
-        />
-      </div>
-      {m.emissive && m.emissive !== '#000000' && (
+    <div>
+      <CollapseSection title="Material" icon="palette" storageKey="mat_basic">
+        {/* Cor base */}
         <div className="prop-row">
-          <label>Intensidade Emissive: {(m.emissiveIntensity ?? 0).toFixed(2)}</label>
+          <label>Cor Base</label>
+          <input
+            type="color"
+            value={m.color}
+            onFocus={_pushHistory}
+            onChange={(e) => set({ color: e.target.value })}
+            onBlur={(e) => commit({ color: e.target.value })}
+          />
+          <div className="swatch-row mt-2">
+            {SWATCHES.map((c) => (
+              <div
+                key={c}
+                className="swatch"
+                style={{ background: c }}
+                onClick={() => { _pushHistory(); commit({ color: c }) }}
+                title={c}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Roughness */}
+        <div className="prop-row">
+          <label>Brilho (Roughness): {m.roughness.toFixed(2)}</label>
           <input
             type="range"
             min="0"
-            max="5"
-            step="0.1"
-            value={m.emissiveIntensity ?? 0}
-            onChange={(e) => set({ emissiveIntensity: Number(e.target.value) })}
-            onMouseUp={(e) => commit({ emissiveIntensity: Number(e.target.value) })}
+            max="1"
+            step="0.01"
+            value={m.roughness}
+            onFocus={_pushHistory}
+            onChange={(e) => set({ roughness: Number(e.target.value) })}
+            onMouseUp={(e) => commit({ roughness: Number(e.target.value) })}
+          />
+          <div className="small muted row between">
+            <span>Mate</span>
+            <span>Espelhado</span>
+          </div>
+        </div>
+
+        {/* Metalness */}
+        <div className="prop-row">
+          <label>Metalicidade: {m.metalness.toFixed(2)}</label>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={m.metalness}
+            onFocus={_pushHistory}
+            onChange={(e) => set({ metalness: Number(e.target.value) })}
+            onMouseUp={(e) => commit({ metalness: Number(e.target.value) })}
+          />
+          <div className="small muted row between">
+            <span>Dielétrico</span>
+            <span>Metal</span>
+          </div>
+        </div>
+
+        {/* Opacidade */}
+        <div className="prop-row">
+          <label>Opacidade: {m.opacity.toFixed(2)}</label>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={m.opacity}
+            onFocus={_pushHistory}
+            onChange={(e) => set({ opacity: Number(e.target.value), transparent: Number(e.target.value) < 1 })}
+            onMouseUp={(e) => commit({ opacity: Number(e.target.value), transparent: Number(e.target.value) < 1 })}
           />
         </div>
-      )}
 
-      <div className="divider" />
+        {/* Flags */}
+        <div className="prop-row">
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={m.wireframe}
+                onChange={(e) => { _pushHistory(); commit({ wireframe: e.target.checked }) }}
+              />
+              Wireframe
+            </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={m.flatShading}
+                onChange={(e) => { _pushHistory(); commit({ flatShading: e.target.checked }) }}
+              />
+              Flat shading
+            </label>
+          </div>
+        </div>
 
-      {/* Textura difusa */}
-      <div className="panel-section" style={{ marginBottom: 0 }}>
-        <h4>Textura Difusa</h4>
+        {/* Emissive */}
+        <div className="prop-row">
+          <label>Emissive (cor de emissão)</label>
+          <input
+            type="color"
+            value={m.emissive || '#000000'}
+            onChange={(e) => set({ emissive: e.target.value })}
+            onBlur={(e) => commit({ emissive: e.target.value })}
+          />
+        </div>
+        {m.emissive && m.emissive !== '#000000' && (
+          <div className="prop-row">
+            <label>Intensidade Emissive: {(m.emissiveIntensity ?? 0).toFixed(2)}</label>
+            <input
+              type="range"
+              min="0"
+              max="5"
+              step="0.1"
+              value={m.emissiveIntensity ?? 0}
+              onChange={(e) => set({ emissiveIntensity: Number(e.target.value) })}
+              onMouseUp={(e) => commit({ emissiveIntensity: Number(e.target.value) })}
+            />
+          </div>
+        )}
+      </CollapseSection>
+
+      <CollapseSection title="Textura Difusa" icon="image" defaultOpen={false} storageKey="mat_diffuse">
         <div className="prop-row">
           <div className="file-input-wrap">
             <button onClick={() => mapInputRef.current?.click()}>
@@ -286,13 +283,9 @@ export default function MaterialEditor({ obj }) {
             </div>
           </>
         )}
-      </div>
+      </CollapseSection>
 
-      <div className="divider" />
-
-      {/* Textura normal */}
-      <div className="panel-section" style={{ marginBottom: 0 }}>
-        <h4>Textura Normal (opcional)</h4>
+      <CollapseSection title="Textura Normal" icon="image" defaultOpen={false} storageKey="mat_normal">
         <div className="prop-row">
           <div className="file-input-wrap">
             <button onClick={() => normalInputRef.current?.click()}>
@@ -330,7 +323,7 @@ export default function MaterialEditor({ obj }) {
             </div>
           </div>
         )}
-      </div>
+      </CollapseSection>
     </div>
   )
 }

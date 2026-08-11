@@ -103,7 +103,7 @@ export function generateGameHTML(projectData, options = {}) {
   <canvas id="game-canvas"></canvas>
   <div id="ui-overlay"></div>
   <div id="debug-console">
-    <div id="debug-header"><span>🐛 Debug</span></div>
+    <div id="debug-header"><span>Debug</span></div>
     <div id="debug-body"></div>
   </div>
 

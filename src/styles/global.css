@@ -3115,6 +3115,21 @@ label {
   color: #fff;
   font-weight: 600;
   padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Botões da home com ícone + texto */
+.home-section-header button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.home-empty button.primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .home-content {
@@ -3226,15 +3241,31 @@ label {
 .feature-card {
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   padding: 16px;
   text-align: center;
+  transition: all 0.2s ease;
+  cursor: default;
+}
+.feature-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .feature-icon {
   font-size: 28px;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-bottom: 8px;
+  color: var(--accent);
+  width: 48px;
+  height: 48px;
+  margin-left: auto;
+  margin-right: auto;
+  background: var(--accent-soft);
+  border-radius: var(--radius-md);
 }
 
 .feature-card h3 {
