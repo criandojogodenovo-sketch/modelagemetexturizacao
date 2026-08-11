@@ -5,8 +5,11 @@
  *  - Fundo (cor sólida ou gradiente)
  *  - Grelha (visibilidade, tamanho, cor)
  *  - Luzes (ambiente + direcional)
+ *
+ * Secções colapsáveis via CollapseSection.
  */
 import { useStore } from '../../store/useStore'
+import CollapseSection from '../ui/CollapseSection'
 
 export default function SceneSettings() {
   const background = useStore((s) => s.background)
@@ -18,8 +21,7 @@ export default function SceneSettings() {
 
   return (
     <>
-      <div className="panel-section">
-        <h4>Fundo da Cena</h4>
+      <CollapseSection title="Fundo da Cena" icon="palette" storageKey="scene_bg">
         <div className="prop-row">
           <label>Tipo</label>
           <select
@@ -59,10 +61,9 @@ export default function SceneSettings() {
             </div>
           </>
         )}
-      </div>
+      </CollapseSection>
 
-      <div className="panel-section">
-        <h4>Grelha de Referência</h4>
+      <CollapseSection title="Grelha de Referência" icon="grid-2x2" defaultOpen={false} storageKey="scene_grid">
         <div className="prop-row">
           <label className="checkbox-row">
             <input
@@ -103,10 +104,9 @@ export default function SceneSettings() {
             onChange={(e) => setGrid({ color: e.target.value })}
           />
         </div>
-      </div>
+      </CollapseSection>
 
-      <div className="panel-section">
-        <h4>Iluminação</h4>
+      <CollapseSection title="Iluminação" icon="lightbulb" defaultOpen={false} storageKey="scene_lights">
         <div className="prop-row">
           <label>Luz Ambiente — Intensidade: {lights.ambient.intensity.toFixed(2)}</label>
           <input
@@ -199,7 +199,7 @@ export default function SceneSettings() {
             </div>
           </div>
         </div>
-      </div>
+      </CollapseSection>
     </>
   )
 }

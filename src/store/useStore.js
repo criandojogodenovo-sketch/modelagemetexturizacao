@@ -138,6 +138,8 @@ function newProjectState() {
     uiScreens: [],
     activeUIScreenId: null,
     selectedUIElementId: null,
+    // Bone selecionado (para SkeletonGizmo)
+    selectedBoneId: null,
     // Animation
     animation: {
       playing: false,
@@ -953,6 +955,9 @@ export const useStore = create(
       },
 
       selectUIElement: (elementId) => set({ selectedUIElementId: elementId }),
+
+      // Selecionar osso (para SkeletonGizmo destacar)
+      selectBone: (boneId) => set({ selectedBoneId: boneId }),
 
       setUIScreenVisible: (screenId, visible) => {
         set((s) => ({

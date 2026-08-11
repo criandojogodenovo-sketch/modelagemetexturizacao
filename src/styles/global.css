@@ -1198,6 +1198,65 @@ label {
   pointer-events: none;
 }
 
+/* === Faixas por osso (timeline colorida) === */
+.timeline-tracks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 120px;
+  overflow-y: auto;
+  margin: 4px 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-app);
+}
+
+.timeline-track-row {
+  display: flex;
+  align-items: center;
+  height: 20px;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.timeline-track-row:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+.timeline-track-row.selected {
+  background: var(--accent-soft);
+}
+
+.timeline-track-label {
+  width: 60px;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 0 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.timeline-track-bar {
+  flex: 1;
+  position: relative;
+  height: 100%;
+  min-width: 0;
+}
+
+.timeline-track-bar .timeline-keyframe {
+  width: 6px;
+  height: 6px;
+  border-width: 1px;
+}
+
+.timeline-track-bar .timeline-cursor {
+  top: 0;
+  bottom: 0;
+}
+
 .timeline-clips {
   display: flex;
   align-items: center;

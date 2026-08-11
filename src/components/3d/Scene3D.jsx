@@ -17,6 +17,7 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-three/drei'
 import * as THREE from 'three'
 import SceneObject from './SceneObject'
+import SkeletonGizmo from './SkeletonGizmo'
 import { useStore } from '../../store/useStore'
 
 // ----- Componente interno: aplica o fundo da cena -----
@@ -116,7 +117,7 @@ function SelectedTransformControls({ selectedMesh, orbitRef }) {
     <TransformControls
       object={selectedMesh}
       mode={transformMode}
-      size={0.8}
+      size={1.2}
       onMouseDown={() => {
         if (orbitRef.current) orbitRef.current.enabled = false
       }}
@@ -257,6 +258,9 @@ export default function Scene3D() {
 
         {/* Gizmo de transformação no objeto selecionado (só em modo object) */}
         <SelectedTransformControls selectedMesh={selectedMesh} orbitRef={orbitRef} />
+
+        {/* Esqueleto sobreposto ao modelo (quando em modo rig/animate) */}
+        <SkeletonGizmo meshRef={selectedMesh} />
 
         {/* Raycast para sculpt */}
         <SculptRaycaster meshRefs={meshRefs} orbitRef={orbitRef} />

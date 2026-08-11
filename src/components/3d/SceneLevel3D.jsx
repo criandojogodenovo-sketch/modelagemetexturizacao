@@ -697,7 +697,7 @@ export default function SceneLevel3D() {
 
           {/* TransformControls — só no editor */}
           {!isGameMode && selectedMesh && selectedInstanceId && (
-            <TransformControls object={selectedMesh} mode={transformMode} size={0.8}
+            <TransformControls object={selectedMesh} mode={transformMode} size={1.2}
               onMouseDown={() => { if (orbitRef.current) orbitRef.current.enabled = false }}
               onMouseUp={() => { if (orbitRef.current) orbitRef.current.enabled = true; handleTransformUpdate() }}
               onObjectChange={handleTransformUpdate}
