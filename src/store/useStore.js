@@ -1441,6 +1441,11 @@ export const useStore = create(
       openMarketplace: () => set({ marketplaceOpen: true }),
       closeMarketplace: () => set({ marketplaceOpen: false }),
 
+      // Settings
+      settingsPanelOpen: false,
+      openSettingsPanel: () => set({ settingsPanelOpen: true }),
+      closeSettingsPanel: () => set({ settingsPanelOpen: false }),
+
       homeVisible: true,
       showHome: () => set({ homeVisible: true }),
       hideHome: () => set({ homeVisible: false }),

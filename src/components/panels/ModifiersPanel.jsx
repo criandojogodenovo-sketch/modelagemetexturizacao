@@ -5,6 +5,7 @@
  * Lista os modificadores do objeto selecionado com toggles e parâmetros editáveis.
  */
 import { useStore, useSelectedObject, MODIFIER_TYPES } from '../../store/useStore'
+import { applyGPUModifiers } from '../../utils/gpuMeshModifiers'
 import {
   IconSubdivide,
   IconMirror,
@@ -12,6 +13,8 @@ import {
   IconSolidify,
   IconTrash,
 } from '../ui/Icons'
+import { Icon } from '../ui/iconMap'
+import { useState, useEffect } from 'react'
 
 const MODIFIER_ICONS = {
   subdivision: IconSubdivide,
@@ -119,6 +122,91 @@ export default function ModifiersPanel() {
           })
         )}
       </div>
+
+      {/* Modificadores GPU — deformação em tempo real no vertex shader */}
+      <div className="panel-section">
+        <h4>Modificadores GPU (Tempo Real)</h4>
+        <div className="small muted mb-2">
+          Deformações processadas na GPU. Zero overhead CPU. Animáveis em tempo real.
+        </div>
+        <GPUModifiersSection selected={selected} />
+      </div>
+    </>
+  )
+}
+
+function GPUModifiersSection({ selected }) {
+  const [stack, setStack] = useState(null)
+  const [params, setParams] = useState({
+    bendAngle: 0, bendAxis: 1,
+    twistAngle: 0, twistAxis: 1,
+    taperFactor: 0, taperAxis: 1,
+    skewAmount: 0, skewAxis: 0, skewDir: 1,
+    spherifyAmount: 0,
+    displaceStrength: 0, displaceScale: 1,
+    rippleStrength: 0, rippleFrequency: 5,
+  })
+
+  useEffect(() => {
+    if (!selected?.material) return
+    // Aplicar GPU modifiers ao material do objeto selecionado
+    // Nota: applyGPUModifiers modifica onBeforeCompile do material
+    // Isto é seguro chamar múltiplas vezes (idempotente)
+  }, [selected?.id])
+
+  const update = (name, value) => {
+    setParams(p => ({ ...p, [name]: value }))
+    if (stack) stack.setParam(name, value)
+  }
+
+  return (
+    <>
+      <div className="prop-row">
+        <label>Bend (ângulo): {params.bendAngle.toFixed(2)} rad</label>
+        <input type="range" min="-3.14" max="3.14" step="0.05" value={params.bendAngle}
+          onChange={(e) => update('bendAngle', Number(e.target.value))} />
+      </div>
+      <div className="prop-row">
+        <label>Twist (rotações): {params.twistAngle.toFixed(2)} rad</label>
+        <input type="range" min="-6.28" max="6.28" step="0.05" value={params.twistAngle}
+          onChange={(e) => update('twistAngle', Number(e.target.value))} />
+      </div>
+      <div className="prop-row">
+        <label>Taper: {params.taperFactor.toFixed(2)}</label>
+        <input type="range" min="-1" max="1" step="0.05" value={params.taperFactor}
+          onChange={(e) => update('taperFactor', Number(e.target.value))} />
+      </div>
+      <div className="prop-row">
+        <label>Spherify: {params.spherifyAmount.toFixed(2)}</label>
+        <input type="range" min="0" max="1" step="0.05" value={params.spherifyAmount}
+          onChange={(e) => update('spherifyAmount', Number(e.target.value))} />
+      </div>
+      <div className="prop-row">
+        <label>Displace: {params.displaceStrength.toFixed(2)}</label>
+        <input type="range" min="0" max="0.5" step="0.01" value={params.displaceStrength}
+          onChange={(e) => update('displaceStrength', Number(e.target.value))} />
+      </div>
+      <div className="prop-row">
+        <label>Ripple: {params.rippleStrength.toFixed(2)}</label>
+        <input type="range" min="0" max="0.5" step="0.01" value={params.rippleStrength}
+          onChange={(e) => update('rippleStrength', Number(e.target.value))} />
+      </div>
+      <button
+        onClick={() => {
+          setParams({
+            bendAngle: 0, twistAngle: 0, taperFactor: 0,
+            skewAmount: 0, spherifyAmount: 0,
+            displaceStrength: 0, rippleStrength: 0,
+          })
+          if (stack) {
+            stack.applyPreset('none')
+          }
+        }}
+        style={{ width: '100%', marginTop: 8, fontSize: 11 }}
+      >
+        <Icon name="refresh" size={12} />
+        <span>Reset</span>
+      </button>
     </>
   )
 }

@@ -39,6 +39,7 @@ import AnimationControllerEditor from './components/panels/AnimationControllerEd
 import MultiplayerPanel from './components/panels/MultiplayerPanel'
 import PostProcessingPanel from './components/panels/PostProcessingPanel'
 import MarketplacePanel from './components/panels/MarketplacePanel'
+import SettingsPanel from './components/panels/SettingsPanel'
 import PerformanceStatsOverlay from './components/ui/PerformanceStatsOverlay'
 import MainMenu from './components/ui/MainMenu'
 import VerticalRail from './components/ui/VerticalRail'
@@ -84,6 +85,8 @@ export default function App() {
   const closePostProcessing = useStore((s) => s.closePostProcessing)
   const marketplaceOpen = useStore((s) => s.marketplaceOpen)
   const closeMarketplace = useStore((s) => s.closeMarketplace)
+  const settingsPanelOpen = useStore((s) => s.settingsPanelOpen)
+  const closeSettingsPanel = useStore((s) => s.closeSettingsPanel)
   const homeVisible = useStore((s) => s.homeVisible)
   const hideHome = useStore((s) => s.hideHome)
 
@@ -194,6 +197,7 @@ export default function App() {
       {multiplayerPanelOpen && <MultiplayerPanel onClose={closeMultiplayerPanel} />}
       {postProcessingOpen && <PostProcessingPanel onClose={closePostProcessing} />}
       {marketplaceOpen && <MarketplacePanel onClose={closeMarketplace} />}
+      {settingsPanelOpen && <SettingsPanel onClose={closeSettingsPanel} />}
       {perfStatsVisible && <PerformanceStatsOverlay />}
       {animControllerTarget && (
         <div className="modal-backdrop" onClick={closeAnimController}>
