@@ -263,16 +263,32 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         if (s) useStore.getState().setUIScreenVisible(s.id, false)
       },
       getUIValue: (name) => {
+        // Procurar em uiScreens
         for (const s of useStore.getState().uiScreens) {
           const el = s.elements.find((e) => e.name === name)
           if (el) return el.value ?? el.text ?? ''
         }
+        // Procurar em Conects de UI (TextObject, ButtonObject)
+        const scene = useStore.getState().scenes.find((s) => s.id === useStore.getState().activeSceneId)
+        const conect = (scene?.conects || []).find((c) => c.name === name && (c.type === 'TextObject' || c.type === 'ButtonObject'))
+        if (conect) return conect.text ?? conect.label ?? conect.value ?? ''
         return ''
       },
       setUIValue: (name, val) => {
+        // Procurar em uiScreens
         for (const s of useStore.getState().uiScreens) {
           const el = s.elements.find((e) => e.name === name)
           if (el) { useStore.getState().updateUIElement(el.id, { value: val, text: val, label: val }); return }
+        }
+        // Procurar em Conects de UI (TextObject, ButtonObject)
+        const state = useStore.getState()
+        const scene = state.scenes.find((s) => s.id === state.activeSceneId)
+        if (scene) {
+          const conect = (scene.conects || []).find((c) => c.name === name && (c.type === 'TextObject' || c.type === 'ButtonObject'))
+          if (conect) {
+            state.updateConect(conect.instanceId, { text: String(val), label: String(val) })
+            return
+          }
         }
       },
       triggerUIEvent: (eventName, payload) => {
@@ -677,30 +693,47 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     })
 
     // FlirCode/FlirScript runtimes
-    const setupRuntime = (instance, scriptData) => {
+    const setupRuntime = (instance, scriptData, scriptField) => {
       if (!scriptData) return
       try {
-        if (typeof scriptData === 'string' && scriptData.startsWith('FLIRCODE:')) {
-          const source = scriptData.slice(9)
-          const rt = createFlirCodeRuntime(source, { ...gameContext, _instanceId: instance.instanceId, mesh: conectMeshRefs.current.get(instance.instanceId) || meshRefs.current.get(instance.instanceId) })
-          if (!rt.hasErrors) {
-            runtimesRef.current.set(instance.instanceId, rt)
-            rt.triggerEvent('beginPlay')
+        let source = null
+        if (typeof scriptData === 'string') {
+          // Suportar ambos: "FLIRCODE:codigo" e código direto (flirCode field)
+          if (scriptData.startsWith('FLIRCODE:')) {
+            source = scriptData.slice(9)
+          } else {
+            source = scriptData
           }
         } else if (typeof scriptData === 'object') {
+          // FlirScript (grafo de nós)
           const errors = validateGraph(scriptData)
           if (errors.length > 0) return
           const rt = createFlirScriptRuntime(scriptData, gameContext)
           rt.graph.nodes.forEach((n) => { n._instanceId = instance.instanceId })
           runtimesRef.current.set(instance.instanceId, rt)
           rt.triggerEvent('beginPlay')
+          return
+        }
+        if (source) {
+          const rt = createFlirCodeRuntime(source, { ...gameContext, _instanceId: instance.instanceId, mesh: conectMeshRefs.current.get(instance.instanceId) || meshRefs.current.get(instance.instanceId) })
+          if (!rt.hasErrors) {
+            runtimesRef.current.set(instance.instanceId, rt)
+            rt.triggerEvent('beginPlay')
+          } else {
+            debugLog(`Erros no FlirCode de ${instance.name || instance.type}: ${rt.errors.length}`, 'warn', 'Script')
+          }
         }
       } catch (err) {
         debugLog('Erro ao inicializar script: ' + err.message, 'error', 'Script')
       }
     }
-    for (const inst of setupScene.objects || []) setupRuntime(inst, inst.flirScript)
-    for (const conect of setupScene.conects || []) setupRuntime(conect, conect.flirScript)
+    // Registar runtimes: tentar flirScript primeiro, depois flirCode
+    for (const inst of setupScene.objects || []) {
+      setupRuntime(inst, inst.flirScript || inst.flirCode)
+    }
+    for (const conect of setupScene.conects || []) {
+      setupRuntime(conect, conect.flirScript || conect.flirCode)
+    }
 
     // Animation players — ler AnimationBoostObject para blendTime
     const boostConect = (setupScene.conects || []).find((c) => c.type === 'AnimationBoostObject')
@@ -837,6 +870,18 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           mesh.position.copy(entry.body.position)
           mesh.quaternion.copy(entry.body.quaternion)
         }
+      }
+    }
+
+    // Actualizar variáveis de posição do jogador para FlirCode
+    const playerConect = (setupScene?.conects || []).find((c) => c.type === 'PersonalObject')
+    if (playerConect) {
+      const playerMesh = conectMeshRefs.current.get(playerConect.instanceId)
+      if (playerMesh) {
+        gameContext.setVar('_player_x', playerMesh.position.x)
+        gameContext.setVar('_player_y', playerMesh.position.y)
+        gameContext.setVar('_player_z', playerMesh.position.z)
+        gameContext.setVar('_y_pos', playerMesh.position.y)
       }
     }
 

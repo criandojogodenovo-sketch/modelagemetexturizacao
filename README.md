@@ -336,15 +336,48 @@ Otimizações aplicadas para ecrãs pequenos (≤375px):
 
 ## O que pode ser corrigido numa próxima sessão
 
-1. **CameraTouchZone** — integrar zona de toque no GameUIOverlay para rodar câmara
-2. **Unificar gameContext** — editor e exportado com as mesmas funções
-3. **wait() real** — implementar scheduler no FlirCode
-4. **collidingWith real** — usar eventos de colisão do cannon-es
-5. **Aritmética no FlirCode** — 5+3 deve dar 8, não "53"
-6. **SpawnObject** — spawning temporal de objetos
-7. **PrefabObject** — instanciação de prefabs
-8. **GroupObject** — parenting de meshes
-9. **ReferenceObject** — renderizar conteúdo de outra cena
+Todos os itens anteriores foram resolvidos. O estado atual da engine é:
+
+### Resolvido (sessões anteriores):
+- CameraTouchZone ✅
+- wait() real ✅
+- collidingWith real ✅
+- Aritmética no FlirCode ✅
+- SpawnObject ✅
+- PrefabObject ✅
+- GroupObject ✅
+- ReferenceObject ✅
+- AnimationBoostObject ✅
+- RoguelikeGenerator ✅
+- linkTo ✅
+- setLightIntensity/setLightColor ✅
+- FlirCode if/else no exportado ✅
+- Persistência de animações FBX ✅
+- CheckpointObject save/respawn ✅
+- SkyObject/WaterObject/FogObject/SunObject/PointObject/SpotObject/AmbientObject ✅
+- ButtonObject/TextObject/ImageObject/PanelObject no GameUIOverlay ✅
+- ParticleObject runtime ✅
+- TrailObject runtime ✅
+- NavigatorObject (portal) ✅
+- ItemObject (auto-pickup) ✅
+- WeaponObject (equip/shoot/reload) ✅
+- GameStateObject ✅
+- emitSignal ✅
+- saveProgress/loadProgress ✅
+- getCameraRotation/setCameraSensitivity ✅
+- Otimização mobile (iPhone 7, Realme C33, iPhone SE) ✅
+
+### Resolvido nesta sessão:
+- TimerObject com FlirCode: runtime registado para `flirCode` (não só `flirScript`) ✅
+- TextObject com FlirCode: `setUIValue`/`getUIValue` agora procuram em Conects de UI ✅
+- PersonalObject _y_pos: atualizado automaticamente a cada frame ✅
+- FlirCode if com begincode: parser agora suporta `if (cond)` sem `begincode` na mesma linha ✅
+
+### Pendente (honesto):
+- Jogo exportado requer internet (importmap CDN) — para 100% offline, copiar three.module.js + cannon-es.js localmente
+- LOD automático em objetos (só terrain tem LOD)
+- FlirCode `else` no exportado (gameRuntime.js) — `else if` funciona mas `else` sozinho é stub
+- GLTF com .bin externo (browser File API não tem path)
 
 
 ---

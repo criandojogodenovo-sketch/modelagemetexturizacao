@@ -185,12 +185,20 @@ function parseSimpleStatement(text, lineNum, errors) {
   let m = text.match(/^var\s+(\w+)\s*=\s*(.+)$/)
   if (m) return { type: 'var', name: m[1], value: parseValue(m[2]), line: lineNum }
 
-  // if (cond) begincode
+  // if (cond) begincode — na mesma linha
   m = text.match(/^if\s*\((.+)\)\s*begincode$/)
+  if (m) return { type: 'if', condition: m[1], line: lineNum }
+
+  // if (cond) — sem begincode (begincode está na linha seguinte)
+  m = text.match(/^if\s*\((.+)\)$/)
   if (m) return { type: 'if', condition: m[1], line: lineNum }
 
   // else if (cond) begincode
   m = text.match(/^else\s+if\s*\((.+)\)\s*begincode$/)
+  if (m) return { type: 'elseif', condition: m[1], line: lineNum }
+
+  // else if (cond) — sem begincode
+  m = text.match(/^else\s+if\s*\((.+)\)$/)
   if (m) return { type: 'elseif', condition: m[1], line: lineNum }
 
   // else begincode
@@ -243,6 +251,26 @@ function parseStatement(lines, idx, errors) {
   if (!stmt) return null
   // Se o statement abre um bloco (if, repeat, etc.), parsear o corpo
   if (['if', 'elseif', 'else', 'repeat_n', 'repeat_inc', 'repeat_dec', 'switch', 'case', 'default'].includes(stmt.type)) {
+    // Se a linha atual não termina com 'begincode', procurar na linha seguinte
+    let bodyStartIdx = idx + 1
+    if (!lines[idx].text.endsWith('begincode')) {
+      // Procurar 'begincode' nas linhas seguintes (skip vazias/comentários já removidas)
+      while (bodyStartIdx < lines.length && lines[bodyStartIdx].text !== 'begincode') {
+        bodyStartIdx++
+      }
+      if (bodyStartIdx >= lines.length) {
+        errors.push({ line: lines[idx].line, message: 'begincode não encontrado após ' + stmt.type })
+        return { ...stmt, body: [], nextIdx: idx + 1 }
+      }
+      // bodyStartIdx aponta para 'begincode' — parseBlock começa em bodyStartIdx + 1
+      const body = parseBlock(lines, bodyStartIdx + 1, errors)
+      if (body.error) {
+        errors.push({ line: lines[idx].line, message: body.error })
+        return { ...stmt, body: [], nextIdx: body.nextIdx }
+      }
+      return { ...stmt, body: body.statements, nextIdx: body.nextIdx }
+    }
+    // Linha termina com begincode — parseBlock começa em idx + 1
     const body = parseBlock(lines, idx + 1, errors)
     if (body.error) {
       errors.push({ line: lines[idx].line, message: body.error })
