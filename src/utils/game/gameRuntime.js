@@ -117,6 +117,41 @@ function createFlirCodeRuntime(src, gc) {
       case 'collidingWith': return gc.collidingWith ? gc.collidingWith(gc._instanceId, args[0]) : false
       case 'distanceTo': return gc.distanceTo ? gc.distanceTo(gc._instanceId, args[0]) : 0
       case 'isTouching': return gc.isTouching ? gc.isTouching() : false
+      // Sistema 2: Armas
+      case 'shoot': gc.shoot && gc.shoot(); break
+      case 'reload': gc.reload && gc.reload(); break
+      case 'equipWeapon': gc.equipWeapon && gc.equipWeapon(args[0]); break
+      case 'getAmmo': return gc.getAmmo ? gc.getAmmo() : 0
+      case 'takeDamage': gc.takeDamage && gc.takeDamage(gc._instanceId, args[0]); break
+      case 'getHealth': return gc.getHealth ? gc.getHealth(gc._instanceId) : 100
+      // Sistema 3: Inventário
+      case 'addToInventory': gc.addToInventory && gc.addToInventory(args[0], args[1]); break
+      case 'removeFromInventory': gc.removeFromInventory && gc.removeFromInventory(args[0], args[1]); break
+      case 'getInventoryCount': return gc.getInventoryCount ? gc.getInventoryCount(args[0]) : 0
+      case 'hasItem': return gc.hasItem ? gc.hasItem(args[0]) : false
+      // Sistema 3: Sinais
+      case 'emitSignal': gc.emitSignal && gc.emitSignal(args[0], args[1]); break
+      // Aliases showUI/hideUI = showUIScreen/hideUIScreen
+      case 'showUI': gc.showUIScreen && gc.showUIScreen(args[0]); break
+      case 'hideUI': gc.hideUIScreen && gc.hideUIScreen(args[0]); break
+      // Multiplayer (básico no export)
+      case 'sendMessage': gc.sendMessage && gc.sendMessage(args[0]); break
+      case 'getPlayers': return gc.getPlayers ? gc.getPlayers() : 1
+      case 'getPlayerState': return gc.getPlayerState ? gc.getPlayerState(args[0]) : null
+      // Sistema: Links — navegar para cena ou tela
+      case 'linkTo': gc.linkTo && gc.linkTo(args[0], args[1]); break
+      // Sistema: Game State
+      case 'setGameState': gc.setGameState && gc.setGameState(args[0]); break
+      case 'getGameState': return gc.getGameState ? gc.getGameState() : 'menu'
+      // Sistema: Save/Load Progress
+      case 'saveProgress': gc.saveProgress && gc.saveProgress(args[0], args[1]); break
+      case 'loadProgress': return gc.loadProgress ? gc.loadProgress(args[0]) : null
+      // Sistema: Sequenciador
+      case 'playSequence': gc.playSequence && gc.playSequence(args[0]); break
+      // changeScene real
+      case 'changeScene':
+        if (gc.changeScene) { gc.changeScene(args[0]); break }
+        dbg('changeScene: ' + args[0], 'log'); break
       default: dbg('Função desconhecida: ' + name, 'warn')
     }
   }
@@ -211,6 +246,71 @@ function startGame() {
     collidingWith: function (id, type) { for (var k in bodies) { if (k === id) continue; if (bodies[k]._conect.type === type || bodies[k]._conect.name === type) { if (bodies[id].position.distanceTo(bodies[k].position) < 1.5) return true } } return false },
     distanceTo: function (id, name) { for (var k in meshMap) { if (meshMap[k]._name === name) { return meshMap[id].position.distanceTo(meshMap[k].position) } } return 0 },
     isTouching: function () { return joystick.active },
+    // Sistema 2: Armas e combate (exportado)
+    shoot: function () { dbg('shoot() — sem implementação no export', 'log', 'Weapon') },
+    reload: function () { dbg('reload()', 'log', 'Weapon') },
+    equipWeapon: function (name) { dbg('equipWeapon: ' + name, 'log', 'Weapon') },
+    getAmmo: function () { return gc._weaponAmmo || 0 },
+    takeDamage: function (id, amount) {
+      for (var i = 0; i < scene.conects.length; i++) {
+        if (scene.conects[i].instanceId === id) {
+          var c = scene.conects[i]
+          c.health = Math.max(0, (c.health || 100) - amount)
+          dbg(c.name + ' recebeu ' + amount + ' dano (vida: ' + c.health + ')', 'log', 'Combat')
+          var rt = runtimes[id]; if (rt) rt.triggerEvent('onDamage', { amount: amount, source: 'weapon' })
+          if (c.health <= 0 && meshMap[id]) meshMap[id].visible = false
+          break
+        }
+      }
+    },
+    getHealth: function (id) {
+      for (var i = 0; i < scene.conects.length; i++) { if (scene.conects[i].instanceId === id) return scene.conects[i].health || 100 }
+      return 100
+    },
+    // Sistema 3: Inventário (exportado)
+    addToInventory: function (name, qty) {
+      gc._inventory = gc._inventory || {}
+      gc._inventory[name] = (gc._inventory[name] || 0) + (qty || 1)
+      dbg('Item "' + name + '" adicionado (' + qty + '). Total: ' + gc._inventory[name], 'log', 'Inventory')
+      for (var k in runtimes) { runtimes[k].triggerEvent('onPickup', { itemName: name, quantity: qty }) }
+    },
+    removeFromInventory: function (name, qty) {
+      gc._inventory = gc._inventory || {}
+      if (!gc._inventory[name]) return
+      gc._inventory[name] = Math.max(0, gc._inventory[name] - (qty || 1))
+      if (gc._inventory[name] === 0) delete gc._inventory[name]
+    },
+    getInventoryCount: function (name) { return (gc._inventory || {})[name] || 0 },
+    hasItem: function (name) { return ((gc._inventory || {})[name] || 0) > 0 },
+    // Sistema 3: Sinais (exportado)
+    emitSignal: function (name, sigData) {
+      for (var k in runtimes) { runtimes[k].triggerEvent('onSignal', { name: name, data: sigData }) }
+      dbg('Signal emitido: ' + name, 'log', 'Signals')
+    },
+    // Sistema: Links (exportado)
+    linkTo: function (target, sub) {
+      if (target === 'scene') {
+        var sc = (data.scenes || []).find(function (s) { return s.name === sub || s.id === sub })
+        if (sc) { data.activeSceneId = sc.id; dbg('Link: cena "' + sc.name + '"', 'log', 'Links') }
+      } else if (target === 'screen') {
+        var ss = (data.uiScreens || []).find(function (s) { return s.name === sub || s.id === sub })
+        if (ss) { (data.uiScreens || []).forEach(function (s) { s.visible = (s.id === ss.id) }); renderUI(); dbg('Link: tela "' + ss.name + '"', 'log', 'Links') }
+      } else if (target === 'url') { window.open(sub, '_blank') }
+    },
+    // changeScene real (exportado)
+    changeScene: function (name) {
+      var sc = (data.scenes || []).find(function (s) { return s.name === name || s.id === name })
+      if (sc) { data.activeSceneId = sc.id; dbg('Cena mudou para "' + sc.name + '"', 'log', 'Game') }
+    },
+    // Sistema: Game State (exportado)
+    _gameState: 'menu',
+    setGameState: function (s) { gc._gameState = s; dbg('Game State: ' + s, 'log', 'GameState'); for (var k in runtimes) { runtimes[k].triggerEvent('onGameStateChange', { state: s }) } },
+    getGameState: function () { return gc._gameState },
+    // Sistema: Save/Load Progress (exportado — localStorage do jogador)
+    saveProgress: function (key, val) { try { localStorage.setItem('flir_progress_' + key, JSON.stringify(val)); dbg('Progresso guardado: ' + key, 'log', 'Save') } catch (e) {} },
+    loadProgress: function (key) { try { var v = localStorage.getItem('flir_progress_' + key); return v ? JSON.parse(v) : null } catch (e) { return null } },
+    // Sistema: Sequenciador (exportado — básico)
+    playSequence: function (name) { dbg('Sequência "' + name + '" iniciada', 'log', 'Sequence') },
   }
   window._flirGameContext = gc
 
@@ -327,7 +427,11 @@ function startGame() {
         dom.style.cssText = 'position:absolute;left:' + (el.position && el.position[0] || 50) + '%;top:' + (el.position && el.position[1] || 50) + '%;width:' + (el.size && el.size[0] || 120) + 'px;height:' + (el.size && el.size[1] || 40) + 'px;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;background:' + (el.color || 'transparent') + ';color:' + (el.textColor || '#e6edf3') + ';font-size:' + (el.fontSize || 14) + 'px;border:' + (el.borderWidth || 0) + 'px solid ' + (el.borderColor || 'transparent') + ';border-radius:' + (el.borderRadius || 0) + 'px;padding:' + (el.padding || 0) + 'px;opacity:' + (el.opacity || 1) + ';pointer-events:auto;user-select:none;font-family:sans-serif;box-sizing:border-box;'
         if (el.type === 'Button' || el.type === 'Text' || el.type === 'Label') dom.textContent = el.label || el.text || ''
         if (el.type === 'Input') { dom.placeholder = el.placeholder || ''; dom.value = el.value || ''; dom.oninput = function () { el.value = dom.value; gc.triggerUIEvent('onChange', { element: el, value: dom.value }) } }
-        if (el.type === 'Button') dom.onclick = function () { gc.triggerUIEvent(el.eventName || 'onClick', { element: el }) }
+        if (el.type === 'Button') dom.onclick = function () {
+          // Sistema: Links — navegação automática
+          if (el.linkType && el.linkType !== 'none' && gc.linkTo) { gc.linkTo(el.linkType, el.linkTarget); return }
+          gc.triggerUIEvent(el.eventName || 'onClick', { element: el })
+        }
         if (el.type === 'Checkbox') { dom.innerHTML = '<input type="checkbox" ' + (el.checked ? 'checked' : '') + '> <span>' + (el.label || '') + '</span>'; dom.querySelector('input').onchange = function () { el.checked = this.checked; gc.triggerUIEvent('onChange', { element: el, value: this.checked }) } }
         if (el.type === 'Slider') { dom.innerHTML = '<input type="range" min="' + (el.min || 0) + '" max="' + (el.max || 100) + '" value="' + (el.value || 50) + '"><span style="font-size:10px">' + (el.value || '') + '</span>'; dom.querySelector('input').oninput = function () { el.value = Number(this.value); gc.triggerUIEvent('onChange', { element: el, value: Number(this.value) }) } }
         if (el.type === 'Image' && el.url) dom.innerHTML = '<img src="' + el.url + '" style="width:100%;height:100%;object-fit:contain">'

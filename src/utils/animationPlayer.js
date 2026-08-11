@@ -20,6 +20,7 @@
  * Para animar o objeto inteiro (sem bones), usamos keyframes com boneId = 'object'.
  */
 import * as THREE from 'three'
+import { getCachedPose, applyPose, clearPoseCache } from './sharedAnimationCache'
 
 // Funções de interpolação
 function interpolate(a, b, t, type = 'ease') {
@@ -45,9 +46,23 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
   let loop = false
   let speed = 1
   let onComplete = null
+  
+  // AnimationBoost: blending entre clips
+  let prevClip = null
+  let prevTime = 0
+  let blendTime = 0
+  let blendDuration = 0
+  let boostEnabled = false
 
   function play(clipName, options = {}) {
     if (!animations[clipName] || animations[clipName].length === 0) return false
+    // AnimationBoost: guardar clip anterior para blending
+    if (boostEnabled && currentClip && currentClip !== clipName) {
+      prevClip = currentClip
+      prevTime = currentTime
+      blendTime = 0
+      blendDuration = options.blendTime ?? 0.3
+    }
     currentClip = clipName
     currentTime = 0
     playing = true
@@ -55,6 +70,11 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
     speed = options.speed ?? 1
     onComplete = options.onComplete
     return true
+  }
+  
+  function setBoost(enabled, blendDur = 0.3) {
+    boostEnabled = enabled
+    blendDuration = blendDur
   }
 
   function stop() {
@@ -90,6 +110,15 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
     const keyframes = animations[currentClip]
     if (!keyframes || keyframes.length === 0) return
 
+    // AnimationBoost: avançar blending
+    if (prevClip && blendTime < blendDuration) {
+      blendTime += deltaTime
+      prevTime += deltaTime * speed
+      if (blendTime >= blendDuration) {
+        prevClip = null // blending completo
+      }
+    }
+
     currentTime += deltaTime * speed
 
     // Calcular duração total do clip
@@ -106,42 +135,71 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
       }
     }
 
-    // Aplicar transform aos bones ou ao objeto
+    // OTIMIZAÇÃO: usar cache partilhado de poses
+    // Se 200 NPCs tocam o mesmo clip no mesmo tempo, a interpolação
+    // é calculada UMA VEZ e reutilizada para todos
     const mesh = getMesh?.()
     const bones = getBones?.()
 
-    // Coletar todos os boneIds únicos
-    const boneIds = [...new Set(keyframes.map((k) => k.boneId))]
+    const pose = getCachedPose(currentClip, keyframes, currentTime)
 
-    for (const boneId of boneIds) {
-      const pair = findKeyframePair(keyframes, currentTime, boneId)
-      if (!pair) continue
-      const { prev, next, t } = pair
-      const interp = next.interpolation || 'ease'
+    // Aplicar 'object' (transform do mesh inteiro)
+    const objTransform = pose.get('object')
+    if (objTransform && mesh) {
+      mesh.position.set(...objTransform.position)
+      mesh.rotation.set(...objTransform.rotation)
+      mesh.scale.set(...objTransform.scale)
+    }
 
-      const position = interpolateVec3(prev.position || [0,0,0], next.position || [0,0,0], t, interp)
-      const rotation = interpolateVec3(prev.rotation || [0,0,0], next.rotation || [0,0,0], t, interp)
-      const scale = interpolateVec3(prev.scale || [1,1,1], next.scale || [1,1,1], t, interp)
-
-      if (boneId === 'object' && mesh) {
-        // Animar o objeto inteiro
-        mesh.position.set(...position)
-        mesh.rotation.set(...rotation)
-        mesh.scale.set(...scale)
-      } else if (bones) {
-        // Animar um osso específico
-        const bone = bones.find((b) => b.id === boneId || b.name === boneId)
-        if (bone) {
-          bone.position.set(...position)
-          bone.rotation.set(...rotation)
-          bone.scale.set(...scale)
+    // Aplicar aos bones (apenas copiar valores — sem recalcular)
+    if (bones) {
+      // AnimationBoost: se estamos em blending, interpolar entre prevPose e pose
+      if (prevClip && blendTime < blendDuration) {
+        const prevKeyframes = animations[prevClip]
+        if (prevKeyframes && prevKeyframes.length > 0) {
+          const prevPose = getCachedPose(prevClip, prevKeyframes, prevTime)
+          const blendWeight = 1 - (blendTime / blendDuration)
+          // Interpolar entre prevPose e pose
+          for (const [boneId, currentTransform] of pose) {
+            const prevTransform = prevPose.get(boneId)
+            const bone = bones.find(
+              (b) => b.id === boneId || b.name === boneId || b.userData?.boneId === boneId
+            )
+            if (!bone) continue
+            if (prevTransform) {
+              bone.position.set(
+                prevTransform.position[0] * blendWeight + currentTransform.position[0] * (1 - blendWeight),
+                prevTransform.position[1] * blendWeight + currentTransform.position[1] * (1 - blendWeight),
+                prevTransform.position[2] * blendWeight + currentTransform.position[2] * (1 - blendWeight),
+              )
+              bone.rotation.set(
+                prevTransform.rotation[0] * blendWeight + currentTransform.rotation[0] * (1 - blendWeight),
+                prevTransform.rotation[1] * blendWeight + currentTransform.rotation[1] * (1 - blendWeight),
+                prevTransform.rotation[2] * blendWeight + currentTransform.rotation[2] * (1 - blendWeight),
+              )
+              bone.scale.set(
+                prevTransform.scale[0] * blendWeight + currentTransform.scale[0] * (1 - blendWeight),
+                prevTransform.scale[1] * blendWeight + currentTransform.scale[1] * (1 - blendWeight),
+                prevTransform.scale[2] * blendWeight + currentTransform.scale[2] * (1 - blendWeight),
+              )
+            } else {
+              // Osso não existe no clip anterior — usar apenas o atual
+              bone.position.set(...currentTransform.position)
+              bone.rotation.set(...currentTransform.rotation)
+              bone.scale.set(...currentTransform.scale)
+            }
+          }
         }
+      } else {
+        // Sem blending — aplicar diretamente
+        applyPose(pose, bones)
       }
     }
   }
 
   return {
-    play, stop, pause, resume, update,
+    play, stop, pause, resume, update, setBoost,
     getCurrentClip, isPlaying, getCurrentTime,
   }
 }
+

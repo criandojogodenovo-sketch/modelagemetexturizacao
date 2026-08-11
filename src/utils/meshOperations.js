@@ -479,3 +479,517 @@ export function findClosestFace(geometry, raycaster, mesh) {
   if (intersects.length === 0) return null
   return intersects[0]
 }
+
+// ============ FASE 2: NOVOS MODIFICADORES DE MESH ============
+
+// ---------- Elevation (Mapa de Ruído / Heightmap) ----------
+// Eleva/rebaixa partes da geometria com base num mapa de ruído.
+// Útil para criar terreno a partir de um plano, ou dar relevo a qualquer modelo.
+export function elevationDisplace(geometry, options = {}) {
+  const {
+    strength = 0.5,
+    scale = 1.0,
+    axis = 'y', // eixo ao longo do qual elevar
+    seed = 0,
+  } = options
+
+  const geo = geometry.clone()
+  const pos = geo.getAttribute('position')
+  if (!pos) return geo
+
+  // Função de ruído simples baseada em hash (não precisa de dependências externas)
+  // Usamos Perlin aproximado via múltiplas oitavas de hash
+  function hash(x, y, z, s) {
+    let h = x * 374761393 + y * 668265263 + z * 2654435761 + s * 1013904223
+    h = (h ^ (h >>> 13)) * 1274126177
+    h = h ^ (h >>> 16)
+    return (h & 0x7fffffff) / 0x7fffffff
+  }
+  function noise(x, y, z, s) {
+    // 3 oitavas
+    let n = 0
+    n += hash(x, y, z, s)
+    n += 0.5 * hash(x * 2, y * 2, z * 2, s)
+    n += 0.25 * hash(x * 4, y * 4, z * 4, s)
+    return n / 1.75 - 0.5 // -0.5..0.5
+  }
+
+  const axisIdx = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i) * scale
+    const y = pos.getY(i) * scale
+    const z = pos.getZ(i) * scale
+    const n = noise(x, y, z, seed)
+    if (axisIdx === 0) pos.setX(i, pos.getX(i) + n * strength)
+    else if (axisIdx === 1) pos.setY(i, pos.getY(i) + n * strength)
+    else pos.setZ(i, pos.getZ(i) + n * strength)
+  }
+  pos.needsUpdate = true
+  geo.computeVertexNormals()
+  return geo
+}
+
+// ---------- Displace (Ruído orgânico) ----------
+// Desloca vértices ao longo das normais com base num mapa de ruído.
+// Diferente de elevationDisplace: este usa a normal do vértice, não um eixo fixo.
+export function displaceGeometry(geometry, options = {}) {
+  const {
+    strength = 0.3,
+    scale = 1.0,
+    seed = 0,
+  } = options
+
+  const geo = geometry.clone()
+  if (!geo.getAttribute('normal')) geo.computeVertexNormals()
+  const pos = geo.getAttribute('position')
+  const nor = geo.getAttribute('normal')
+
+  function hash(x, y, z, s) {
+    let h = x * 374761393 + y * 668265263 + z * 2654435761 + s * 1013904223
+    h = (h ^ (h >>> 13)) * 1274126177
+    h = h ^ (h >>> 16)
+    return (h & 0x7fffffff) / 0x7fffffff
+  }
+  function noise(x, y, z, s) {
+    let n = 0
+    n += hash(x, y, z, s)
+    n += 0.5 * hash(x * 2, y * 2, z * 2, s)
+    n += 0.25 * hash(x * 4, y * 4, z * 4, s)
+    return n / 1.75 - 0.5
+  }
+
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i) * scale
+    const y = pos.getY(i) * scale
+    const z = pos.getZ(i) * scale
+    const n = noise(x, y, z, seed)
+    pos.setX(i, pos.getX(i) + nor.getX(i) * n * strength)
+    pos.setY(i, pos.getY(i) + nor.getY(i) * n * strength)
+    pos.setZ(i, pos.getZ(i) + nor.getZ(i) * n * strength)
+  }
+  pos.needsUpdate = true
+  geo.computeVertexNormals()
+  return geo
+}
+
+// ---------- Taper (Afunilar) ----------
+// Estreita uma ponta do objeto gradualmente ao longo de um eixo.
+// factor > 0: estreita a ponta positiva do eixo; < 0: alarga
+export function taperGeometry(geometry, options = {}) {
+  const {
+    factor = 0.5,
+    axis = 'y', // eixo de afunilamento
+    taperAxis = 'xz', // quais eixos estreitar (xz = ambos)
+  } = options
+
+  const geo = geometry.clone()
+  const pos = geo.getAttribute('position')
+  geo.computeBoundingBox()
+  const bbox = geo.boundingBox
+  const axisIdx = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
+  const minA = bbox.min.getComponent(axisIdx)
+  const maxA = bbox.max.getComponent(axisIdx)
+  const range = maxA - minA || 1
+
+  for (let i = 0; i < pos.count; i++) {
+    const a = pos.getComponent(i, axisIdx)
+    const t = (a - minA) / range // 0..1 ao longo do eixo
+    // Fator de escala interpolado (1 na base, 1-factor no topo)
+    const s = 1 - factor * t
+    if (taperAxis.includes('x')) pos.setX(i, pos.getX(i) * s)
+    if (taperAxis.includes('z')) pos.setZ(i, pos.getZ(i) * s)
+  }
+  pos.needsUpdate = true
+  geo.computeVertexNormals()
+  return geo
+}
+
+// ---------- Twist (Torcer) ----------
+// Roda a geometria progressivamente ao longo de um eixo.
+export function twistGeometry(geometry, options = {}) {
+  const {
+    angle = Math.PI, // rotação total (radianos)
+    axis = 'y',
+  } = options
+
+  const geo = geometry.clone()
+  const pos = geo.getAttribute('position')
+  geo.computeBoundingBox()
+  const bbox = geo.boundingBox
+  const axisIdx = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
+  const minA = bbox.min.getComponent(axisIdx)
+  const maxA = bbox.max.getComponent(axisIdx)
+  const range = maxA - minA || 1
+
+  // Vetor unitário do eixo
+  const axisVec = new THREE.Vector3(
+    axis === 'x' ? 1 : 0,
+    axis === 'y' ? 1 : 0,
+    axis === 'z' ? 1 : 0
+  )
+
+  const quat = new THREE.Quaternion()
+  const v = new THREE.Vector3()
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i)
+    const a = v.getComponent(axisIdx)
+    const t = (a - minA) / range
+    const twistAngle = t * angle
+    quat.setFromAxisAngle(axisVec, twistAngle)
+    // Rotacionar em torno do eixo (não em torno do centro — preserva a coordenada do eixo)
+    const component = v.getComponent(axisIdx)
+    v.applyQuaternion(quat)
+    v.setComponent(axisIdx, component)
+    pos.setXYZ(i, v.x, v.y, v.z)
+  }
+  pos.needsUpdate = true
+  geo.computeVertexNormals()
+  return geo
+}
+
+// ---------- Bend (Dobrar) ----------
+// Dobra o objeto num âângulo, como vergar um tubo.
+// Funciona deslocando vértices em arco ao longo do eixo de dobra.
+export function bendGeometry(geometry, options = {}) {
+  const {
+    angle = Math.PI / 6, // ângulo de dobra (radianos)
+    axis = 'y', // eixo primário (a direção que será curvada)
+    bendAxis = 'z', // eixo perpendicular ao plano de dobra
+  } = options
+
+  const geo = geometry.clone()
+  const pos = geo.getAttribute('position')
+  geo.computeBoundingBox()
+  const bbox = geo.boundingBox
+  const axisIdx = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
+  const bendAxisIdx = bendAxis === 'x' ? 0 : bendAxis === 'y' ? 1 : 2
+  const minA = bbox.min.getComponent(axisIdx)
+  const maxA = bbox.max.getComponent(axisIdx)
+  const range = maxA - minA || 1
+  // Raio de curvatura = range / angle (quanto maior o ângulo, menor o raio)
+  const radius = range / Math.max(0.001, Math.abs(angle))
+
+  const v = new THREE.Vector3()
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i)
+    const a = v.getComponent(axisIdx)
+    const t = (a - minA) / range // 0..1
+    // Distância perpendicular ao eixo de dobra
+    const perp = v.getComponent(bendAxisIdx) - radius
+    // Ângulo no arco
+    const arcAngle = t * angle
+    // Nova posição: arco + offset perpendicular
+    const newAlong = Math.sin(arcAngle) * radius
+    const newPerp = Math.cos(arcAngle) * radius + perp * Math.cos(arcAngle)
+    v.setComponent(axisIdx, minA + newAlong)
+    v.setComponent(bendAxisIdx, newPerp)
+    pos.setXYZ(i, v.x, v.y, v.z)
+  }
+  pos.needsUpdate = true
+  geo.computeVertexNormals()
+  return geo
+}
+
+// ---------- Smooth (Suavização Laplaciana) ----------
+// Suaviza a geometria movendo cada vértice para a média dos seus vizinhos.
+// iterations: mais iterações = mais suave
+export function smoothGeometry(geometry, options = {}) {
+  const {
+    iterations = 2,
+    factor = 0.5, // 0 = sem efeito, 1 = total
+  } = options
+
+  // mergeVertices para ter topologia indexada (necessário para encontrar vizinhos)
+  let geo = BufferGeometryUtils.mergeVertices(geometry.clone(), 0.001)
+  if (!geo.index) {
+    // fallback: se ainda não está indexada, fazer smoothing aproximado por triângulo
+    geo = toNonIndexed(geo)
+  }
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const pos = geo.getAttribute('position')
+    const idx = geo.index
+    if (!idx) break
+    const newPositions = new Float32Array(pos.array.length)
+
+    // Para cada vértice, encontrar vizinhos (vértices que partilham um triângulo)
+    const neighbors = new Map() // index → Set de indexes vizinhos
+    for (let i = 0; i < idx.count; i += 3) {
+      const a = idx.getX(i)
+      const b = idx.getX(i + 1)
+      const c = idx.getX(i + 2)
+      if (!neighbors.has(a)) neighbors.set(a, new Set())
+      if (!neighbors.has(b)) neighbors.set(b, new Set())
+      if (!neighbors.has(c)) neighbors.set(c, new Set())
+      neighbors.get(a).add(b); neighbors.get(a).add(c)
+      neighbors.get(b).add(a); neighbors.get(b).add(c)
+      neighbors.get(c).add(a); neighbors.get(c).add(b)
+    }
+
+    // Para cada vértice, calcular a média dos vizinhos
+    const v = new THREE.Vector3()
+    const sum = new THREE.Vector3()
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i)
+      const ns = neighbors.get(i)
+      if (!ns || ns.size === 0) {
+        newPositions[i * 3] = v.x
+        newPositions[i * 3 + 1] = v.y
+        newPositions[i * 3 + 2] = v.z
+        continue
+      }
+      sum.set(0, 0, 0)
+      for (const n of ns) {
+        sum.x += pos.getX(n)
+        sum.y += pos.getY(n)
+        sum.z += pos.getZ(n)
+      }
+      sum.divideScalar(ns.size)
+      // Interpolar entre a posição original e a média
+      newPositions[i * 3] = v.x + (sum.x - v.x) * factor
+      newPositions[i * 3 + 1] = v.y + (sum.y - v.y) * factor
+      newPositions[i * 3 + 2] = v.z + (sum.z - v.z) * factor
+    }
+
+    pos.array.set(newPositions)
+    pos.needsUpdate = true
+  }
+
+  geo.computeVertexNormals()
+  return geo
+}
+
+// ---------- Decimate (Reduzir Polígonos) ----------
+// Reduz a contagem de triângulos mantendo a forma geral.
+// Implementação simplificada: remove triângulos com área muito pequena
+// e funde vértices próximos.
+export function decimateGeometry(geometry, options = {}) {
+  const {
+    ratio = 0.5, // 0.5 = manter 50% dos triângulos
+  } = options
+
+  const geo = toNonIndexed(geometry)
+  const pos = geo.getAttribute('position')
+  const totalTriangles = pos.count / 3
+  const targetTriangles = Math.max(1, Math.floor(totalTriangles * ratio))
+
+  if (targetTriangles >= totalTriangles) return geometry.clone()
+
+  // Calcular área de cada triângulo e manter apenas os maiores
+  const triangles = []
+  const v0 = new THREE.Vector3(), v1 = new THREE.Vector3(), v2 = new THREE.Vector3()
+  const edge1 = new THREE.Vector3(), edge2 = new THREE.Vector3(), cross = new THREE.Vector3()
+
+  for (let i = 0; i < pos.count; i += 3) {
+    v0.fromBufferAttribute(pos, i)
+    v1.fromBufferAttribute(pos, i + 1)
+    v2.fromBufferAttribute(pos, i + 2)
+    edge1.subVectors(v1, v0)
+    edge2.subVectors(v2, v0)
+    cross.crossVectors(edge1, edge2)
+    const area = cross.length() * 0.5
+    triangles.push({ index: i, area })
+  }
+
+  // Ordenar por área descendente e manter os maiores
+  triangles.sort((a, b) => b.area - a.area)
+  const kept = triangles.slice(0, targetTriangles)
+
+  const newPositions = new Float32Array(targetTriangles * 9)
+  for (let i = 0; i < kept.length; i++) {
+    const idx = kept[i].index
+    for (let j = 0; j < 9; j++) {
+      newPositions[i * 9 + j] = pos.array[idx * 3 + j]
+    }
+  }
+
+  const result = new THREE.BufferGeometry()
+  result.setAttribute('position', new THREE.Float32BufferAttribute(newPositions, 3))
+  result.computeVertexNormals()
+  return result
+}
+
+// ---------- Line Path (Tubo/Cabo/Corda) ----------
+// Cria uma NOVA geometria (tubo) que segue um PathObject.
+// Diferente de curveDeform (que deforma geometria existente), este cria geometria nova.
+export function createLinePathGeometry(pathPoints, options = {}) {
+  const {
+    radius = 0.1,
+    tubularSegments = 64,
+    radialSegments = 8,
+    closed = false,
+  } = options
+
+  if (!pathPoints || pathPoints.length < 2) return null
+
+  const points = pathPoints.map(p => new THREE.Vector3(p[0], p[1], p[2]))
+  const curve = new THREE.CatmullRomCurve3(points, closed, 'catmullrom', 0.5)
+  return new THREE.TubeGeometry(curve, tubularSegments, radius, radialSegments, closed)
+}
+
+// ---------- Contact Illumination (AO de contacto) ----------
+// Realça sombreamento nas zonas onde o modelo toca noutras superfícies.
+// Como modificador, darkens vertices na base (y mínimo) para dar "aderência visual".
+// Isto é mais leve que um SSAO completo e funciona em tempo de modelação.
+export function contactIllumination(geometry, options = {}) {
+  const {
+    strength = 0.5, // 0..1, quanto escurecer
+    height = 1.0, // altura (em unidades do modelo) a partir da base que recebe escurecimento
+  } = options
+
+  const geo = geometry.clone()
+  if (!geo.getAttribute('normal')) geo.computeVertexNormals()
+  geo.computeBoundingBox()
+  const minY = geo.boundingBox.min.y
+  const pos = geo.getAttribute('position')
+  const nor = geo.getAttribute('normal')
+
+  // Adicionar vertex colors se não existirem
+  let colAttr = geo.getAttribute('color')
+  if (!colAttr) {
+    const colors = new Float32Array(pos.count * 3).fill(1.0)
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+    colAttr = geo.getAttribute('color')
+  }
+
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i)
+    const ny = nor.getY(i)
+    // Escurecer vértices perto da base E com normal apontando para baixo
+    const heightFactor = Math.max(0, 1 - (y - minY) / height)
+    const normalFactor = Math.max(0, -ny) // 0..1, maior quando normal aponta para baixo
+    const darken = heightFactor * normalFactor * strength
+    const r = colAttr.getX(i) * (1 - darken)
+    const g = colAttr.getY(i) * (1 - darken)
+    const b = colAttr.getZ(i) * (1 - darken)
+    colAttr.setXYZ(i, r, g, b)
+  }
+  colAttr.needsUpdate = true
+  return geo
+}
+
+// ---------- Curve Deform ----------
+/**
+ * Deforma uma geometria ao longo de uma curva (array de pontos [x,y,z]).
+ *
+ * Como funciona:
+ *  1. Calcula o bounding box da geometria original
+ *  2. Para cada vértice, mapeia a sua posição X (ao longo do eixo principal)
+ *     para um parâmetro t ∈ [0, 1] ao longo da curva
+ *  3. Obtém a posição na curva correspondente a t usando Catmull-Rom (curva suave)
+ *  4. Translada o vértice para essa posição, mantendo Y/Z relativos
+ *  5. Aplica rotação para alinhar com a tangente da curva
+ *
+ * Usa THREE.CatmullRomCurve3 para interpolação suave (passa por todos os pontos
+ * sem angulosidades), ao contrário da interpolação linear anterior.
+ *
+ * @param {THREE.BufferGeometry} geometry - geometria a deformar
+ * @param {Array} pathPoints - array de [x,y,z] pontos da curva
+ * @param {Object} options - { twist: 0, stretch: 1 }
+ * @returns {THREE.BufferGeometry} - nova geometria deformada
+ */
+export function curveDeform(geometry, pathPoints, options = {}) {
+  if (!pathPoints || pathPoints.length < 2) return geometry
+
+  const { twist = 0, stretch = 1 } = options
+
+  // Clonar geometria para não mutar a original
+  const result = geometry.clone()
+
+  // Calcular bounding box para mapear X → t
+  result.computeBoundingBox()
+  const bbox = result.boundingBox
+  const minX = bbox.min.x
+  const maxX = bbox.max.x
+  const rangeX = maxX - minX || 1
+
+  // Normalizar pathPoints para THREE.Vector3
+  const points = pathPoints.map(p => new THREE.Vector3(p[0], p[1], p[2]))
+
+  // Criar curva Catmull-Rom (suave — passa por todos os pontos sem angulosidades)
+  // Catmull-Rom precisa de pelo menos 2 pontos; com 2 pontos funciona como linear
+  // (mas não há nada a suavizar). Com 3+ pontos gera uma curva suave.
+  const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.5)
+
+  // Pré-calcular pontos amostrados ao longo da curva para obter comprimento
+  // e mapeamento t → distância
+  const sampleCount = Math.max(100, points.length * 20)
+  const samples = []
+  let totalLength = 0
+  let prevPoint = null
+  for (let i = 0; i <= sampleCount; i++) {
+    const t = i / sampleCount
+    const pt = curve.getPoint(t)
+    if (prevPoint) {
+      totalLength += pt.distanceTo(prevPoint)
+    }
+    samples.push({ t, point: pt, dist: totalLength })
+    prevPoint = pt
+  }
+  if (totalLength === 0) return geometry
+
+  // Função para obter ponto e tangente na curva em t ∈ [0, 1]
+  // Usa amostragem por distância (parametrização por arc-length)
+  function getPointOnCurve(t) {
+    t = Math.max(0, Math.min(1, t * stretch))
+    const targetDist = t * totalLength
+    // Busca binária nos samples
+    let lo = 0, hi = samples.length - 1
+    while (lo < hi - 1) {
+      const mid = (lo + hi) >> 1
+      if (samples[mid].dist <= targetDist) lo = mid
+      else hi = mid
+    }
+    const s1 = samples[lo]
+    const s2 = samples[hi]
+    const segLen = s2.dist - s1.dist || 1
+    const localT = (targetDist - s1.dist) / segLen
+    const point = new THREE.Vector3().lerpVectors(s1.point, s2.point, localT)
+    // Tangente via derivative da curva Catmull-Rom
+    const tangent = curve.getTangent(t).normalize()
+    return { point, tangent }
+  }
+
+  // Para cada vértice, deformar
+  const pos = result.attributes.position
+  const v = new THREE.Vector3()
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i)
+
+    // Mapear X → t (0 no minX, 1 no maxX)
+    const t = (v.x - minX) / rangeX
+
+    // Obter ponto na curva
+    const { point, tangent } = getPointOnCurve(t * stretch)
+
+    // Offset relativo (Y e Z do vértice original)
+    const offsetY = v.y
+    const offsetZ = v.z
+
+    // Calcular rotação para alinhar X com a tangente
+    // Tangente padrão é (1,0,0); queremos rodar para `tangent`
+    const defaultDir = new THREE.Vector3(1, 0, 0)
+    const quat = new THREE.Quaternion().setFromUnitVectors(defaultDir, tangent)
+
+    // Aplicar rotação ao offset (Y,Z)
+    const offset = new THREE.Vector3(0, offsetY, offsetZ)
+    offset.applyQuaternion(quat)
+
+    // Aplicar twist (rotação incremental ao longo da curva)
+    if (twist !== 0) {
+      const twistAngle = t * twist * Math.PI * 2
+      const twistQuat = new THREE.Quaternion().setFromAxisAngle(tangent, twistAngle)
+      offset.applyQuaternion(twistQuat)
+    }
+
+    // Posição final = ponto na curva + offset rotacionado
+    v.copy(point).add(offset)
+    pos.setXYZ(i, v.x, v.y, v.z)
+  }
+
+  pos.needsUpdate = true
+  result.computeVertexNormals()
+  result.computeBoundingBox()
+  result.computeBoundingSphere()
+  return result
+}

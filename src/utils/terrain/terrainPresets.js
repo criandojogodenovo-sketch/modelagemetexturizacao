@@ -12,19 +12,19 @@ export const SCULPT_BRUSHES = [
   {
     id: 'raise',
     label: 'Elevar',
-    icon: 'arrow-up',
+    icon: '⬆️',
     desc: 'Sobe o terreno — pincel padrão de elevação',
   },
   {
     id: 'lower',
     label: 'Rebaixar',
-    icon: 'arrow-down',
+    icon: '⬇️',
     desc: 'Desce o terreno — inverso do Elevar',
   },
   {
     id: 'smooth',
     label: 'Suavizar',
-    icon: 'waves',
+    icon: '🌊',
     desc: 'Média 3x3 — alisa picos e vales',
   },
   {
@@ -36,13 +36,13 @@ export const SCULPT_BRUSHES = [
   {
     id: 'setHeight',
     label: 'Definir Altura',
-    icon: 'target',
+    icon: '🎯',
     desc: 'Define exatamente a altura alvo (mais agressivo que Achatar)',
   },
   {
     id: 'noise',
     label: 'Ruído',
-    icon: 'sparkles',
+    icon: '✨',
     desc: 'Adiciona ruído aleatório — útil para variação natural',
   },
   {

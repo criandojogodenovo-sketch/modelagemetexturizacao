@@ -70,25 +70,64 @@ export function createPhysicsSystem(options = {}) {
   }
 
   // Cria shape CANNON baseado no tipo de geometria do conect
+  // Sistema 1: suporta colisor independente do modelo visual
   function createShape(conect, mesh) {
-    // Tentar inferir tamanho a partir do bounding box do mesh
-    let size = [1, 1, 1]
-    if (mesh) {
-      mesh.geometry?.computeBoundingBox?.()
-      const bb = mesh.geometry?.boundingBox
-      if (bb) {
-        size = [
-          Math.max(0.1, (bb.max.x - bb.min.x) / 2),
-          Math.max(0.1, (bb.max.y - bb.min.y) / 2),
-          Math.max(0.1, (bb.max.z - bb.min.z) / 2),
-        ]
+    const shape = conect.colliderShape || 'model'
+
+    // Modo "model" — usar bounding box do mesh (comportamento original)
+    if (shape === 'model' || !shape) {
+      let size = [1, 1, 1]
+      if (mesh) {
+        mesh.geometry?.computeBoundingBox?.()
+        const bb = mesh.geometry?.boundingBox
+        if (bb) {
+          size = [
+            Math.max(0.1, (bb.max.x - bb.min.x) / 2),
+            Math.max(0.1, (bb.max.y - bb.min.y) / 2),
+            Math.max(0.1, (bb.max.z - bb.min.z) / 2),
+          ]
+        }
+      }
+      // Override para triggers
+      if (conect.type === 'TriggerObject' && conect.size) {
+        size = [conect.size[0] / 2, conect.size[1] / 2, conect.size[2] / 2]
+      }
+      return new CANNON.Box(new CANNON.Vec3(size[0], size[1], size[2]))
+    }
+
+    // Colisor independente — usar propriedades personalizadas
+    const cs = conect.colliderSize || [1, 1, 1]
+    const radius = Math.max(0.05, conect.colliderRadius || 0.5)
+    const height = Math.max(0.1, conect.colliderHeight || 1.5)
+
+    if (shape === 'box') {
+      return new CANNON.Box(new CANNON.Vec3(cs[0] / 2, cs[1] / 2, cs[2] / 2))
+    }
+    if (shape === 'sphere') {
+      return new CANNON.Sphere(radius)
+    }
+    if (shape === 'capsule') {
+      // cannon-es não tem Capsule nativa; usar Cylinder como aproximação
+      // (visualmente mostramos cápsula no gizmo, mas a física usa cylinder)
+      const r = Math.max(0.05, radius)
+      const h = Math.max(0.1, height)
+      try {
+        return new CANNON.Cylinder(r, r, h, 8)
+      } catch (e) {
+        return new CANNON.Sphere(r)
       }
     }
-    // Override para triggers
-    if (conect.type === 'TriggerObject' && conect.size) {
-      size = [conect.size[0] / 2, conect.size[1] / 2, conect.size[2] / 2]
+
+    // Fallback
+    return new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5))
+  }
+
+  // Sistema 1: retorna offset do colisor (para posicionar body separado do mesh)
+  function getColliderOffset(conect) {
+    if (conect.colliderShape && conect.colliderShape !== 'model') {
+      return conect.colliderOffset || [0, 0, 0]
     }
-    return new CANNON.Box(new CANNON.Vec3(size[0], size[1], size[2]))
+    return [0, 0, 0]
   }
 
   // Adiciona um conect ao sistema de física
@@ -104,10 +143,17 @@ export function createPhysicsSystem(options = {}) {
     const isTrigger = conect.isTrigger || conect.type === 'TriggerObject'
 
     const shape = createShape(conect, mesh)
+    // Sistema 1: aplicar offset do colisor à posição do body
+    const offset = getColliderOffset(conect)
+    const bodyPos = new CANNON.Vec3(
+      conect.position[0] + offset[0],
+      conect.position[1] + offset[1],
+      conect.position[2] + offset[2]
+    )
     const body = new CANNON.Body({
       mass: isTrigger ? 0 : (conect.mass ?? 0),
       shape,
-      position: new CANNON.Vec3(...conect.position),
+      position: bodyPos,
       material: conect.type === 'PersonalObject' ? materials.player : materials.default,
     })
     body.linearDamping = conect.linearDamping ?? 0.01
@@ -201,10 +247,43 @@ export function createPhysicsSystem(options = {}) {
   function jumpPersonal(instanceId) {
     const entry = bodies.get(instanceId)
     if (!entry || entry.type !== 'PersonalObject') return
-    if (!entry.grounded) return
+    // FASE 9: Coyote time + salto duplo configurável
+    const coyoteTime = entry.conect.coyoteTime ?? 0.15
+    const maxJumps = entry.conect.maxJumps ?? 1
+    // Inicializar estado de saltos se não existir
+    if (entry._jumpsUsed === undefined) entry._jumpsUsed = 0
+    if (entry._coyoteTimer === undefined) entry._coyoteTimer = 0
+    // Verificar se pode saltar
+    const canJumpNow = entry.grounded || (entry._coyoteTimer > 0) || (entry._jumpsUsed < maxJumps)
+    if (!canJumpNow) return
     const jumpForce = entry.conect.jumpForce ?? 8
     entry.body.velocity.y = jumpForce
+    // Se estava grounded ou em coyote time, é o 1º salto
+    if (entry.grounded || entry._coyoteTimer > 0) {
+      entry._jumpsUsed = 1
+    } else {
+      entry._jumpsUsed += 1
+    }
     entry.grounded = false
+    entry._coyoteTimer = 0
+  }
+
+  // FASE 9: Atualizar coyote timer — chamado a cada frame
+  function updatePersonalState(instanceId, deltaTime) {
+    const entry = bodies.get(instanceId)
+    if (!entry || entry.type !== 'PersonalObject') return
+    if (entry._coyoteTimer === undefined) entry._coyoteTimer = 0
+    if (entry._jumpsUsed === undefined) entry._jumpsUsed = 0
+    // Reset jumps quando toca o chão
+    if (entry.grounded) {
+      entry._jumpsUsed = 0
+      entry._coyoteTimer = entry.conect.coyoteTime ?? 0.15
+    } else {
+      // Decrementar coyote timer
+      if (entry._coyoteTimer > 0) {
+        entry._coyoteTimer = Math.max(0, entry._coyoteTimer - deltaTime)
+      }
+    }
   }
 
   // Atualiza o mundo e sincroniza transforms
@@ -326,6 +405,7 @@ export function createPhysicsSystem(options = {}) {
     applyForce,
     movePersonal,
     jumpPersonal,
+    updatePersonalState,
     addJoint,
     update,
     dispose,
