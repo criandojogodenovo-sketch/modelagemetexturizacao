@@ -11,6 +11,7 @@
 import { useStore } from '../../store/useStore'
 import { debugLog } from '../../utils/debug/debugStore'
 import JoystickControl from '../ui/JoystickControl'
+import { useRef, useEffect } from 'react'
 
 export default function GameUIOverlay() {
   const uiScreens = useStore((s) => s.uiScreens)
@@ -26,7 +27,10 @@ export default function GameUIOverlay() {
     c.type === 'CameraTouchZone'
   )
   const joysticks = uiConects.filter((c) => c.type === 'JoystickObject')
-  const otherUiConects = uiConects.filter((c) => c.type !== 'JoystickObject')
+  const cameraZones = uiConects.filter((c) => c.type === 'CameraTouchZone')
+  const otherUiConects = uiConects.filter((c) =>
+    c.type !== 'JoystickObject' && c.type !== 'CameraTouchZone'
+  )
 
   if (visibleScreens.length === 0 && uiConects.length === 0) return null
 
@@ -200,6 +204,18 @@ export default function GameUIOverlay() {
         />
       ))}
 
+      {/* CameraTouchZone — zona de toque para rodar câmara (FPS/BR-style) */}
+      {cameraZones.map((cz) => (
+        <CameraTouchZoneControl
+          key={cz.instanceId}
+          zone={cz.zone}
+          sensitivity={cz.sensitivity ?? 1.0}
+          invertY={cz.invertY || false}
+          minPitch={cz.minPitch ?? -1.4}
+          maxPitch={cz.maxPitch ?? 1.4}
+        />
+      ))}
+
       {/* Conects de UI da cena ativa (ButtonObject, TextObject, etc.) */}
       {otherUiConects.map((conect) => {
         const pos = conect.position || [10, 10]
@@ -275,5 +291,105 @@ export default function GameUIOverlay() {
         }
       })}
     </div>
+  )
+}
+
+/**
+ * CameraTouchZoneControl — zona de toque para rodar a câmara (pitch/yaw).
+ * Estilo COD Mobile / Fortnite: arrastar o dedo nesta zona roda a câmara.
+ * Invisível (transparente) mas captura eventos de toque.
+ * Funciona com window._flirCameraRotation — o SceneLevel3D lê estes valores.
+ */
+function CameraTouchZoneControl({ zone, sensitivity, invertY, minPitch, maxPitch }) {
+  const touchIdRef = useRef(null)
+  const lastPosRef = useRef(null)
+
+  useEffect(() => {
+    if (!window._flirCameraRotation) {
+      window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: sensitivity }
+    }
+    window._flirCameraRotation.sensitivity = sensitivity
+  }, [sensitivity])
+
+  const z = zone || { x: 50, y: 0, w: 50, h: 100 }
+  const zoneStyle = {
+    position: 'fixed',
+    left: `${z.x}%`,
+    top: `${z.y}%`,
+    width: `${z.w}%`,
+    height: `${z.h}%`,
+    zIndex: 88,
+    touchAction: 'none',
+    background: 'transparent',
+    pointerEvents: 'auto',
+  }
+
+  const onTouchStart = (e) => {
+    const touch = e.changedTouches[0]
+    touchIdRef.current = touch.identifier
+    lastPosRef.current = { x: touch.clientX, y: touch.clientY }
+  }
+  const onTouchMove = (e) => {
+    if (touchIdRef.current === null) return
+    for (const touch of e.changedTouches) {
+      if (touch.identifier === touchIdRef.current) {
+        const dx = touch.clientX - lastPosRef.current.x
+        const dy = touch.clientY - lastPosRef.current.y
+        lastPosRef.current = { x: touch.clientX, y: touch.clientY }
+        if (window._flirCameraRotation) {
+          const sens = sensitivity * 0.005
+          window._flirCameraRotation.yaw -= dx * sens
+          const pitchDelta = invertY ? dy * sens : -dy * sens
+          window._flirCameraRotation.pitch = Math.max(
+            minPitch, Math.min(maxPitch, window._flirCameraRotation.pitch + pitchDelta)
+          )
+        }
+        break
+      }
+    }
+  }
+  const onTouchEnd = (e) => {
+    for (const touch of e.changedTouches) {
+      if (touch.identifier === touchIdRef.current) {
+        touchIdRef.current = null
+        lastPosRef.current = null
+        break
+      }
+    }
+  }
+
+  const onMouseDown = (e) => {
+    e.preventDefault()
+    lastPosRef.current = { x: e.clientX, y: e.clientY }
+    const move = (ev) => {
+      const dx = ev.clientX - lastPosRef.current.x
+      const dy = ev.clientY - lastPosRef.current.y
+      lastPosRef.current = { x: ev.clientX, y: ev.clientY }
+      if (window._flirCameraRotation) {
+        const sens = sensitivity * 0.005
+        window._flirCameraRotation.yaw -= dx * sens
+        const pitchDelta = invertY ? dy * sens : -dy * sens
+        window._flirCameraRotation.pitch = Math.max(
+          minPitch, Math.min(maxPitch, window._flirCameraRotation.pitch + pitchDelta)
+        )
+      }
+    }
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
+  return (
+    <div
+      style={zoneStyle}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchEnd}
+      onMouseDown={onMouseDown}
+    />
   )
 }

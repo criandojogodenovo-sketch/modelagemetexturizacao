@@ -89,6 +89,11 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
     return <AmbientLightMesh conect={conect} setMeshRef={setMeshRef} />
   }
 
+  // ReferenceObject: renderiza conteúdo de outra cena
+  if (conect.type === 'ReferenceObject') {
+    return <ReferenceMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
   if (!def?.hasVisual && conect.type !== 'VisualObject') {
     // Sem visual — ligar o meshRef a null para que physics não tente usar
     useEffect(() => { setMeshRef?.(null) }, [])
@@ -727,4 +732,44 @@ function AmbientLightMesh({ conect, setMeshRef }) {
 
   // Sem gizmo visível
   return null
+}
+
+// ===== ReferenceObject — renderiza conteúdo de outra cena =====
+function ReferenceMesh({ conect, setMeshRef }) {
+  const scenes = useStore((s) => s.scenes)
+  const targetScene = scenes.find(s => s.id === conect.targetSceneId)
+
+  if (!targetScene) {
+    // Sem cena de destino — mostrar gizmo de placeholder
+    return (
+      <mesh ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+        <boxGeometry args={[0.5, 0.5, 0.5]} />
+        <meshBasicMaterial color="#8957e5" wireframe />
+      </mesh>
+    )
+  }
+
+  // Renderizar objetos do catálogo da cena referenciada
+  const refObjects = (targetScene.objects || []).map((instance) => {
+    const obj = objects.find((o) => o.id === instance.objectId)
+    if (!obj) return null
+    const sceneObj = {
+      ...obj,
+      id: `${conect.instanceId}_ref_${instance.instanceId}`,
+      position: [
+        (conect.position?.[0] || 0) + (instance.position?.[0] || 0),
+        (conect.position?.[1] || 0) + (instance.position?.[1] || 0),
+        (conect.position?.[2] || 0) + (instance.position?.[2] || 0),
+      ],
+      rotation: instance.rotation || [0, 0, 0],
+      scale: instance.scale || [1, 1, 1],
+    }
+    return <SceneObject key={instance.instanceId} obj={sceneObj} isSelected={false} onSelect={() => {}} />
+  }).filter(Boolean)
+
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      {refObjects}
+    </group>
+  )
 }

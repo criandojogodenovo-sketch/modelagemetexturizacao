@@ -105,6 +105,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   const joystickRef = useRef({ x: 0, z: 0, active: false })
   const inventoryRef = useRef({})
   const weaponStateRef = useRef({ equipped: false, ammo: 0, maxAmmo: 0, damage: 0, fireRate: 0.3, range: 50, reloadTime: 2, lastShot: 0 })
+  const collisionEventsRef = useRef(new Map()) // instanceId → Set de otherIds em contacto
 
   // Expor meshRefs globalmente para TrailObject poder seguir objetos
   useEffect(() => {
@@ -274,12 +275,27 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       },
       collidingWith: (instanceId, type) => {
         if (!physicsRef.current) return false
-        const entry = physicsRef.current.bodies.get(instanceId)
-        if (!entry) return false
-        for (const [otherId, otherEntry] of physicsRef.current.bodies) {
-          if (otherId === instanceId) continue
-          if (otherEntry.conect.type === type || otherEntry.conect.name === type) {
-            if (entry.body.position.distanceTo(otherEntry.body.position) < 1.5) return true
+        // Usar contactos reais do cannon-es em vez de distância
+        const contacts = physicsRef.current.getContacts?.(instanceId)
+        if (contacts && contacts.length > 0) {
+          for (const otherId of contacts) {
+            const otherEntry = physicsRef.current.bodies.get(otherId)
+            if (!otherEntry) continue
+            if (otherEntry.conect.type === type || otherEntry.conect.name === type) {
+              return true
+            }
+          }
+          return false
+        }
+        // Fallback: usar eventos de colisão registados
+        const collisionSet = collisionEventsRef.current.get(instanceId)
+        if (collisionSet && collisionSet.size > 0) {
+          for (const otherId of collisionSet) {
+            const otherEntry = physicsRef.current.bodies.get(otherId)
+            if (!otherEntry) continue
+            if (otherEntry.conect.type === type || otherEntry.conect.name === type) {
+              return true
+            }
           }
         }
         return false
@@ -432,6 +448,17 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
 
     // Eventos de física
     physicsRef.current.on('onCollision', ({ instanceId, otherInstanceId }) => {
+      // Registar colisão para collidingWith()
+      if (!collisionEventsRef.current.has(instanceId)) {
+        collisionEventsRef.current.set(instanceId, new Set())
+      }
+      collisionEventsRef.current.get(instanceId).add(otherInstanceId)
+      // Limitar tempo de vida do contacto (expira em 0.5s se não renovado)
+      setTimeout(() => {
+        const set = collisionEventsRef.current.get(instanceId)
+        if (set) set.delete(otherInstanceId)
+      }, 500)
+
       const rt = runtimesRef.current.get(instanceId)
       if (rt) rt.triggerEvent('onCollision', { other: otherInstanceId })
     })
@@ -512,6 +539,34 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     for (const conect of setupScene.conects || []) {
       if (conect.type === 'TimerObject' && conect.autoStart) {
         timerStatesRef.current.set(conect.instanceId, { remaining: conect.duration || 5, loop: conect.loop || false, duration: conect.duration || 5 })
+      }
+    }
+
+    // PrefabObject — expandir prefabs na cena (instanciar objetos do prefabData)
+    for (const conect of setupScene.conects || []) {
+      if (conect.type === 'PrefabObject' && conect.prefabData && Array.isArray(conect.prefabData)) {
+        try {
+          const prefabData = typeof conect.prefabData === 'string'
+            ? JSON.parse(conect.prefabData)
+            : conect.prefabData
+          for (const childConect of prefabData) {
+            // Instanciar cada conect do prefab na posição relativa ao PrefabObject
+            const newConect = {
+              ...childConect,
+              instanceId: `prefab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              position: [
+                (conect.position?.[0] || 0) + (childConect.position?.[0] || 0),
+                (conect.position?.[1] || 0) + (childConect.position?.[1] || 0),
+                (conect.position?.[2] || 0) + (childConect.position?.[2] || 0),
+              ],
+            }
+            // Adicionar à cena via store (para que ConectRenderer o renderize)
+            useStore.getState().addConectToScene(newConect.type, newConect.position)
+          }
+          debugLog(`Prefab "${conect.name}" expandido (${prefabData.length} objetos)`, 'log', 'Prefab')
+        } catch (e) {
+          debugLog(`Erro ao expandir prefab: ${e.message}`, 'error', 'Prefab')
+        }
       }
     }
 
@@ -701,6 +756,47 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
               }
             }
           }
+        }
+      }
+    }
+
+    // SpawnObject — spawning temporal de objetos
+    for (const spawn of setupScene?.conects || []) {
+      if (spawn.type === 'SpawnObject' && spawn.autoStart !== false && spawn.objectToSpawn) {
+        if (!timerStatesRef.current.has(spawn.instanceId + '_spawn')) {
+          timerStatesRef.current.set(spawn.instanceId + '_spawn', {
+            remaining: spawn.interval || 3,
+            duration: spawn.interval || 3,
+            loop: true,
+          })
+        }
+        const st = timerStatesRef.current.get(spawn.instanceId + '_spawn')
+        st.remaining -= delta
+        if (st.remaining <= 0) {
+          st.remaining = st.duration
+          // Spawn do objeto
+          const spawnMesh = conectMeshRefs.current.get(spawn.instanceId)
+          const spawnPos = spawnMesh
+            ? [spawnMesh.position.x, spawnMesh.position.y, spawnMesh.position.z]
+            : spawn.position || [0, 1, 0]
+          gameContext.spawnObject(spawn.objectToSpawn, spawnPos)
+          debugLog(`Spawn: "${spawn.objectToSpawn}" em ${spawnPos}`, 'log', 'Spawn')
+        }
+      }
+    }
+
+    // GroupObject — aplicar parenting
+    for (const grp of setupScene?.conects || []) {
+      if (grp.type === 'GroupObject' && grp.children && grp.children.length > 0) {
+        const groupMesh = conectMeshRefs.current.get(grp.instanceId)
+        if (groupMesh && !groupMesh.userData._grouped) {
+          for (const childId of grp.children) {
+            const childMesh = conectMeshRefs.current.get(childId) || meshRefs.current.get(childId)
+            if (childMesh && childMesh.parent !== groupMesh) {
+              groupMesh.attach(childMesh)
+            }
+          }
+          groupMesh.userData._grouped = true
         }
       }
     }

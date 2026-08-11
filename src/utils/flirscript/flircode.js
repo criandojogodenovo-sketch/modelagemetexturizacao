@@ -260,6 +260,37 @@ function parseValue(text) {
   if (text.startsWith('"') && text.endsWith('"')) {
     return { type: 'string', value: text.slice(1, -1) }
   }
+  // Expressão aritmética: 5+3, 10-2, 4*2, 8/2, 10%3
+  // Detecta operadores aritméticos com números ou variáveis
+  const arithMatch = text.match(/^(-?\d+(?:\.\d+)?)\s*([+\-*/%])\s*(-?\d+(?:\.\d+)?)$/)
+  if (arithMatch) {
+    return {
+      type: 'arith',
+      left: { type: 'number', value: parseFloat(arithMatch[1]) },
+      op: arithMatch[2],
+      right: { type: 'number', value: parseFloat(arithMatch[3]) },
+    }
+  }
+  // Aritmética com variável: var+5, var-2, var*3, etc.
+  const arithVarMatch = text.match(/^(\w+)\s*([+\-*/%])\s*(-?\d+(?:\.\d+)?)$/)
+  if (arithVarMatch && !arithVarMatch[1].startsWith('"')) {
+    return {
+      type: 'arith',
+      left: { type: 'var', name: arithVarMatch[1] },
+      op: arithVarMatch[2],
+      right: { type: 'number', value: parseFloat(arithVarMatch[3]) },
+    }
+  }
+  // Aritmética com número à direita: 5+var, 10-var
+  const arithVarMatch2 = text.match(/^(-?\d+(?:\.\d+)?)\s*([+\-*/%])\s*(\w+)$/)
+  if (arithVarMatch2 && !arithVarMatch2[3].startsWith('"')) {
+    return {
+      type: 'arith',
+      left: { type: 'number', value: parseFloat(arithVarMatch2[1]) },
+      op: arithVarMatch2[2],
+      right: { type: 'var', name: arithVarMatch2[3] },
+    }
+  }
   // Expressão com concatenação (+) — suporta "string" + var + "string" + ...
   // Não divide dentro de strings (respeita aspas)
   if (text.includes('+') && !/^-?\d/.test(text)) {
@@ -277,7 +308,6 @@ function parseValue(text) {
   // Sistema 2: 'this' refere-se ao próprio objeto (instanceId)
   if (text === 'this') return { type: 'this' }
   // Chamada de função embutida como valor: identifier(args)
-  // Ex: getVar("teste"), distanceTo("Cubo"), collidingWith("tipo"), isTouching(), getUIValue("nome")
   const callMatch = text.match(/^(\w+)\s*\(([^)]*)\)$/)
   if (callMatch) {
     const funcName = callMatch[1]
@@ -388,17 +418,27 @@ export function createFlirCodeRuntime(source, gameContext) {
       case 'number': return val.value
       case 'string': return val.value
       case 'boolean': return val.value
-      case 'this': return gameContext._instanceId // Sistema 2: this = próprio objeto
+      case 'this': return gameContext._instanceId
       case 'concat': return val.parts.map((p) => {
         const v = evalValue(p)
         return v === null || v === undefined ? '' : String(v)
       }).join('')
+      case 'arith': {
+        const l = Number(evalValue(val.left))
+        const r = Number(evalValue(val.right))
+        switch (val.op) {
+          case '+': return l + r
+          case '-': return l - r
+          case '*': return l * r
+          case '/': return r !== 0 ? l / r : 0
+          case '%': return r !== 0 ? l % r : 0
+          default: return 0
+        }
+      }
       case 'call_value': {
-        // Avaliar a função embutida e retornar o resultado
         return execBuiltin(val.funcName, val.args, {})
       }
       case 'var': {
-        // Primeiro procura em localVars, depois em globalVars (via getVar)
         if (val.name in localVars) return localVars[val.name]
         const gv = gameContext.getVar?.(val.name)
         return gv ?? 0
@@ -429,11 +469,27 @@ export function createFlirCodeRuntime(source, gameContext) {
   // Executar uma lista de statements
   function execStatements(statements, params = {}) {
     for (const stmt of statements) {
+      // wait() — se _waitUntil está no futuro, as linhas seguintes são adiadas
+      if (gameContext._waitUntil && Date.now() < gameContext._waitUntil) {
+        // Adiar as statements restantes via setTimeout
+        const remaining = statements.slice(statements.indexOf(stmt) + 1)
+        if (remaining.length > 0) {
+          const delay = gameContext._waitUntil - Date.now()
+          gameContext._waitUntil = 0 // reset
+          setTimeout(() => {
+            execStatements(remaining, params)
+          }, delay)
+        }
+        return // parar execução síncrona aqui
+      }
+      // Resetar _waitUntil se já passou
+      if (gameContext._waitUntil && Date.now() >= gameContext._waitUntil) {
+        gameContext._waitUntil = 0
+      }
       try {
         execStatement(stmt, params)
       } catch (err) {
         debugLog(`Erro ao executar (linha ${stmt.line}): ${err.message}`, 'error', 'FlirCode')
-        // Não travar — continuar
       }
     }
   }
@@ -587,16 +643,13 @@ export function createFlirCodeRuntime(source, gameContext) {
         gameContext.changeScene?.(evaluatedArgs[0])
         break
       case 'wait': {
-        // wait(seconds) — implementa um delay real via setTimeout
-        // Como FlirCode é síncrono, o wait só afeta a chamada atual:
-        // regista o delay e o runtime processa ações pendentes após o tempo
+        // wait(seconds) — atrasa a execução das linhas seguintes
+        // Implementação: marca o timestamp de próxima execução
+        // O runtime verifica _waitUntil antes de executar a próxima linha
         const delayMs = (evaluatedArgs[0] || 0) * 1000
         debugLog('wait(' + evaluatedArgs[0] + 's) — aguardando', 'log', 'FlirCode')
-        // Usar Atomics.wait para um sleep síncrono não-bloqueante em worker
-        // Como não estamos em worker, usar setTimeout com flag
-        if (gameContext._waitQueue) {
-          gameContext._waitQueue.push(delayMs)
-        }
+        if (gameContext._waitUntil === undefined) gameContext._waitUntil = 0
+        gameContext._waitUntil = Date.now() + delayMs
         break
       }
       case 'setVar':
