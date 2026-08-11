@@ -1,0 +1,24 @@
+import { chromium } from 'playwright'
+
+async function main() {
+  const browser = await chromium.launch({ headless: true })
+  const context = await browser.newContext({
+    viewport: { width: 414, height: 896 },
+    deviceScaleFactor: 2,
+  })
+  const page = await context.newPage()
+  try {
+    await page.goto('https://modelagemetexturizacao.vercel.app/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
+    })
+    await new Promise(r => setTimeout(r, 6000))
+    await page.screenshot({ path: '/home/z/my-project/download/prod-main-after.png' })
+    console.log('Screenshot saved')
+  } catch (err) {
+    console.error('Error:', err.message)
+  } finally {
+    await browser.close()
+  }
+}
+main()
