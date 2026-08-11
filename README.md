@@ -205,6 +205,140 @@ MIT — usa livremente.
 
 ---
 
+# Auditoria Honesta da Engine — Estado Real (2026-08-11)
+
+Esta secção documenta o que **realmente funciona** vs o que **não funciona**, após auditoria exaustiva do código fonte.
+
+## Conects que FUNCIONAM (visual + runtime)
+
+| Conect | Visual no editor | Runtime no jogo | Notas |
+|---|---|---|---|
+| PersonalObject | ✅ Capsule verde | ✅ Física + input + joystick + salto | Funciona completamente |
+| RigidObject | ✅ Cubo cinza | ✅ Física (gravidade, massa) | Funciona (placeholder visual) |
+| StaticObject | ✅ Cubo cinza | ✅ Física (massa=0) | Funciona |
+| StopObject | ✅ Cubo amarelo | ✅ Física (kinematic) | Funciona |
+| NpcObject | ⚠️ Cubo cinza | ✅ IA (patrulhar, perseguir) | Visual é placeholder |
+| TriggerObject | ❌ Invisível | ✅ Deteção de colisão | Funciona mas sem preview visual |
+| JointObject | ❌ Invisível | ✅ Junta física entre objetos | Funciona mas sem linha visual |
+| ViewObject | ✅ Gizmo de câmara | ✅ Segue jogador (third/top/side) | Funciona |
+| TimerObject | ❌ Invisível | ✅ Timer + evento onTimer | Funciona |
+| VisualObject | ✅ Modelo do catálogo | ⚠️ Só mesh, sem lógica extra | Funciona como placeholder |
+| TerrainObject | ✅ Heightmap + splat | ✅ Física (box collider) | Funciona |
+| LuminousObject | ✅ Luz + gizmo | ⚠️ Declarativo (sem animação) | Funciona |
+| PathObject | ✅ Waypoints + linha | ⚠️ Só dados para NPC patrulha | Não move objetos ao longo do path |
+| CheckpointObject | ✅ Bandeira visual | ❌ Sem lógica de save/respawn | Apenas decorativo |
+| JoystickObject | ❌ Invisível | ✅ Joystick virtual no jogo | Funciona via GameUIOverlay |
+
+## Conects CORRIGIDOS nesta sessão (antes não funcionavam)
+
+| Conect | Antes | Depois | O que foi corrigido |
+|---|---|---|---|
+| **SkyObject** | ❌ Não renderizava, não mudava fundo | ✅ Renderiza esfera + muda background | Adicionado SkyMesh no ConectRenderer |
+| **WaterObject** | ❌ Plano estático, sem ondas | ✅ Ondas animadas via useFrame | Adicionada animação de vértices |
+| **FogObject** | ❌ scene.fog nunca era definido | ✅ FogApplier aplica fog à cena | Adicionado FogApplier no SceneLevel3D |
+| **SunObject** | ❌ Luz nunca era criada | ✅ directionalLight + gizmo | Adicionado SunLightMesh no ConectRenderer |
+| **PointObject** | ❌ Luz nunca era criada | ✅ pointLight + gizmo | Adicionado PointLightMesh |
+| **SpotObject** | ❌ Luz nunca era criada | ✅ spotLight + gizmo | Adicionado SpotLightMesh |
+| **AmbientObject** | ❌ Luz nunca era criada | ✅ ambientLight à cena | Adicionado AmbientLightMesh |
+| **ButtonObject** | ❌ Não aparecia no jogo | ✅ Renderizado pelo GameUIOverlay | Adicionado render de Conects de UI |
+| **TextObject** | ❌ Não aparecia no jogo | ✅ Renderizado pelo GameUIOverlay | Adicionado render de Conects de UI |
+| **ImageObject** | ❌ Não aparecia no jogo | ✅ Renderizado pelo GameUIOverlay | Adicionado render de Conects de UI |
+| **PanelObject** | ❌ Não aparecia no jogo | ✅ Renderizado pelo GameUIOverlay | Adicionado render de Conects de UI |
+
+## Conects que AINDA NÃO FUNCIONAM
+
+| Conect | Estado | O que falta |
+|---|---|---|
+| ParticleObject | ⚠️ Estático | Partículas não se movem/morrem. Sem emission runtime. |
+| TrailObject | ⚠️ Estático | Rasto não segue objeto. Sem update no useFrame. |
+| SpawnObject | ❌ Morto | Spawning não implementado. |
+| NavigatorObject | ❌ Morto | Portal não transporta entre cenas. |
+| WeaponObject | ❌ Morto | Sistema de combate não implementado. |
+| ItemObject | ❌ Morto | Sistema de inventário não implementado. |
+| AnimationBoostObject | ❌ Morto | Propriedades nunca lidas. |
+| GameStateObject | ❌ Morto | Máquina de estados não implementada. |
+| PrefabObject | ❌ Morto | Instanciação de prefabs não implementada. |
+| RoguelikeGenerator | ❌ Morto | Geração procedural não implementada. |
+| GroupObject | ❌ Morto | Parenting não implementado. |
+| ReferenceObject | ❌ Morto | Referência entre cenas não implementada. |
+| CameraTouchZone | ❌ Morto | Zona de toque para câmara não funcional no runtime. |
+
+## FlirCode — funções que FUNCIONAM no editor
+
+| Função | Estado |
+|---|---|
+| setVar / getVar | ✅ Funciona |
+| playAnimation | ✅ Funciona |
+| playSound / playSoundByName | ✅ Funciona |
+| spawnObject | ✅ Funciona |
+| changeScene | ✅ Funciona |
+| setVisible | ✅ Funciona |
+| applyForce | ✅ Funciona |
+| jumpPlayer | ✅ Funciona |
+| showUIScreen / hideUIScreen | ✅ Funciona |
+| getUIValue / setUIValue | ✅ Funciona |
+| distanceTo | ✅ Funciona |
+| isTouching | ✅ Funciona (mas básico) |
+| move / rotate / scale | ✅ Funciona (mas hardcode 60fps) |
+
+## FlirCode — funções que NÃO FUNCIONAM no editor
+
+| Função | Estado | Nota |
+|---|---|---|
+| wait() | ❌ No-op | _waitQueue nunca definido |
+| destroy() | ⚠️ Parcial | Só esconde mesh, não remove da física |
+| collidingWith() | ⚠️ Parcial | Usa distância, não colisão real |
+| shoot / reload / equipWeapon | ❌ No-op | Sistema de combate não implementado |
+| takeDamage / getHealth | ❌ No-op | |
+| addToInventory / removeFromInventory | ❌ No-op | |
+| linkTo | ❌ No-op | |
+| setGameState / getGameState | ❌ No-op | |
+| saveProgress / loadProgress | ❌ No-op | |
+| playSequence | ❌ No-op | |
+| setLightIntensity / setLightColor | ❌ No-op | |
+| getCameraRotation / setCameraSensitivity | ❌ No-op | |
+| startNewRun / getRunSeed / endRun | ❌ No-op | |
+
+**Nota:** Algumas destas funções (shoot, inventory, saveProgress, etc.) funcionam no **jogo exportado** (gameRuntime.js) mas NÃO no preview do editor (SceneLevel3D.jsx). Há divergência entre os dois contextos.
+
+## Import/Export
+
+| Funcionalidade | Estado |
+|---|---|
+| Importar GLB | ✅ Funciona |
+| Importar GLTF | ✅ Funciona |
+| Importar OBJ | ✅ Funciona |
+| Importar FBX (via Worker) | ✅ Funciona |
+| Exportar GLB | ✅ Funciona |
+| Exportar OBJ | ✅ Funciona |
+| Guardar .flirengine | ✅ Funciona |
+| Abrir .flirengine | ✅ Funciona |
+| Auto-save IndexedDB | ✅ Funciona |
+
+## Layout mobile
+
+| Dispositivo | Otimização | Notas |
+|---|---|---|
+| Realme C33 (360px) | ⚠️ Parcial | Rail vertical + bottombar visíveis, mas algum texto pode sobrepor |
+| Samsung S8 (360px) | ⚠️ Parcial | Mesmo que C33 |
+| iPhone 7 (375px) | ⚠️ Parcial | Mesmo que C33 |
+
+O rail vertical (44px) + bottombar ocupam espaço significativo em ecrãs < 400px. Funciona mas é apertado.
+
+## O que pode ser corrigido numa próxima sessão
+
+1. **ParticleObject runtime** — animar partículas no useFrame
+2. **TrailObject runtime** — seguir objeto e atualizar buffer
+3. **NavigatorObject** — deteção de proximidade + changeScene
+4. **CameraTouchZone** — integrar no GameUIOverlay
+5. **Unificar gameContext** — editor e exportado com as mesmas funções
+6. **wait() real** — implementar scheduler
+7. **collidingWith real** — usar eventos de colisão do cannon-es
+8. **Aritmética no FlirCode** — 5+3 deve dar 8, não "53"
+
+
+---
+
 # Flir Engine — Sistema Gráfico Avançado (WebGL 2.0)
 
 Documentação dos sistemas de renderização avançada implementados. Tudo otimizado para mobile (WebGL 2.0), com honestidade sobre limitações e custos de performance.

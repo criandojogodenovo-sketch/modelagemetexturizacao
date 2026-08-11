@@ -19,10 +19,16 @@ export default function GameUIOverlay() {
   const visibleScreens = uiScreens.filter((sc) => sc.visible !== false)
 
   const activeScene = scenes.find((s) => s.id === activeSceneId)
-  // Procurar JoystickObjects na cena ativa
-  const joysticks = (activeScene?.conects || []).filter((c) => c.type === 'JoystickObject')
+  // Procurar TODOS os Conects de UI na cena ativa
+  const uiConects = (activeScene?.conects || []).filter((c) =>
+    c.type === 'ButtonObject' || c.type === 'JoystickObject' ||
+    c.type === 'TextObject' || c.type === 'ImageObject' || c.type === 'PanelObject' ||
+    c.type === 'CameraTouchZone'
+  )
+  const joysticks = uiConects.filter((c) => c.type === 'JoystickObject')
+  const otherUiConects = uiConects.filter((c) => c.type !== 'JoystickObject')
 
-  if (visibleScreens.length === 0 && joysticks.length === 0) return null
+  if (visibleScreens.length === 0 && uiConects.length === 0) return null
 
   const handleEvent = (element, eventType, value) => {
     debugLog(`UI Event: ${element.name}.${eventType}`, 'log', 'UI')
@@ -193,6 +199,81 @@ export default function GameUIOverlay() {
           onEnd={handleJoystickEnd}
         />
       ))}
+
+      {/* Conects de UI da cena ativa (ButtonObject, TextObject, etc.) */}
+      {otherUiConects.map((conect) => {
+        const pos = conect.position || [10, 10]
+        const size = conect.size || [120, 40]
+        const baseStyle = {
+          position: 'absolute',
+          left: `${pos[0]}%`,
+          top: `${pos[1]}%`,
+          width: size[0],
+          height: size[1],
+          transform: 'translate(-50%, -50%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: conect.color || 'transparent',
+          color: conect.textColor || '#e6edf3',
+          fontSize: (conect.fontSize || 14) + 'px',
+          borderRadius: 4,
+          padding: 0,
+          opacity: conect.opacity ?? 1,
+          pointerEvents: 'auto',
+          userSelect: 'none',
+          fontFamily: '-apple-system, sans-serif',
+          boxSizing: 'border-box',
+          zIndex: 91,
+        }
+
+        switch (conect.type) {
+          case 'ButtonObject':
+            return (
+              <button
+                key={conect.instanceId}
+                style={{ ...baseStyle, cursor: 'pointer', border: 'none', borderRadius: 6 }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  handleEvent(conect, conect.eventName || 'onClick')
+                }}
+                onTouchStart={(e) => { e.stopPropagation() }}
+              >
+                {conect.label || 'Botão'}
+              </button>
+            )
+          case 'TextObject':
+            return (
+              <div
+                key={conect.instanceId}
+                style={{
+                  ...baseStyle,
+                  textAlign: conect.align || 'center',
+                  background: 'transparent',
+                  width: 'auto',
+                  height: 'auto',
+                  padding: '4px 8px',
+                  textShadow: '0 1px 3px rgba(0,0,0,0.8)',
+                }}
+              >
+                {conect.text || conect.label || ''}
+              </div>
+            )
+          case 'ImageObject':
+            return (
+              <div key={conect.instanceId} style={{ ...baseStyle, overflow: 'hidden' }}>
+                {conect.url ? (
+                  <img src={conect.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                ) : null}
+              </div>
+            )
+          case 'PanelObject':
+            return <div key={conect.instanceId} style={baseStyle} />
+          default:
+            return null
+        }
+      })}
     </div>
   )
 }

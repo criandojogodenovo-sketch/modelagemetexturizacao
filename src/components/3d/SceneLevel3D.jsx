@@ -76,6 +76,24 @@ function SceneBackgroundSolid({ background }) {
   return null
 }
 
+// ===== FogApplier — aplica FogObject à cena 3D =====
+function FogApplier({ conects }) {
+  const { scene } = useThree()
+  const fogConect = (conects || []).find(c => c.type === 'FogObject')
+  useEffect(() => {
+    if (!fogConect) {
+      scene.fog = null
+      return
+    }
+    if (fogConect.fogType === 'exponential') {
+      scene.fog = new THREE.FogExp2(fogConect.color || '#a0a0a0', fogConect.density || 0.02)
+    } else {
+      scene.fog = new THREE.Fog(fogConect.color || '#a0a0a0', fogConect.near || 5, fogConect.far || 50)
+    }
+  }, [fogConect?.fogType, fogConect?.color, fogConect?.near, fogConect?.far, fogConect?.density, scene])
+  return null
+}
+
 // ===== Componente que gere o modo jogo dentro do canvas =====
 function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }) {
   const { camera } = useThree()
@@ -395,13 +413,17 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       }
     }
 
-    // SkyObject / FogObject
+    // SkyObject — aplicar fundo do céu à cena
     const skyConect = (setupScene.conects || []).find((c) => c.type === 'SkyObject')
     if (skyConect) {
-      // Aplicado via SceneBackgroundSolid se mudar o background
+      // O SkyMesh no ConectRenderer trata do visual (esfera com shader)
+      // Aqui garantimos que o background da cena não tapa o sky
+      skyRef.current = skyConect
     }
+
+    // FogObject — aplicar névoa à cena (via FogApplier que já existe no render)
     const fogConect = (setupScene.conects || []).find((c) => c.type === 'FogObject')
-    // Fog aplicado no useFrame
+    // FogApplier no render trata disto — basta existir na cena
 
     // Joystick touch
     const onTouchStart = (e) => { if (e.touches.length === 1) { joystickRef.current.active = true } }
@@ -648,6 +670,7 @@ export default function SceneLevel3D() {
       >
         <Suspense fallback={null}>
           <SceneBackgroundSolid background={background} />
+          <FogApplier conects={activeScene?.conects} />
 
           <ambientLight intensity={lights.ambient.intensity} color={lights.ambient.color} />
           <directionalLight

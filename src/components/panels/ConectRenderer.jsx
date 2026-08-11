@@ -14,7 +14,8 @@
  *  - CheckpointObject: renderiza uma bandeira/marca
  *  - Outros (UI, Sound, Sky, Fog, View, etc.): sem visual 3D (só lógica)
  */
-import { forwardRef, useMemo, useEffect } from 'react'
+import { forwardRef, useMemo, useEffect, useRef } from 'react'
+import { useThree, useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useStore } from '../../store/useStore'
 import { findConectDefinition } from '../../utils/conects/taxonomy'
@@ -61,6 +62,31 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
   // ReflectObject: sonda de reflexo (renderiza uma esfera espelhada)
   if (conect.type === 'ReflectObject') {
     return <ReflectMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // SkyObject: renderiza esfera de céu com shader procedural
+  if (conect.type === 'SkyObject') {
+    return <SkyMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // SunObject: luz direcional (sol)
+  if (conect.type === 'SunObject') {
+    return <SunLightMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // PointObject: luz pontual
+  if (conect.type === 'PointObject') {
+    return <PointLightMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // SpotObject: luz spot
+  if (conect.type === 'SpotObject') {
+    return <SpotLightMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // AmbientObject: luz ambiente (sem gizmo, só aplica à cena)
+  if (conect.type === 'AmbientObject') {
+    return <AmbientLightMesh conect={conect} setMeshRef={setMeshRef} />
   }
 
   if (!def?.hasVisual && conect.type !== 'VisualObject') {
@@ -254,17 +280,46 @@ function TerrainMesh({ conect, setMeshRef }) {
 
 // ===== WaterObject =====
 function WaterMesh({ conect, setMeshRef }) {
+  const meshRef = useRef()
+  const time = useRef(0)
+
+  const geometry = useMemo(() => {
+    const [w, h] = conect.size || [20, 20]
+    const g = new THREE.PlaneGeometry(w, h, 32, 32)
+    g.rotateX(-Math.PI / 2)
+    return g
+  }, [conect.size])
+
+  // Animar ondas no useFrame
+  useFrame((_, delta) => {
+    if (!meshRef.current) return
+    time.current += delta * (conect.waveSpeed || 0.5)
+    const pos = meshRef.current.geometry.attributes.position
+    const waveHeight = conect.waveHeight || 0.1
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i)
+      const z = pos.getZ(i)
+      const y = Math.sin(x * 0.5 + time.current) * waveHeight
+        + Math.cos(z * 0.5 + time.current * 0.7) * waveHeight * 0.5
+      pos.setY(i, y)
+    }
+    pos.needsUpdate = true
+    meshRef.current.geometry.computeVertexNormals()
+  })
+
   return (
     <mesh
-      ref={setMeshRef}
+      ref={(node) => {
+        meshRef.current = node
+        if (typeof setMeshRef === 'function') setMeshRef(node)
+      }}
       position={conect.position}
-      rotation={[-Math.PI / 2, 0, 0]}
+      geometry={geometry}
     >
-      <planeGeometry args={conect.size || [20, 20]} />
       <meshStandardMaterial
-        color={conect.color}
+        color={conect.color || '#2f81f7'}
         transparent
-        opacity={conect.opacity}
+        opacity={conect.opacity ?? 0.6}
         roughness={0.1}
         metalness={0.3}
       />
@@ -444,4 +499,118 @@ function ReflectMesh({ conect, setMeshRef }) {
       />
     </mesh>
   )
+}
+
+// ===== SkyObject — esfera de céu com shader procedural =====
+function SkyMesh({ conect, setMeshRef }) {
+  const { scene } = useThree()
+
+  // Aplicar background à cena
+  useEffect(() => {
+    if (!scene) return
+    if (conect.skyType === 'procedural' || conect.skyType === 'gradient') {
+      // Gradiente via canvas
+      const canvas = document.createElement('canvas')
+      canvas.width = 2; canvas.height = 256
+      const ctx = canvas.getContext('2d')
+      const grad = ctx.createLinearGradient(0, 0, 0, 256)
+      grad.addColorStop(0, conect.gradientTop || '#4a90d9')
+      grad.addColorStop(1, conect.gradientBottom || '#b0d4f1')
+      ctx.fillStyle = grad
+      ctx.fillRect(0, 0, 2, 256)
+      const tex = new THREE.CanvasTexture(canvas)
+      tex.colorSpace = THREE.SRGBColorSpace
+      scene.background = tex
+      return () => { tex.dispose() }
+    } else {
+      scene.background = new THREE.Color(conect.color || '#87CEEB')
+    }
+  }, [scene, conect.skyType, conect.color, conect.gradientTop, conect.gradientBottom])
+
+  // Esfera grande com material de céu (BackSide)
+  return (
+    <mesh ref={setMeshRef} scale={[100, 100, 100]}>
+      <sphereGeometry args={[1, 32, 16]} />
+      <meshBasicMaterial
+        color={conect.color || '#87CEEB'}
+        side={THREE.BackSide}
+        fog={false}
+      />
+    </mesh>
+  )
+}
+
+// ===== SunObject — luz direcional =====
+function SunLightMesh({ conect, setMeshRef }) {
+  return (
+    <group ref={setMeshRef} position={conect.position}>
+      <directionalLight
+        color={conect.color || '#ffffff'}
+        intensity={conect.intensity ?? 1.5}
+        castShadow={conect.castShadow !== false}
+      />
+      {/* Gizmo esférico para visualizar no editor */}
+      <mesh>
+        <sphereGeometry args={[0.3, 16, 16]} />
+        <meshBasicMaterial color={conect.color || '#ffff00'} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== PointObject — luz pontual =====
+function PointLightMesh({ conect, setMeshRef }) {
+  return (
+    <group ref={setMeshRef} position={conect.position}>
+      <pointLight
+        color={conect.color || '#ffffff'}
+        intensity={conect.intensity ?? 1.0}
+        distance={conect.distance || 20}
+        decay={2}
+      />
+      <mesh>
+        <sphereGeometry args={[0.15, 12, 12]} />
+        <meshBasicMaterial color={conect.color || '#ffffff'} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== SpotObject — luz spot =====
+function SpotLightMesh({ conect, setMeshRef }) {
+  return (
+    <group ref={setMeshRef} position={conect.position}>
+      <spotLight
+        color={conect.color || '#ffffff'}
+        intensity={conect.intensity ?? 2.0}
+        distance={conect.distance || 30}
+        angle={conect.angle ? (conect.angle * Math.PI / 180) : Math.PI / 6}
+        penumbra={conect.penumbra ?? 0.3}
+        castShadow={conect.castShadow !== false}
+      />
+      <mesh>
+        <coneGeometry args={[0.2, 0.4, 12]} />
+        <meshBasicMaterial color={conect.color || '#ffffff'} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== AmbientObject — luz ambiente =====
+function AmbientLightMesh({ conect, setMeshRef }) {
+  const { scene } = useThree()
+
+  useEffect(() => {
+    if (!scene) return
+    // Adicionar luz ambiente à cena
+    const ambient = new THREE.AmbientLight(
+      conect.color || '#ffffff',
+      conect.intensity ?? 0.5
+    )
+    scene.add(ambient)
+    return () => { scene.remove(ambient) }
+  }, [scene, conect.color, conect.intensity])
+
+  // Sem gizmo visível
+  return null
 }
