@@ -40,6 +40,7 @@ import MultiplayerPanel from './components/panels/MultiplayerPanel'
 import PostProcessingPanel from './components/panels/PostProcessingPanel'
 import PerformanceStatsOverlay from './components/ui/PerformanceStatsOverlay'
 import MainMenu from './components/ui/MainMenu'
+import VerticalRail from './components/ui/VerticalRail'
 import HomePage from './components/home/HomePage'
 import Toasts from './components/ui/Toasts'
 import LoadingOverlay from './components/ui/LoadingOverlay'
@@ -150,6 +151,7 @@ export default function App() {
     <div className={`app-shell ${scenePreviewOpen ? 'game-mode' : ''}`}>
       {homeVisible && <HomePage onOpenProject={hideHome} />}
       {!scenePreviewOpen && <TopBar />}
+      {!scenePreviewOpen && appMode !== 'flirscript' && appMode !== 'ui' && <VerticalRail />}
       <OfflineIndicator />
 
       {appMode === 'flirscript' ? (
