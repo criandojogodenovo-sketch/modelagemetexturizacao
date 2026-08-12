@@ -751,8 +751,10 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     const gravity = setupScene.physics?.gravity || [0, -9.82, 0]
     physicsRef.current = createPhysicsSystem({ gravity: gravity[1] })
 
-    // Registar conects com física
-    setTimeout(() => {
+    // Registar conects com física — usar queueMicrotask em vez de setTimeout(50)
+    // para evitar race condition onde a câmara ficava presa dentro do terreno
+    // durante 50ms antes da física inicializar
+    queueMicrotask(() => {
       if (!physicsRef.current) return
       for (const conect of setupScene.conects || []) {
         const mesh = conectMeshRefs.current.get(conect.instanceId)
@@ -763,7 +765,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           physicsRef.current.addJoint(conect)
         }
       }
-    }, 50)
+    })
 
     // Eventos de física
     physicsRef.current.on('onCollision', ({ instanceId, otherInstanceId }) => {

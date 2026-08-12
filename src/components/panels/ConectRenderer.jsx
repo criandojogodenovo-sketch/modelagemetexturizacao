@@ -182,6 +182,25 @@ export default ConectRenderer
 
 // ===== Placeholder para conects com física =====
 const PlaceholderMesh = forwardRef(function PlaceholderMesh({ conect }, ref) {
+  // Em modo jogo com ViewObject FPS, esconder o PersonalObject para não tapar a câmara
+  // (a câmara está dentro/colada ao capsule em first-person)
+  const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
+  const scenes = useStore((s) => s.scenes)
+  const activeSceneId = useStore((s) => s.activeSceneId)
+  const shouldHideInFPS = useMemo(() => {
+    if (!scenePreviewOpen || conect.type !== 'PersonalObject') return false
+    const activeScene = scenes.find((s) => s.id === activeSceneId)
+    if (!activeScene) return false
+    // Procurar ViewObject com followMode='first' que segue este jogador
+    const viewConects = (activeScene.conects || []).filter((c) => c.type === 'ViewObject')
+    for (const v of viewConects) {
+      if (v.followMode === 'first' && (v.followTarget === conect.instanceId || v.cameraRole === 'player')) {
+        return true
+      }
+    }
+    return false
+  }, [scenePreviewOpen, conect.type, conect.instanceId, scenes, activeSceneId])
+
   const color = conect.type === 'PersonalObject' ? '#3fb950'
                 : conect.type === 'StaticObject' ? '#6e7681'
                 : conect.type === 'StopObject' ? '#d29922'
@@ -195,7 +214,7 @@ const PlaceholderMesh = forwardRef(function PlaceholderMesh({ conect }, ref) {
       position={conect.position}
       rotation={conect.rotation}
       scale={conect.scale}
-      visible={conect.visible !== false}
+      visible={conect.visible !== false && !shouldHideInFPS}
       castShadow
       receiveShadow
       userData={{ conectInstanceId: conect.instanceId }}
@@ -322,6 +341,7 @@ function TerrainMesh({ conect, setMeshRef }) {
         vertexColors={hasVertexColors}
         roughness={0.9}
         metalness={0}
+        side={THREE.DoubleSide}
       />
     </mesh>
   )
@@ -712,21 +732,27 @@ function SkyMesh({ conect, setMeshRef }) {
   // Material Pro para procedural (Rayleigh + Mie scattering)
   const proMaterial = useMemo(() => {
     if (skyType !== 'procedural') return null
-    // Calcular direção do sol a partir de elevation/azimuth
-    const sunDir = calculateSunDirection(
-      conect.sunElevation || 25,   // graus
-      172,                          // dia do ano (verão)
-      0                             // latitude equador
-    )
+    // Calcular direção do sol: priorizar sunPosition se definido (mais intuitivo)
+    // Senão, usar sunElevation (graus 0-90) convertido para hourOfDay
+    let sunDir
+    if (conect.sunPosition && Array.isArray(conect.sunPosition) && conect.sunPosition.length === 3) {
+      sunDir = new THREE.Vector3(conect.sunPosition[0], conect.sunPosition[1], conect.sunPosition[2]).normalize()
+    } else {
+      // sunElevation em graus (0=horizonte, 90=zénite) → converter para hourOfDay
+      // 0° = 6h/18h, 90° = 12h
+      const elevation = conect.sunElevation ?? 45
+      const hourOfDay = 12 - (90 - elevation) / 90 * 6  // mapeia 0°→6h, 90°→12h
+      sunDir = calculateSunDirection(hourOfDay, 172, 0)
+    }
     return createSkyProMaterial({
-      sunDirection: sunDir.toArray(),
+      sunDirection: [sunDir.x, sunDir.y, sunDir.z],
       sunIntensity: 15,
       rayleigh: conect.rayleigh ?? 2.5,
       mie: 0.5,
       turbidity: conect.turbidity ?? 10,
       starsEnabled: conect.starsEnabled || false,
     })
-  }, [skyType, conect.sunElevation, conect.rayleigh, conect.turbidity, conect.starsEnabled])
+  }, [skyType, conect.sunPosition, conect.sunElevation, conect.rayleigh, conect.turbidity, conect.starsEnabled])
 
   // Animar uTime do sky shader
   useFrame((_, delta) => {
@@ -739,8 +765,9 @@ function SkyMesh({ conect, setMeshRef }) {
   useEffect(() => {
     if (!scene) return
     if (skyType === 'procedural' && proMaterial) {
-      // Procedural usa esfera com shader — limpar background para não tapar
-      scene.background = null
+      // Procedural usa esfera com shader — manter fallback azul céu caso a SkyMesh falhe
+      // (anteriormente era null, o que causava ecrã PRETO se a esfera não renderizasse)
+      scene.background = new THREE.Color(bottomColor || '#87ceeb')
     } else if (skyType === 'gradient') {
       // Gradiente via canvas
       const canvas = document.createElement('canvas')
@@ -979,8 +1006,12 @@ function NavigatorMesh({ conect, setMeshRef }) {
 
 // ===== WeaponObject — arma visual (caixa + cano) =====
 function WeaponMesh({ conect, setMeshRef }) {
+  // Em modo jogo, esconder a arma visual (não está parented à câmara —
+  // ficaria flutuante no mundo a tapar a vista FPS).
+  // No editor, mostra para o utilizador poder posicionar.
+  const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
   return (
-    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale} visible={!scenePreviewOpen}>
       {/* Corpo da arma */}
       <mesh castShadow>
         <boxGeometry args={[0.15, 0.2, 0.6]} />

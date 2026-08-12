@@ -31,6 +31,17 @@ import { generateTerrainHeightmap } from '../terrain/terrainNoise.js'
 let _idCounter = 1
 const uid = () => `obj_${Date.now()}_${_idCounter++}`
 
+// Helper: amostrar altura do heightmap numa posição (x,z) do mundo
+function sampleTerrainHeight(hm, seg, worldX, worldZ, terrainWidth, terrainDepth, heightScale) {
+  const nx = (worldX / terrainWidth + 0.5) * seg
+  const nz = (worldZ / terrainDepth + 0.5) * seg
+  const ix = Math.max(0, Math.min(seg, Math.round(nx)))
+  const iz = Math.max(0, Math.min(seg, Math.round(nz)))
+  const idx = iz * (seg + 1) + ix
+  const h = hm[idx] || 0
+  return h * heightScale
+}
+
 // === Geração de terrenos ===
 const SEG = 64
 
@@ -226,9 +237,10 @@ for (let i = 0; i < wallSpecs.length; i++) {
 
 // Jogador
 const playerId = uid()
+const player1Y = sampleTerrainHeight(villageTerrain, SEG, 0, 0, 80, 80, 5) + 2
 scene1Conects.push({
   instanceId: playerId, type: 'PersonalObject', name: 'Jogador',
-  position: [0, 2, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+  position: [0, player1Y, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
   health: 100, maxHealth: 100,
   mass: 1, moveSpeed: 6, jumpForce: 9, canJump: true,
   fixedRotation: true, isPlayer: true,
@@ -471,9 +483,10 @@ for (let i = 0; i < 8; i++) {
 
 // Jogador (mesma config)
 const player2Id = uid()
+const player2Y = sampleTerrainHeight(forestTerrain, SEG, 0, 0, 80, 80, 8) + 3  // +3m por terreno montanhoso
 scene2Conects.push({
   instanceId: player2Id, type: 'PersonalObject', name: 'JogadorF',
-  position: [0, 5, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+  position: [0, player2Y, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
   health: 100, maxHealth: 100, mass: 1, moveSpeed: 6, jumpForce: 9, canJump: true,
   fixedRotation: true, isPlayer: true,
 })

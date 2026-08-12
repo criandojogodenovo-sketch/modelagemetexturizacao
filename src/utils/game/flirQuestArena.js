@@ -52,6 +52,20 @@ const splatmap = autoSplat(heightmap, SEG, 4)
 let _idCounter = 1
 const uid = () => `obj_${Date.now()}_${_idCounter++}`
 
+// Helper: amostrar altura do heightmap numa posição (x,z) do mundo
+// Garante que o jogador faz spawn ACIMA do terreno (não dentro dele)
+function sampleTerrainHeight(hm, seg, worldX, worldZ, terrainWidth, terrainDepth, heightScale) {
+  // Converter coords mundo → índices do heightmap
+  // Terreno é centrado na origem, vai de -width/2 a +width/2
+  const nx = (worldX / terrainWidth + 0.5) * seg
+  const nz = (worldZ / terrainDepth + 0.5) * seg
+  const ix = Math.max(0, Math.min(seg, Math.round(nx)))
+  const iz = Math.max(0, Math.min(seg, Math.round(nz)))
+  const idx = iz * (seg + 1) + ix
+  const h = hm[idx] || 0  // valor em [-1, 1]
+  return h * heightScale  // altura em mundo
+}
+
 // ===== Catálogo de objetos (modelos 3D do jogo) =====
 const objects = [
   {
@@ -187,13 +201,14 @@ for (let i = 0; i < wallSpecs.length; i++) {
   })
 }
 
-// Jogador (PersonalObject) — no centro
+// Jogador (PersonalObject) — no centro, posicionado ACIMA do terreno
 const playerId = uid()
+const playerY = sampleTerrainHeight(heightmap, SEG, 0, 0, 60, 60, 5) + 2  // +2m acima do terreno
 conects.push({
   instanceId: playerId,
   type: 'PersonalObject',
   name: 'Jogador',
-  position: [0, 2, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+  position: [0, playerY, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
   // CRITICAL: mass > 0 required or cannon-es makes the body STATIC (immovable).
   // moveSpeed is the property name expected by GameMode (taxonomy standard).
   // fixedRotation prevents the capsule from tipping over.

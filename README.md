@@ -141,6 +141,51 @@ Cada Conect é um objeto de jogo com semântica própria. Todos têm renderer de
 
 ---
 
+## 🔧 Correções recentes (Agosto 2026 — Sessão 5)
+
+### BUG CRÍTICO: Ecrã PRETO no modo jogo — RESOLVIDO
+
+O utilizador reportou que ao executar o jogo (FlirQuest Arena/Saga), o ecrã ficava **preto**. Após auditoria profunda, encontrei **3 causas principais** e **4 agravantes**:
+
+#### Causa #1: Sky shader bug (sol abaixo do horizonte) — CORRIGIDO
+- **Problema**: `ConectRenderer.jsx:716` passava `sunElevation` (graus 0-90) como `hourOfDay` (0-24) à função `calculateSunDirection()`. Com `sunElevation=25` → `hourOfDay=25` (>24, inválido) → sol calculado a **-62° abaixo do horizonte** → `nightFactor=1` → céu RGB ≈ (0.03, 0.16) — quase preto.
+- **Solução**: Agora prioriza `conect.sunPosition` se definido (mais intuitivo). Senão converte `sunElevation` (graus) para `hourOfDay` corretamente: `0°→6h, 90°→12h`.
+
+#### Causa #2: `scene.background = null` sem fallback — CORRIGIDO
+- **Problema**: `ConectRenderer.jsx:743` fazia `scene.background = null` quando `skyType === 'procedural'`. Se a SkyMesh falhasse (frustum cull, shader error, etc.), o ecrã ficava **PRETO PURO**.
+- **Solução**: Agora define `scene.background = new THREE.Color(bottomColor || '#87ceeb')` como fallback. A SkyMesh renderiza por cima do background, mas se falhar, vê-se azul céu em vez de preto.
+
+#### Causa #3: Jogador spawn DENTRO do terreno — CORRIGIDO
+- **Problema**: Demos posicionavam o jogador em `y=2` fixo. Com `heightScale=6`, as alturas do terreno variam em [-6, +6]. Se a altura do heightmap em (0,0) fosse ≥ 2, o jogador (e a câmara FPS) ficavam **dentro do terreno**. Como o terreno usava `FrontSide` culling (default), a câmara via "através" dele — só via o céu escuro.
+- **Solução**: Adicionei helper `sampleTerrainHeight()` que amostra o heightmap na posição de spawn e posiciona o jogador **acima** do terreno (+2m de margem). Aplicado em ambos os demos:
+  - FlirQuest Arena: jogador agora em y ≈ 1.87 (antes: 2 fixo)
+  - FlirQuest Saga Vila: jogador agora em y ≈ 2.56 (antes: 2 fixo)
+  - FlirQuest Saga Floresta: jogador agora em y ≈ 4.74 (antes: 5 fixo)
+
+#### Agravante #4: Race condition 50ms — CORRIGIDO
+- **Problema**: `SceneLevel3D.jsx:755` usava `setTimeout(..., 50)` antes de registar os corpos físicos. Durante esses 50ms (~3 frames), a câmara ficava presa na posição inicial — potencialmente dentro do terreno.
+- **Solução**: Substituído por `queueMicrotask()` — executa no próximo microtask (praticamente imediato).
+
+#### Agravante #5: Terreno com FrontSide culling — CORRIGIDO
+- **Problema**: `ConectRenderer.jsx:247` (TerrainMesh) não definia `side`. Default = `FrontSide`. Se a câmara ficava dentro do terreno, via através dele (faces traseiras culled).
+- **Solução**: Adicionado `side={THREE.DoubleSide}` ao material do terreno. Agora mesmo dentro do terreno vê-se a superfície (mitigação, não correção total — a correção real é o spawn acima).
+
+#### Agravante #6: PersonalObject visível em FPS — CORRIGIDO
+- **Problema**: `PlaceholderMesh` não escondia o capsule do jogador em first-person. Embora a câmara esteja 0.7m acima do topo do capsule (fora do FOV), é má prática FPS.
+- **Solução**: `PlaceholderMesh` agora lê `scenePreviewOpen` + `scenes` do store e verifica se há `ViewObject` com `followMode='first'` a seguir o jogador. Se sim, esconde o capsule.
+
+#### Agravante #7: WeaponObject em coords mundo — CORRIGIDO
+- **Problema**: `WeaponObject` estava em `position: [0.3, 1.6, -0.5]` (coords mundo, não parented à câmara). Em FPS, ficava uma box flutuante no mundo a tapar a vista.
+- **Solução**: `WeaponMesh` agora tem `visible={!scenePreviewOpen}` — só visível no editor para posicionamento. No modo jogo, a arma não aparece (ainda não está parented à câmara — ver roadmap).
+
+#### Verificação matemática (porque o capsule NÃO era a causa)
+- Capsule: `args=[0.4, 1, 8, 16]` → altura total = 1 + 2×0.4 = 1.8 → y ∈ [1.1, 2.9] com jogador em y=2
+- Câmara FPS: `y = player.y + eyeHeight = 2 + 1.6 = 3.6`
+- **3.6 > 2.9** → câmara está 0.7m ACIMA do topo do capsule, fora do FOV (90° abaixo vs FOV 80°)
+- Portanto o capsule NÃO tapa a câmara. A causa do preto era o céu escuro + background null + câmara dentro do terreno.
+
+---
+
 ## 🔧 Correções recentes (Agosto 2026 — Sessão 4)
 
 ### Joystick mobile agora funciona
