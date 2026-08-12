@@ -1595,7 +1595,7 @@ export const useStore = create(
             lights: { ...initialScene.lights, ...(scene.lights || {}) },
             scenes: data.scenes || [],
             activeSceneId: data.activeSceneId || (data.scenes && data.scenes[0]?.id) || null,
-            appMode: data.appMode || 'modeling',
+            appMode: data.appMode || (data.scenes && data.scenes.length > 0 ? 'scene' : 'modeling'),
             // P1: limpar state que não é exportado mas deve ser resetado
             selectedConectId: null,
             flirScriptTarget: null,

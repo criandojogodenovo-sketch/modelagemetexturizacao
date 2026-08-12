@@ -92,17 +92,51 @@ export default function MarketplacePanel({ onClose }) {
   const [sortBy, setSortBy] = useState('relevance')
   const [user, setUser] = useState(marketplaceAPI.getCurrentUser())
   const [publishOpen, setPublishOpen] = useState(false)
+  const [backendOnline, setBackendOnline] = useState(null) // null=unknown, true/false
+  const [backendItems, setBackendItems] = useState([])
   const toast = useStore((s) => s.toast)
   const exportProjectJSON = useStore((s) => s.exportProjectJSON)
   const projectName = useStore((s) => s.projectName) || 'Meu Jogo'
 
-  // Carregar itens — combina demo locais + tentativa de backend
+  // Verificar se o backend está online (ping simples)
+  useEffect(() => {
+    const checkBackend = async () => {
+      try {
+        const res = await fetch('/api/marketplace/assets?limit=1', { signal: AbortSignal.timeout(5000) })
+        if (res.ok) {
+          const data = await res.json()
+          setBackendOnline(true)
+          if (data.items && data.items.length > 0) {
+            setBackendItems(data.items)
+          }
+        } else {
+          setBackendOnline(false)
+        }
+      } catch (err) {
+        setBackendOnline(false)
+      }
+    }
+    checkBackend()
+  }, [])
+
+  // Carregar itens — combina backend (se online) + demo locais
   const allItems = useMemo(() => {
-    if (activeTab === 'assets') return DEMO_ASSETS
-    if (activeTab === 'games') return DEMO_GAMES
-    if (activeTab === 'templates') return DEMO_TEMPLATES
-    return []
-  }, [activeTab])
+    const demoItems = activeTab === 'assets' ? DEMO_ASSETS
+      : activeTab === 'games' ? DEMO_GAMES
+      : activeTab === 'templates' ? DEMO_TEMPLATES
+      : []
+    // Se o backend está online e tem items, usar esses (prioridade)
+    if (backendOnline && backendItems.length > 0) {
+      const filtered = backendItems.filter(i => {
+        if (activeTab === 'assets') return i.type || i.category
+        if (activeTab === 'games') return i.title || i.project_data
+        if (activeTab === 'templates') return i.category
+        return true
+      })
+      return [...filtered, ...demoItems]  // backend primeiro, demo como fallback
+    }
+    return demoItems
+  }, [activeTab, backendOnline, backendItems])
 
   // Filtrar por categoria + pesquisa
   const filteredItems = useMemo(() => {
@@ -321,9 +355,19 @@ export default function MarketplacePanel({ onClose }) {
             <AccountTab user={user} onLogin={handleLogin} onRegister={handleRegister} onLogout={handleLogout} />
           ) : (
             <>
-              {/* Aviso de modo offline */}
-              <div style={{ padding: 6, marginBottom: 6, background: 'var(--bg-app)', borderRadius: 4, fontSize: 10, color: 'var(--text-muted)' }}>
-                ℹ️ Modo demo — backend Neon não deployado. Os items são demonstrações locais.
+              {/* Indicador de estado do backend */}
+              <div style={{
+                padding: 6, marginBottom: 6, borderRadius: 4, fontSize: 10,
+                background: backendOnline === null ? 'var(--bg-app)'
+                  : backendOnline ? 'rgba(16,185,129,0.15)'
+                  : 'rgba(245,158,11,0.15)',
+                color: backendOnline === null ? 'var(--text-muted)'
+                  : backendOnline ? '#10b981'
+                  : '#f59e0b',
+              }}>
+                {backendOnline === null && '⏳ A verificar ligação ao backend...'}
+                {backendOnline === true && '✓ Backend online — itens reais do Neon PostgreSQL'}
+                {backendOnline === false && '⚠️ Backend offline — a mostrar itens demo locais. (Verifica NEON_DATABASE_URL na Vercel)'}
               </div>
 
               {filteredItems.length === 0 ? (

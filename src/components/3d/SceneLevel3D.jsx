@@ -182,6 +182,81 @@ function TerrainSculptBridge({ activeScene, conectMeshRefs, isGameMode, onDragSt
   )
 }
 
+// ===== ViewModelFPS — renderiza a arma como filho da câmara (first-person viewmodel) =====
+function ViewModelFPS({ activeScene, isGameMode }) {
+  const { camera } = useThree()
+  const weaponGroupRef = useRef()
+
+  // Procurar WeaponObject na cena ativa
+  const weaponConect = useMemo(() => {
+    if (!activeScene?.conects) return null
+    return (activeScene.conects || []).find(c => c.type === 'WeaponObject') || null
+  }, [activeScene])
+
+  // Procurar ViewObject para verificar followMode
+  const viewConect = useMemo(() => {
+    if (!activeScene?.conects) return null
+    const views = (activeScene.conects || []).filter(c => c.type === 'ViewObject')
+    return views.find(c => c.cameraRole === 'player') || views[0] || null
+  }, [activeScene])
+
+  // Só mostrar em modo jogo, com arma, e followMode first ou third
+  const shouldShow = isGameMode && weaponConect && viewConect &&
+    (viewConect.followMode === 'first' || viewConect.followMode === 'third')
+
+  // Parentar à câmara quando ativo
+  useEffect(() => {
+    if (!shouldShow || !weaponGroupRef.current) return
+    // Adicionar o grupo da arma como filho da câmara
+    camera.add(weaponGroupRef.current)
+    return () => {
+      // Remover ao desmontar
+      if (weaponGroupRef.current && weaponGroupRef.current.parent === camera) {
+        camera.remove(weaponGroupRef.current)
+      }
+    }
+  }, [shouldShow, camera])
+
+  if (!shouldShow) return null
+
+  // Posição relativa à câmara (view space)
+  // Em first-person: arma à direita, em baixo, à frente
+  const isFirst = viewConect.followMode === 'first'
+  const weaponPos = isFirst
+    ? [weaponConect.position?.[0] || 0.3, -(0.2), -(0.5)]  // direita, baixo, frente
+    : [0.5, -0.3, -0.8]  // third-person: mais afastada
+  const weaponScale = isFirst ? [0.5, 0.5, 0.5] : [0.6, 0.6, 0.6]
+
+  return (
+    <group ref={weaponGroupRef} position={weaponPos} scale={weaponScale}>
+      {/* Corpo da arma */}
+      <mesh>
+        <boxGeometry args={[0.15, 0.2, 0.6]} />
+        <meshStandardMaterial color="#1f2937" roughness={0.6} metalness={0.4} />
+      </mesh>
+      {/* Cano */}
+      <mesh position={[0, 0.05, -0.4]}>
+        <cylinderGeometry args={[0.04, 0.04, 0.4, 8]} rotation={[Math.PI / 2, 0, 0]} />
+        <meshStandardMaterial color="#374151" roughness={0.4} metalness={0.7} />
+      </mesh>
+      {/* Mira */}
+      <mesh position={[0, 0.18, -0.2]}>
+        <boxGeometry args={[0.02, 0.06, 0.02]} />
+        <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={0.8} />
+      </mesh>
+      {/* Mãos (simplificadas) */}
+      <mesh position={[0, -0.15, 0.15]}>
+        <boxGeometry args={[0.08, 0.1, 0.15]} />
+        <meshStandardMaterial color="#9ca3af" roughness={0.8} />
+      </mesh>
+      <mesh position={[0, -0.12, -0.2]}>
+        <boxGeometry args={[0.08, 0.08, 0.12]} />
+        <meshStandardMaterial color="#9ca3af" roughness={0.8} />
+      </mesh>
+    </group>
+  )
+}
+
 // ===== Componente que gere o modo jogo dentro do canvas =====
 function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }) {
   const { camera } = useThree()
@@ -1471,6 +1546,9 @@ export default function SceneLevel3D() {
 
           {/* Hardware Instancing renderer — busca sistemas de window._flirInstancingSystems */}
           <InstancingRenderer />
+
+          {/* ViewModel FPS — arma parented à câmara em first/third-person */}
+          <ViewModelFPS activeScene={activeScene} isGameMode={isGameMode} />
 
           {/* GameMode — activado quando scenePreviewOpen */}
           <GameMode activeScene={activeScene} objects={objects} meshRefs={meshRefs} conectMeshRefs={conectMeshRefs} isGameMode={isGameMode} />

@@ -141,6 +141,83 @@ Cada Conect é um objeto de jogo com semântica própria. Todos têm renderer de
 
 ---
 
+## 🔧 Correções recentes (Agosto 2026 — Sessão 6)
+
+### BUG CRÍTICO: Demos carregavam em modo errado (ecrã "preto") — RESOLVIDO
+
+O utilizador reportou que ao clicar em "Demo FPS" ou "RPG Saga", o ecrã ficava preto. Após auditoria profunda, encontrei a **causa raiz real** (diferente da Sessão 5):
+
+#### Causa: `loadProjectJSON` usava `appMode || 'modeling'`
+
+- **Problema**: `useStore.js:1598` fazia `appMode: data.appMode || 'modeling'`. Os demos não definiam `appMode`, então ficavam em `'modeling'`.
+- **Sintoma**: Em modo `'modeling'`, o utilizador vê o `Scene3D` (canvas de modelagem) que **só renderiza objetos do catálogo** (4 marcadores minúsculos), NUNCA os conects (terreno, jogador, céu, etc.).
+- O gradiente de fundo era `#1e3a8a` (azul-marinho escuro) — o utilizador percebia como "preto".
+- A toast dizia "Clica em Play" mas em modelagem **não há botão Play** (só existe no `SceneEditorPanel`, que só monta quando `appMode === 'scene'`).
+
+#### Soluções aplicadas (3 camadas de defesa)
+
+1. **`loadProjectJSON` corrigido** (`useStore.js:1598`):
+   ```js
+   appMode: data.appMode || (data.scenes && data.scenes.length > 0 ? 'scene' : 'modeling'),
+   ```
+   Qualquer projeto com cenas carrega automaticamente em modo Cena.
+
+2. **Demos definem `appMode: 'scene'` explicitamente** (`flirQuestArena.js:423`, `flirQuestSaga.js:683`):
+   ```js
+   const project = {
+     version: 4,
+     projectName: 'FlirQuest Arena — FPS 3D Demo',
+     appMode: 'scene',  // ← garantia extra
+     ...
+   }
+   ```
+
+3. **Toast atualizada** (`HomePage.jsx:93, 104`):
+   - Antes: "Clica em Play para jogar" (sem contexto)
+   - Agora: "Carregado em modo Cena. Clica em ▶ Play para jogar."
+
+### ViewModel FPS implementado (arma parented à câmara)
+
+- **Problema**: `WeaponObject` estava em `position: [0.3, 1.6, -0.5]` (coords mundo). Em FPS, ficava uma box flutuante no mundo a tapar a vista.
+- **Solução**: Novo componente `ViewModelFPS` em `SceneLevel3D.jsx`:
+  - Detecta `WeaponObject` + `ViewObject` com `followMode: 'first'` ou `'third'`
+  - Parenta o grupo da arma à câmara (`camera.add(weaponGroup)`)
+  - Posição relativa à câmara: `[0.3, -0.2, -0.5]` (direita, baixo, frente)
+  - Inclui modelo completo: corpo, cano, mira amarela emissiva, 2 mãos
+  - Só visível em modo jogo (`isGameMode === true`)
+- O `WeaponMesh` do `ConectRenderer` continua escondido em modo jogo (`visible={!scenePreviewOpen}`) para evitar duplicação.
+
+### Marketplace com backend Neon activado
+
+- **`api/marketplace/db.js` agora lê `process.env.NEON_DATABASE_URL`** (configurada na Vercel pelo utilizador). Fallback para hardcoded em desenvolvimento local.
+- **`vercel.json` criado** com rewrites para todas as rotas `/api/marketplace/*`.
+- **`MarketplacePanel.jsx` melhorado**:
+  - Ping automático ao backend ao abrir (`/api/marketplace/assets?limit=1`)
+  - Indicador visual de estado: ✓ online (verde) / ⚠️ offline (amarelo) / ⏳ a verificar (cinza)
+  - Se backend online e tem items, mostra items reais do Neon (prioridade) + items demo como fallback
+  - Se backend offline, mostra apenas items demo locais com aviso honesto
+- **Serverless functions existentes** (já criadas em sessões anteriores):
+  - `/api/marketplace/auth/register` — criar conta (SHA256 + token)
+  - `/api/marketplace/auth/login` — autenticar
+  - `/api/marketplace/assets` — CRUD assets
+  - `/api/marketplace/games` — CRUD jogos
+  - `/api/marketplace/templates` — CRUD templates
+- **Para activar totalmente**: deploy na Vercel (automático após push) + `NEON_DATABASE_URL` já configurada.
+
+### Estado real do marketplace (honesto)
+
+| Componente | Estado |
+|---|---|
+| UI (painel) | ✓ Completa — 4 abas, categorias, pesquisa, sort, publicar |
+| Serverless functions | ✓ Existentes em `/api/marketplace/` |
+| `vercel.json` rewrites | ✓ Criado |
+| `NEON_DATABASE_URL` env var | ✓ Configurada pelo utilizador |
+| Conexão ao Neon | ⚠️ A verificar no primeiro deploy após este commit |
+| Auto-init schema SQL | ✓ Corre no primeiro request (`initDB()`) |
+| Login demo (offline) | ✓ Funciona sem backend (qualquer email + password 4+ chars) |
+
+---
+
 ## 🔧 Correções recentes (Agosto 2026 — Sessão 5)
 
 ### BUG CRÍTICO: Ecrã PRETO no modo jogo — RESOLVIDO

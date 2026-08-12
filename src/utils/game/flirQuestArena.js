@@ -420,6 +420,7 @@ const scenes = [{
 const project = {
   version: 4,
   projectName: 'FlirQuest Arena — FPS 3D Demo',
+  appMode: 'scene',
   objects,
   scenes,
   activeSceneId: scenes[0].id,

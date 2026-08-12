@@ -2,11 +2,17 @@
  * /api/marketplace/db.js — Helper para conectar ao Neon PostgreSQL.
  *
  * Usado por todas as serverless functions do marketplace.
+ *
+ * A connection string vem da env var NEON_DATABASE_URL (configurada na Vercel).
+ * Fallback para hardcoded (desenvolvimento local) apenas se a env var não existir.
  */
 const { Pool } = require('pg')
 
+const connectionString = process.env.NEON_DATABASE_URL ||
+  'postgresql://neondb_owner:npg_Yr7nld2jTpSW@ep-fragrant-pond-ayedmxhc-pooler.c-5.us-east-2.aws.neon.tech/neondb'
+
 const pool = new Pool({
-  connectionString: 'postgresql://neondb_owner:npg_Yr7nld2jTpSW@ep-fragrant-pond-ayedmxhc-pooler.c-5.us-east-2.aws.neon.tech/neondb',
+  connectionString,
   ssl: { rejectUnauthorized: false },
   max: 3, // pooler Neon — poucas conexões
 })

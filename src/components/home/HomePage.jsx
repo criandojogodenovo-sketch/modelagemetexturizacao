@@ -90,7 +90,7 @@ export default function HomePage({ onOpenProject }) {
   const handleLoadDemo = () => {
     try {
       loadProjectJSON(flirQuestArenaJSON)
-      toast('FlirQuest Arena carregado! Clica em Play para jogar.', 'success', 4000)
+      toast('FlirQuest Arena carregado em modo Cena. Clica em ▶ Play para jogar.', 'success', 5000)
       onOpenProject?.()
     } catch (err) {
       toast('Erro ao carregar demo: ' + err.message, 'error')
@@ -101,7 +101,7 @@ export default function HomePage({ onOpenProject }) {
   const handleLoadSaga = () => {
     try {
       loadProjectJSON(flirQuestSagaJSON)
-      toast('FlirQuest Saga carregado! 2 cenas, 6 inimigos, 1 BOSS. Boa sorte!', 'success', 5000)
+      toast('FlirQuest Saga carregado em modo Cena. Clica em ▶ Play para jogar.', 'success', 5000)
       onOpenProject?.()
     } catch (err) {
       toast('Erro ao carregar Saga: ' + err.message, 'error')

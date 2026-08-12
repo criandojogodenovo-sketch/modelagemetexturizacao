@@ -680,6 +680,7 @@ const scenes = [
 const project = {
   version: 4,
   projectName: 'FlirQuest Saga — RPG/FPS Profissional',
+  appMode: 'scene',
   objects,
   scenes,
   activeSceneId: 'scene_village',
