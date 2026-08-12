@@ -37,6 +37,8 @@ const RAIL_TOOLS = [
   { id: 'shader', icon: 'palette', label: 'Shader', action: 'openShaderEditor' },
   { id: 'animation', icon: 'film', label: 'Animação', action: 'openAnimStudio' },
   { id: 'terrain', icon: 'mountain', label: 'Terreno', action: 'openTerrainEditor' },
+  { id: 'instancing', icon: 'boxes', label: 'Instancing (GPU)', action: 'openInstancingPanel' },
+  { id: 'marketplace', icon: 'package', label: 'Marketplace', action: 'openMarketplace' },
 ]
 
 const RAIL_BOTTOM = [
@@ -51,6 +53,8 @@ export default function VerticalRail() {
   const openShaderEditor = useStore((s) => s.openShaderEditor)
   const openTerrainEditor = useStore((s) => s.openTerrainEditor)
   const openAnimStudio = useStore((s) => s.openAnimStudio)
+  const openMarketplace = useStore((s) => s.openMarketplace)
+  const openInstancingPanel = useStore((s) => s.openInstancingPanel)
   const toggleMainMenu = useStore((s) => s.toggleMainMenu)
   const toggleLeftDrawer = useStore((s) => s.toggleLeftDrawer)
 
@@ -71,6 +75,8 @@ export default function VerticalRail() {
       case 'openShaderEditor': openShaderEditor(); break
       case 'openTerrainEditor': openTerrainEditor(); break
       case 'openAnimStudio': openAnimStudio(); break
+      case 'openMarketplace': openMarketplace(); break
+      case 'openInstancingPanel': openInstancingPanel(); break
       case 'toggleMainMenu': toggleMainMenu(); break
       case 'openSettingsPanel': toggleMainMenu(); break
       case 'openBuilders':

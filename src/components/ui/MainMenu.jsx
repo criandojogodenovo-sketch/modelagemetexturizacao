@@ -23,6 +23,7 @@ export default function MainMenu({ onClose }) {
   const openDebugConsole = useStore((s) => s.openDebugConsole)
   const openGameExport = useStore((s) => s.openGameExport)
   const openMarketplace = useStore((s) => s.openMarketplace)
+  const openInstancingPanel = useStore((s) => s.openInstancingPanel)
   const toggleConectsWindow = useStore((s) => s.toggleConectsWindow)
   const openMultiplayerPanel = useStore((s) => s.openMultiplayerPanel)
   const togglePerfStats = useStore((s) => s.togglePerfStats)
@@ -129,6 +130,13 @@ export default function MainMenu({ onClose }) {
             </div>
           </button>
           <div className="mm-divider" />
+          <button className="mm-item" onClick={handle(openInstancingPanel)}>
+            <span className="mm-icon"><Icon name="boxes" size={18} /></span>
+            <div>
+              <div className="mm-label">Hardware Instancing</div>
+              <div className="mm-desc small muted">Florestas, pedras, partículas (GPU)</div>
+            </div>
+          </button>
           <button className="mm-item" onClick={handle(openMarketplace)}>
             <span className="mm-icon"><Icon name="package" size={18} /></span>
             <div>

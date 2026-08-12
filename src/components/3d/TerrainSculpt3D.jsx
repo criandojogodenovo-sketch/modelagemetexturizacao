@@ -6,17 +6,31 @@
  *  - Cursor 3D (anel/círculo) que segue o rato/dedo sobre o terreno
  *  - Aplica pincéis (raise, lower, smooth, flatten, noise) em tempo real
  *  - Actualiza a geometria 3D imediatamente (não só depois de soltar)
+ *  - Desactiva OrbitControls durante o arraste (via onDragStateChange)
  *
  * Uso:
  *   <TerrainSculpt3D terrainMesh={mesh} heightmap={hm} seg={seg}
  *     brushMode='raise' brushSize={8} brushStrength={0.5}
- *     onHeightmapChange={(newHm) => ...} />
+ *     onHeightmapChange={(newHm) => ...}
+ *     onDragStateChange={(isDragging) => ...}
+ *     isActive />
  */
 import { useRef, useState, useMemo, useEffect, useCallback } from 'react'
 import { useThree, useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
-export default function TerrainSculpt3D({ terrainMesh, heightmap, seg, brushMode, brushSize, brushStrength, falloffType, onHeightmapChange, isActive }) {
+export default function TerrainSculpt3D({
+  terrainMesh,
+  heightmap,
+  seg,
+  brushMode,
+  brushSize,
+  brushStrength,
+  falloffType,
+  onHeightmapChange,
+  onDragStateChange,
+  isActive,
+}) {
   const { camera, gl, raycaster } = useThree()
   const [cursorPos, setCursorPos] = useState(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -26,6 +40,33 @@ export default function TerrainSculpt3D({ terrainMesh, heightmap, seg, brushMode
 
   // Actualizar hmRef quando heightmap muda externamente
   useEffect(() => { hmRef.current = heightmap }, [heightmap])
+
+  // Reportar drag state ao parent (para desactivar OrbitControls)
+  useEffect(() => {
+    if (onDragStateChange) onDragStateChange(isDragging)
+  }, [isDragging, onDragStateChange])
+
+  // Actualizar geometria do terreno em tempo real
+  const updateGeometry = useCallback(() => {
+    if (!terrainMesh || !terrainMesh.geometry) return
+    const hm = hmRef.current
+    if (!hm) return
+    const pos = terrainMesh.geometry.attributes.position
+    if (!pos) return
+    const heightScale = 5 // mesmo que TerrainMesh usa
+    const segLocal = seg
+
+    for (let i = 0; i < pos.count; i++) {
+      const z = Math.floor(i / (segLocal + 1))
+      const x = i % (segLocal + 1)
+      const h = hm[z * (segLocal + 1) + x] || 0
+      pos.setY(i, h * heightScale)
+    }
+    pos.needsUpdate = true
+    terrainMesh.geometry.computeVertexNormals()
+    if (terrainMesh.geometry.boundingBox) terrainMesh.geometry.computeBoundingBox()
+    if (terrainMesh.geometry.boundingSphere) terrainMesh.geometry.computeBoundingSphere()
+  }, [terrainMesh, seg])
 
   // Raycast no terreno
   const raycastTerrain = useCallback((clientX, clientY) => {
@@ -45,10 +86,24 @@ export default function TerrainSculpt3D({ terrainMesh, heightmap, seg, brushMode
   const pointToCell = useCallback((point) => {
     if (!terrainMesh) return null
     // O terreno tem tamanho seg x seg, centrado na origem
-    const terrainSize = seg
-    const halfSize = terrainSize / 2
-    const x = Math.round(((point.x + halfSize) / terrainSize) * seg)
-    const z = Math.round(((point.z + halfSize) / terrainSize) * seg)
+    // (em ConectRenderer, PlaneGeometry é centrada na origem antes do rotateX)
+    const terrainWidth = 50 // default do TerrainMesh
+    const terrainDepth = 50
+    // Tentar ler do mesh: usar boundingBox
+    let halfW = terrainWidth / 2
+    let halfD = terrainDepth / 2
+    try {
+      const bbox = terrainMesh.geometry.boundingBox
+      if (bbox) {
+        halfW = (bbox.max.x - bbox.min.x) / 2
+        halfD = (bbox.max.z - bbox.min.z) / 2
+      }
+    } catch {}
+
+    // Aplicar transform do mesh (posição/rotação/escala)
+    const localPoint = terrainMesh.worldToLocal(point.clone())
+    const x = Math.round(((localPoint.x + halfW) / (halfW * 2)) * seg)
+    const z = Math.round(((localPoint.z + halfD) / (halfD * 2)) * seg)
     if (x < 0 || x > seg || z < 0 || z > seg) return null
     return { x, z }
   }, [terrainMesh, seg])
@@ -60,7 +115,6 @@ export default function TerrainSculpt3D({ terrainMesh, heightmap, seg, brushMode
     const radius = brushSize
     const r2 = radius * radius
     const strength = brushStrength
-    const dt = 1 // delta time normalizado
 
     // Modo smooth precisa de snapshot
     let snapshot = null
@@ -85,7 +139,7 @@ export default function TerrainSculpt3D({ terrainMesh, heightmap, seg, brushMode
           default: f = 0.5 * (Math.cos(Math.PI * dist / radius) + 1)
         }
         const idx = pz * (seg + 1) + px
-        const amount = f * strength * dt * 0.2
+        const amount = f * strength * 0.2
 
         switch (brushMode) {
           case 'raise':
@@ -95,7 +149,6 @@ export default function TerrainSculpt3D({ terrainMesh, heightmap, seg, brushMode
             hm[idx] -= amount
             break
           case 'smooth': {
-            // Box blur 3x3
             let sum = 0, count = 0
             for (let sz = -1; sz <= 1; sz++) {
               for (let sx = -1; sx <= 1; sx++) {
@@ -107,11 +160,11 @@ export default function TerrainSculpt3D({ terrainMesh, heightmap, seg, brushMode
               }
             }
             const avg = sum / count
-            hm[idx] += (avg - hm[idx]) * f * strength * dt
+            hm[idx] += (avg - hm[idx]) * f * strength
             break
           }
           case 'flatten':
-            hm[idx] += (0 - hm[idx]) * f * strength * dt
+            hm[idx] += (0 - hm[idx]) * f * strength
             break
           case 'noise': {
             const n = (Math.random() - 0.5) * 2
@@ -123,7 +176,7 @@ export default function TerrainSculpt3D({ terrainMesh, heightmap, seg, brushMode
     }
   }, [brushMode, brushSize, brushStrength, falloffType, seg])
 
-  // Mouse handlers
+  // Mouse handlers — activos só quando isActive
   useEffect(() => {
     if (!isActive || !terrainMesh) return
     const canvas = gl.domElement
@@ -131,12 +184,12 @@ export default function TerrainSculpt3D({ terrainMesh, heightmap, seg, brushMode
     const onPointerMove = (e) => {
       const point = raycastTerrain(e.clientX, e.clientY)
       if (point) {
-        setCursorPos(point)
+        setCursorPos(point.clone())
         if (isDragging) {
           const cell = pointToCell(point)
           if (cell) {
             applyBrush(cell.x, cell.z)
-            // Throttle: actualizar geometria a cada 16ms (60fps)
+            // Throttle: actualizar geometria a cada 16ms (~60fps)
             const now = performance.now()
             if (now - lastApplyRef.current > 16) {
               lastApplyRef.current = now
@@ -150,10 +203,12 @@ export default function TerrainSculpt3D({ terrainMesh, heightmap, seg, brushMode
     }
 
     const onPointerDown = (e) => {
-      if (e.button !== 0 && e.type !== 'touchstart') return
+      // Só botão esquerdo ou toque
+      if (e.button !== undefined && e.button !== 0) return
       e.preventDefault()
+      e.stopPropagation()
       setIsDragging(true)
-      const point = raycastTerrain(e.clientX || e.touches?.[0]?.clientX, e.clientY || e.touches?.[0]?.clientY)
+      const point = raycastTerrain(e.clientX, e.clientY)
       if (point) {
         const cell = pointToCell(point)
         if (cell) {
@@ -167,7 +222,9 @@ export default function TerrainSculpt3D({ terrainMesh, heightmap, seg, brushMode
       if (isDragging) {
         setIsDragging(false)
         // Notificar parent do heightmap final
-        if (onHeightmapChange) onHeightmapChange(hmRef.current)
+        if (onHeightmapChange && hmRef.current) {
+          onHeightmapChange(new Float32Array(hmRef.current))
+        }
       }
     }
 
@@ -182,49 +239,52 @@ export default function TerrainSculpt3D({ terrainMesh, heightmap, seg, brushMode
       window.removeEventListener('pointerup', onPointerUp)
       canvas.style.cursor = ''
     }
-  }, [isActive, terrainMesh, gl, raycastTerrain, pointToCell, applyBrush, isDragging, onHeightmapChange])
+  }, [isActive, terrainMesh, gl, raycastTerrain, pointToCell, applyBrush, isDragging, onHeightmapChange, updateGeometry])
 
-  // Actualizar geometria do terreno em tempo real
-  const updateGeometry = useCallback(() => {
-    if (!terrainMesh || !terrainMesh.geometry) return
-    const hm = hmRef.current
-    if (!hm) return
-    const pos = terrainMesh.geometry.attributes.position
-    const terrainSize = seg
-    const heightScale = 5 // mesmo que TerrainMesh usa
-
-    for (let i = 0; i < pos.count; i++) {
-      const z = Math.floor(i / (seg + 1))
-      const x = i % (seg + 1)
-      const h = hm[z * (seg + 1) + x] || 0
-      pos.setY(i, h * heightScale)
-    }
-    pos.needsUpdate = true
-    terrainMesh.geometry.computeVertexNormals()
-  }, [terrainMesh, seg])
-
-  // Renderizar cursor 3D (anel sobre o terreno)
+  // Cursor 3D — anel + preenchimento translúcido
   const cursorGeometry = useMemo(() => {
-    const geo = new THREE.RingGeometry(brushSize * 0.9, brushSize, 32)
+    const geo = new THREE.RingGeometry(brushSize * 0.85, brushSize, 32)
     geo.rotateX(-Math.PI / 2)
     return geo
   }, [brushSize])
 
+  const cursorFillGeometry = useMemo(() => {
+    const geo = new THREE.CircleGeometry(brushSize * 0.85, 32)
+    geo.rotateX(-Math.PI / 2)
+    return geo
+  }, [brushSize])
+
+  // Cursor color consoante o modo
+  const cursorColor = brushMode === 'lower' ? '#ef4444'
+    : brushMode === 'smooth' ? '#f59e0b'
+    : brushMode === 'flatten' ? '#10b981'
+    : brushMode === 'noise' ? '#a855f7'
+    : '#3b82f6'
+
   if (!isActive || !cursorPos) return null
 
+  // Posição do cursor: ligeiramente acima do terreno (em world space)
+  // Como o terrainMesh pode ter transform, usamos world position
   return (
-    <mesh
-      ref={cursorRef}
-      position={[cursorPos.x, cursorPos.y + 0.05, cursorPos.z]}
-      geometry={cursorGeometry}
-    >
-      <meshBasicMaterial
-        color={brushMode === 'lower' ? '#ef4444' : brushMode === 'smooth' ? '#f59e0b' : '#3b82f6'}
-        transparent
-        opacity={0.6}
-        depthTest={false}
-        side={THREE.DoubleSide}
-      />
-    </mesh>
+    <group position={[cursorPos.x, cursorPos.y + 0.05, cursorPos.z]}>
+      <mesh geometry={cursorFillGeometry}>
+        <meshBasicMaterial
+          color={cursorColor}
+          transparent
+          opacity={0.15}
+          depthTest={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      <mesh ref={cursorRef} geometry={cursorGeometry}>
+        <meshBasicMaterial
+          color={cursorColor}
+          transparent
+          opacity={0.85}
+          depthTest={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+    </group>
   )
 }

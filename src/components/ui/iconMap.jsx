@@ -61,6 +61,7 @@ const ICON_MAP = {
   package: Package,
   search: Search,
   'more-horizontal': MoreHorizontal,
+  boxes: Boxes,
   'chevron-down': ChevronDown,
   'chevron-right': ChevronRight,
   'chevron-left': ChevronLeft,

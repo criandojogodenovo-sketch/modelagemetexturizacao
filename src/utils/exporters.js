@@ -220,21 +220,64 @@ export async function importGLB(file) {
   })
 }
 
-export async function importGLTF(file) {
-  // .gltf geralmente é JSON, mas pode referenciar binários externos
-  // Para simplicidade, tentamos ler como texto e usar parse
+export async function importGLTF(file, additionalFiles = []) {
+  // .gltf é JSON e tipicamente referencia ficheiros externos (.bin, texturas).
+  // Em browsers, file.path não existe — usamos Object URLs para cada ficheiro
+  // e um LoadingManager customizado que resolve URIs relativas.
   const text = await file.text()
-  const loader = new GLTFLoader()
+  const gltfFileName = file.name || 'scene.gltf'
+
+  // Indexar ficheiros adicionais por nome
+  const filesByName = new Map()
+  for (const f of additionalFiles) {
+    filesByName.set(f.name, f)
+    // Também indexar por basename (sem caminho)
+    const basename = f.name.split('/').pop()
+    if (basename) filesByName.set(basename, f)
+  }
+
+  // Criar Object URLs para cada ficheiro
+  const urlMap = new Map()
+  const urlToRevoke = []
+  for (const [name, f] of filesByName) {
+    const url = URL.createObjectURL(f)
+    urlMap.set(name, url)
+    urlToRevoke.push(url)
+  }
+
+  // LoadingManager que intercepta cada URI do gltf e devolve o Object URL correto
+  const manager = new THREE.LoadingManager()
+  manager.setURLModifier((url) => {
+    // url pode ser: "arquivo.bin" ou "textures/diffuse.png" ou um blob: já criado
+    if (url.startsWith('blob:') || url.startsWith('data:')) return url
+    // Extrair basename do URL
+    const basename = url.split('/').pop().split('?')[0]
+    // Procurar no mapa (por nome completo ou basename)
+    if (urlMap.has(url)) return urlMap.get(url)
+    if (urlMap.has(basename)) return urlMap.get(basename)
+    // Não encontrado — retornar URL original (vai falhar com warning)
+    console.warn('[GLTF] Recurso externo não encontrado nos ficheiros selecionados:', url)
+    return url
+  })
+
+  const loader = new GLTFLoader(manager)
   return new Promise((resolve, reject) => {
     loader.parse(
       text,
-      file.path || '',
+      '', // path vazio — o LoadingManager trata da resolução
       (gltf) => {
         const meshes = extractMeshes(gltf.scene)
         const objects = meshes.map((m, i) => meshToStoreObject(m, i))
+        // Revogar Object URLs (já não precisamos delas — meshes estão clonados)
+        setTimeout(() => {
+          for (const u of urlToRevoke) URL.revokeObjectURL(u)
+        }, 1000)
         resolve(objects)
       },
-      (err) => reject(err)
+      (err) => {
+        for (const u of urlToRevoke) URL.revokeObjectURL(u)
+        reject(err)
+      }
     )
   })
 }

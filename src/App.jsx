@@ -39,6 +39,7 @@ import AnimationControllerEditor from './components/panels/AnimationControllerEd
 import MultiplayerPanel from './components/panels/MultiplayerPanel'
 import PostProcessingPanel from './components/panels/PostProcessingPanel'
 import MarketplacePanel from './components/panels/MarketplacePanel'
+import InstancingPanel from './components/panels/InstancingPanel'
 import SettingsPanel from './components/panels/SettingsPanel'
 import PerformanceStatsOverlay from './components/ui/PerformanceStatsOverlay'
 import MainMenu from './components/ui/MainMenu'
@@ -85,6 +86,8 @@ export default function App() {
   const closePostProcessing = useStore((s) => s.closePostProcessing)
   const marketplaceOpen = useStore((s) => s.marketplaceOpen)
   const closeMarketplace = useStore((s) => s.closeMarketplace)
+  const instancingPanelOpen = useStore((s) => s.instancingPanelOpen)
+  const closeInstancingPanel = useStore((s) => s.closeInstancingPanel)
   const settingsPanelOpen = useStore((s) => s.settingsPanelOpen)
   const closeSettingsPanel = useStore((s) => s.closeSettingsPanel)
   const homeVisible = useStore((s) => s.homeVisible)
@@ -197,6 +200,7 @@ export default function App() {
       {multiplayerPanelOpen && <MultiplayerPanel onClose={closeMultiplayerPanel} />}
       {postProcessingOpen && <PostProcessingPanel onClose={closePostProcessing} />}
       {marketplaceOpen && <MarketplacePanel onClose={closeMarketplace} />}
+      {instancingPanelOpen && <InstancingPanel onClose={closeInstancingPanel} />}
       {settingsPanelOpen && <SettingsPanel onClose={closeSettingsPanel} />}
       {perfStatsVisible && <PerformanceStatsOverlay />}
       {animControllerTarget && (

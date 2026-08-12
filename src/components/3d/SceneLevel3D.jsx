@@ -18,6 +18,7 @@ import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-t
 import * as THREE from 'three'
 import SceneObject from './SceneObject'
 import ConectRenderer from '../panels/ConectRenderer'
+import TerrainSculpt3D from './TerrainSculpt3D'
 import { useStore } from '../../store/useStore'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
 import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
@@ -92,6 +93,93 @@ function FogApplier({ conects }) {
     }
   }, [fogConect?.fogType, fogConect?.color, fogConect?.near, fogConect?.far, fogConect?.density, scene])
   return null
+}
+
+// ===== InstancingRenderer — adiciona HardwareInstancingSystems à cena e atualiza por frame =====
+function InstancingRenderer() {
+  const { scene, camera } = useThree()
+  const addedRef = useRef(new Set())
+
+  useFrame(() => {
+    const systems = window._flirInstancingSystems
+    if (!systems || systems.length === 0) return
+    for (const sys of systems) {
+      // Adicionar à cena se ainda não foi adicionado
+      if (!addedRef.current.has(sys)) {
+        try {
+          sys.addToScene(scene)
+          addedRef.current.add(sys)
+        } catch (e) {
+          // já foi adicionado ou sistema dispuesto
+        }
+      }
+      // Atualizar frustum culling + LOD + matrizes por instância
+      try { sys.update(camera) } catch {}
+    }
+  })
+
+  // Limpar ao desmontar
+  useEffect(() => {
+    return () => {
+      for (const sys of addedRef.current) {
+        try {
+          for (const mesh of sys.instanceMeshes || []) {
+            scene.remove(mesh)
+          }
+        } catch {}
+      }
+      addedRef.current.clear()
+    }
+  }, [scene])
+
+  return null
+}
+
+// ===== TerrainSculptBridge — ativa escultura 3D no viewport quando um TerrainObject está selecionado =====
+function TerrainSculptBridge({ activeScene, conectMeshRefs, isGameMode, onDragStateChange }) {
+  // Procurar se há um TerrainObject selecionado e um modo de escultura ativo
+  const terrainSculptActive = useStore((s) => s.terrainSculptActive)
+  const terrainBrush = useStore((s) => s.terrainBrush)
+  const selectedConectId = useStore((s) => s.selectedConectId)
+  const updateConect = useStore((s) => s.updateConect)
+
+  // Encontrar o TerrainObject atualmente selecionado
+  const terrainConect = useMemo(() => {
+    if (!activeScene?.conects || !selectedConectId) return null
+    const c = activeScene.conects.find(c => c.instanceId === selectedConectId && c.type === 'TerrainObject')
+    return c || null
+  }, [activeScene, selectedConectId])
+
+  const terrainMesh = useMemo(() => {
+    if (!terrainConect) return null
+    return conectMeshRefs.current.get(terrainConect.instanceId) || null
+  }, [terrainConect, conectMeshRefs, activeScene])
+
+  // Callback quando heightmap é alterado pela escultura 3D
+  const handleHeightmapChange = useCallback((newHm) => {
+    if (!terrainConect) return
+    // Persistir alteração no conect
+    updateConect(terrainConect.instanceId, {
+      heightmap: Array.from(newHm),
+    })
+  }, [terrainConect, updateConect])
+
+  if (!terrainSculptActive || !terrainConect || !terrainMesh || isGameMode) return null
+
+  return (
+    <TerrainSculpt3D
+      terrainMesh={terrainMesh}
+      heightmap={terrainConect.heightmap ? new Float32Array(terrainConect.heightmap) : null}
+      seg={terrainConect.segments || 64}
+      brushMode={terrainBrush?.mode || 'raise'}
+      brushSize={terrainBrush?.size || 8}
+      brushStrength={terrainBrush?.strength || 0.5}
+      falloffType={terrainBrush?.falloff || 'smooth'}
+      onHeightmapChange={handleHeightmapChange}
+      onDragStateChange={onDragStateChange}
+      isActive={terrainSculptActive}
+    />
+  )
 }
 
 // ===== Componente que gere o modo jogo dentro do canvas =====
@@ -1109,6 +1197,7 @@ export default function SceneLevel3D() {
   const meshRefs = useRef(new Map())
   const conectMeshRefs = useRef(new Map())
   const [selectedMesh, setSelectedMesh] = useState(null)
+  const [isTerrainSculptDragging, setIsTerrainSculptDragging] = useState(false)
 
   const activeScene = scenes.find((s) => s.id === activeSceneId)
   const isGameMode = scenePreviewOpen
@@ -1260,8 +1349,20 @@ export default function SceneLevel3D() {
           {!isGameMode && (
             <OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.08} minDistance={1} maxDistance={100} maxPolarAngle={Math.PI * 0.495}
               touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
+              enabled={!isTerrainSculptDragging}
             />
           )}
+
+          {/* Terrain Sculpt 3D — raycast + cursor + aplicação em tempo real */}
+          <TerrainSculptBridge
+            activeScene={activeScene}
+            conectMeshRefs={conectMeshRefs}
+            isGameMode={isGameMode}
+            onDragStateChange={setIsTerrainSculptDragging}
+          />
+
+          {/* Hardware Instancing renderer — busca sistemas de window._flirInstancingSystems */}
+          <InstancingRenderer />
 
           {/* GameMode — activado quando scenePreviewOpen */}
           <GameMode activeScene={activeScene} objects={objects} meshRefs={meshRefs} conectMeshRefs={conectMeshRefs} isGameMode={isGameMode} />

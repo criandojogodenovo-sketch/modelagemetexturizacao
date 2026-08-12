@@ -1441,6 +1441,18 @@ export const useStore = create(
       openMarketplace: () => set({ marketplaceOpen: true }),
       closeMarketplace: () => set({ marketplaceOpen: false }),
 
+      // Hardware Instancing (GPU forests / particles / rocks)
+      instancingPanelOpen: false,
+      openInstancingPanel: () => set({ instancingPanelOpen: true }),
+      closeInstancingPanel: () => set({ instancingPanelOpen: false }),
+
+      // Terrain Sculpt 3D — escultura direta no viewport 3D
+      terrainSculptActive: false,
+      toggleTerrainSculpt: () => set((s) => ({ terrainSculptActive: !s.terrainSculptActive })),
+      setTerrainSculpt: (v) => set({ terrainSculptActive: v }),
+      terrainBrush: { mode: 'raise', size: 8, strength: 0.5, falloff: 'smooth' },
+      setTerrainBrush: (patch) => set((s) => ({ terrainBrush: { ...s.terrainBrush, ...patch } })),
+
       // Settings
       settingsPanelOpen: false,
       openSettingsPanel: () => set({ settingsPanelOpen: true }),

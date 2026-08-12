@@ -42,6 +42,7 @@ import {
   pngToHeightmap,
   hexToRgb,
 } from '../../../utils/terrain/terrainMath'
+import { generateTerrainHeightmap } from '../../../utils/terrain/terrainNoise'
 
 const FALLOFFS = [
   { id: 'smooth',   label: 'Smooth'   },
@@ -63,9 +64,25 @@ export default function TerrainEditor({ onClose }) {
   const activeSceneId = useStore((s) => s.activeSceneId)
   const objects = useStore((s) => s.objects)
   const toast = useStore((s) => s.toast)
+  // Terrain Sculpt 3D (viewport)
+  const terrainSculptActive = useStore((s) => s.terrainSculptActive)
+  const toggleTerrainSculpt = useStore((s) => s.toggleTerrainSculpt)
+  const terrainBrush = useStore((s) => s.terrainBrush)
+  const setTerrainBrush = useStore((s) => s.setTerrainBrush)
 
   const [activeTab, setActiveTab] = useState('sculpt')
-  const [config, setConfig] = useState(DEFAULT_TERRAIN_CONFIG)
+  const [config, setConfig] = useState({
+    ...DEFAULT_TERRAIN_CONFIG,
+    // Configurações avançadas do terrainNoise (Simplex+Voronoi+Ridged+Terracing+Erosion)
+    useAdvancedNoise: true,
+    ridgedAmount: 0.3,
+    warpStrength: 1.0,
+    terracing: false,
+    terraceSteps: 8,
+    terraceSharpness: 0.3,
+    erosion: false,
+    erosionIterations: 3,
+  })
   const [brush, setBrush] = useState(DEFAULT_BRUSH)
   const [rampPoints, setRampPoints] = useState([])
   const [heightmap, setHeightmap] = useState(null)
@@ -78,7 +95,9 @@ export default function TerrainEditor({ onClose }) {
   // Gerar heightmap + splatmap iniciais
   useEffect(() => {
     if (!heightmap) {
-      const hm = generateHeightmap(config.segments, config)
+      const hm = config.useAdvancedNoise
+        ? generateTerrainHeightmap(config.segments, config)
+        : generateHeightmap(config.segments, config)
       setHeightmap(hm)
       const sm = autoSplatByHeight(hm, config.segments, textureLayers, MAX_LAYERS)
       setSplatmap(sm)
@@ -89,11 +108,19 @@ export default function TerrainEditor({ onClose }) {
   // ===== Operações =====
 
   const regenerate = useCallback(() => {
-    const hm = generateHeightmap(config.segments, config)
+    const hm = config.useAdvancedNoise
+      ? generateTerrainHeightmap(config.segments, config)
+      : generateHeightmap(config.segments, config)
     setHeightmap(hm)
     const sm = autoSplatByHeight(hm, config.segments, textureLayers, MAX_LAYERS)
     setSplatmap(sm)
-    toast('Heightmap gerado', 'success', 1200)
+    toast(
+      config.useAdvancedNoise
+        ? 'Heightmap gerado (Simplex + Ridged + Warping)'
+        : 'Heightmap gerado (Perlin básico)',
+      'success',
+      1200
+    )
   }, [config, textureLayers, toast])
 
   // Aplicar pincel — chamado a cada stamp (do HeightmapPreview drag)
@@ -329,8 +356,71 @@ export default function TerrainEditor({ onClose }) {
           {/* ============ TAB: SCULPT ============ */}
           {activeTab === 'sculpt' && (
             <>
+              {/* === Escultura 3D no Viewport === */}
+              <div className="panel-section" style={{
+                background: terrainSculptActive ? 'rgba(59,130,246,0.12)' : 'transparent',
+                border: terrainSculptActive ? '1px solid var(--accent)' : '1px solid var(--border)',
+                borderRadius: 6,
+              }}>
+                <h4>🎨 Escultura 3D no Viewport</h4>
+                <div className="small muted mb-2">
+                  Ativa para esculpir diretamente no terreno 3D da cena. Seleciona um
+                  TerrainObject e arrasta o rato/dedo sobre ele. O cursor 3D segue a malha.
+                </div>
+                <button
+                  onClick={() => toggleTerrainSculpt()}
+                  className={terrainSculptActive ? 'primary' : ''}
+                  style={{ width: '100%' }}
+                >
+                  {terrainSculptActive ? '✓ Escultura 3D ATIVA — desactivar' : 'Activar Escultura 3D no Viewport'}
+                </button>
+                {terrainSculptActive && (
+                  <>
+                    <div className="small" style={{ color: 'var(--accent)', marginTop: 8 }}>
+                      👆 Seleciona um TerrainObject na cena e arrasta para esculpir.
+                      OrbitControls fica desactivado durante o arraste.
+                    </div>
+                    <div className="prop-row" style={{ marginTop: 8 }}>
+                      <label>Modo: </label>
+                      <select
+                        value={terrainBrush.mode}
+                        onChange={(e) => setTerrainBrush({ mode: e.target.value })}
+                      >
+                        <option value="raise">Elevar</option>
+                        <option value="lower">Rebaixar</option>
+                        <option value="smooth">Suavizar</option>
+                        <option value="flatten">Achatar</option>
+                        <option value="noise">Ruído</option>
+                      </select>
+                    </div>
+                    <div className="prop-row">
+                      <label>Tamanho: {terrainBrush.size}</label>
+                      <input type="range" min="1" max="30" step="1" value={terrainBrush.size}
+                        onChange={(e) => setTerrainBrush({ size: Number(e.target.value) })} />
+                    </div>
+                    <div className="prop-row">
+                      <label>Força: {terrainBrush.strength.toFixed(2)}</label>
+                      <input type="range" min="0.05" max="1" step="0.05" value={terrainBrush.strength}
+                        onChange={(e) => setTerrainBrush({ strength: Number(e.target.value) })} />
+                    </div>
+                    <div className="prop-row">
+                      <label>Falloff: </label>
+                      <select
+                        value={terrainBrush.falloff}
+                        onChange={(e) => setTerrainBrush({ falloff: e.target.value })}
+                      >
+                        <option value="smooth">Smooth</option>
+                        <option value="linear">Linear</option>
+                        <option value="constant">Constant</option>
+                        <option value="sharp">Sharp</option>
+                      </select>
+                    </div>
+                  </>
+                )}
+              </div>
+
               <div className="panel-section">
-                <h4>⛏️ Pincel de Escultura</h4>
+                <h4>⛏️ Pincel de Escultura (Preview 2D)</h4>
                 <div className="terrain-brush-grid">
                   {SCULPT_BRUSHES.map((b) => (
                     <button
@@ -526,6 +616,22 @@ export default function TerrainEditor({ onClose }) {
               <div className="panel-section">
                 <h4>Geração Procedural (Perlin)</h4>
                 <div className="prop-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={config.useAdvancedNoise}
+                      onChange={(e) => setConfig({ ...config, useAdvancedNoise: e.target.checked })}
+                      style={{ width: 'auto', display: 'inline-block', marginRight: 6 }}
+                    />
+                    <strong>Modo Pro</strong> (Simplex + Ridged + Warping + Terracing + Erosion)
+                  </label>
+                </div>
+                <div className="small muted mb-2">
+                  {config.useAdvancedNoise
+                    ? 'Combina múltiplos ruídos para terreno orgânico estilo Unreal Engine Landscape.'
+                    : 'Perlin básico — para testes rápidos.'}
+                </div>
+                <div className="prop-row">
                   <label>Seed: {config.seed}</label>
                   <input type="number" value={config.seed}
                     onChange={(e) => setConfig({ ...config, seed: Number(e.target.value) })} />
@@ -550,6 +656,65 @@ export default function TerrainEditor({ onClose }) {
                   <input type="range" min="1.5" max="3" step="0.1" value={config.lacunarity}
                     onChange={(e) => setConfig({ ...config, lacunarity: Number(e.target.value) })} />
                 </div>
+
+                {config.useAdvancedNoise && (
+                  <>
+                    <div className="prop-row">
+                      <label>Cristas (Ridged): {config.ridgedAmount.toFixed(2)}</label>
+                      <input type="range" min="0" max="1" step="0.05" value={config.ridgedAmount}
+                        onChange={(e) => setConfig({ ...config, ridgedAmount: Number(e.target.value) })} />
+                    </div>
+                    <div className="prop-row">
+                      <label>Domain Warp: {config.warpStrength.toFixed(2)}</label>
+                      <input type="range" min="0" max="2" step="0.05" value={config.warpStrength}
+                        onChange={(e) => setConfig({ ...config, warpStrength: Number(e.target.value) })} />
+                    </div>
+                    <div className="prop-row">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={config.terracing}
+                          onChange={(e) => setConfig({ ...config, terracing: e.target.checked })}
+                          style={{ width: 'auto', display: 'inline-block', marginRight: 6 }}
+                        />
+                        Terracing (degraus rochosos)
+                      </label>
+                    </div>
+                    {config.terracing && (
+                      <>
+                        <div className="prop-row">
+                          <label>Nº de degraus: {config.terraceSteps}</label>
+                          <input type="range" min="2" max="32" step="1" value={config.terraceSteps}
+                            onChange={(e) => setConfig({ ...config, terraceSteps: Number(e.target.value) })} />
+                        </div>
+                        <div className="prop-row">
+                          <label>Nitidez: {config.terraceSharpness.toFixed(2)}</label>
+                          <input type="range" min="0" max="1" step="0.05" value={config.terraceSharpness}
+                            onChange={(e) => setConfig({ ...config, terraceSharpness: Number(e.target.value) })} />
+                        </div>
+                      </>
+                    )}
+                    <div className="prop-row">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={config.erosion}
+                          onChange={(e) => setConfig({ ...config, erosion: e.target.checked })}
+                          style={{ width: 'auto', display: 'inline-block', marginRight: 6 }}
+                        />
+                        Erosão térmica (desgaste de encostas)
+                      </label>
+                    </div>
+                    {config.erosion && (
+                      <div className="prop-row">
+                        <label>Iterações de erosão: {config.erosionIterations}</label>
+                        <input type="range" min="1" max="10" step="1" value={config.erosionIterations}
+                          onChange={(e) => setConfig({ ...config, erosionIterations: Number(e.target.value) })} />
+                      </div>
+                    )}
+                  </>
+                )}
+
                 <button onClick={regenerate} style={{ width: '100%', marginTop: 8 }}>Regenerar Heightmap
                 </button>
               </div>
