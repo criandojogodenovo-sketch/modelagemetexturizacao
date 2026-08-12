@@ -281,14 +281,77 @@ function startGame() {
     getUIValue: function (name) { var ss = data.uiScreens || []; for (var i = 0; i < ss.length; i++) { var e = ss[i].elements.find(function (e) { return e.name === name }); if (e) return e.value || e.text || '' } return '' },
     setUIValue: function (name, val) { var ss = data.uiScreens || []; for (var i = 0; i < ss.length; i++) { var e = ss[i].elements.find(function (e) { return e.name === name }); if (e) { e.value = val; e.text = val; e.label = val; renderUI(); return } } },
     triggerUIEvent: function (en, payload) { for (var k in runtimes) { runtimes[k].triggerEvent(en, payload) } },
-    spawnObject: function (name, pos) { dbg('spawnObject: ' + name + ' em ' + pos, 'log') },
+    spawnObject: function (name, pos) {
+      // Procurar objeto do catálogo por nome e cloná-lo
+      var obj = (data.objects || []).find(function (o) { return o.name === name })
+      if (!obj) { dbg('spawnObject: objeto "' + name + '" não encontrado no catálogo', 'warning', 'Spawn'); return null }
+      var geo = obj.bufferGeometry || new THREE.BoxGeometry(1, 1, 1)
+      var mat = new THREE.MeshStandardMaterial({ color: obj.material?.color || '#cccccc', roughness: 0.7 })
+      var mesh = new THREE.Mesh(geo, mat)
+      mesh.position.set(pos[0] || 0, pos[1] || 0, pos[2] || 0)
+      mesh.castShadow = true; mesh.receiveShadow = true
+      mesh._name = name + '_' + Date.now()
+      mesh._isSpawned = true
+      scene3d.add(mesh)
+      // Adicionar ao meshMap para ser encontrável por name/distanceTo
+      var newId = 'spawned_' + Date.now() + '_' + Math.floor(Math.random() * 1000)
+      meshMap[newId] = mesh
+      dbg('spawnObject: ' + name + ' spawnado em [' + pos.join(',') + '] (id=' + newId + ')', 'log', 'Spawn')
+      return newId
+    },
     collidingWith: function (id, type) { for (var k in bodies) { if (k === id) continue; if (bodies[k]._conect.type === type || bodies[k]._conect.name === type) { if (bodies[id].position.distanceTo(bodies[k].position) < 1.5) return true } } return false },
     distanceTo: function (id, name) { for (var k in meshMap) { if (meshMap[k]._name === name) { return meshMap[id].position.distanceTo(meshMap[k].position) } } return 0 },
     isTouching: function () { return joystick.active },
-    // Sistema 2: Armas e combate (exportado)
-    shoot: function () { dbg('shoot() — sem implementação no export', 'log', 'Weapon') },
-    reload: function () { dbg('reload()', 'log', 'Weapon') },
-    equipWeapon: function (name) { dbg('equipWeapon: ' + name, 'log', 'Weapon') },
+    // Sistema 2: Armas e combate (exportado) — implementação real com raycast
+    shoot: function () {
+      if ((gc._weaponAmmo || 0) <= 0) { dbg('shoot: sem munição! Pressiona reload()', 'warning', 'Weapon'); return false }
+      gc._weaponAmmo = (gc._weaponAmmo || 0) - 1
+      // Raycast a partir da câmara
+      var raycaster = new THREE.Raycaster()
+      var origin = camera.position.clone()
+      var dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
+      raycaster.set(origin, dir)
+      raycaster.far = gc._weaponRange || 100
+      // Colectar todos os meshes com _conect (inimigos/NPCs)
+      var targets = []
+      for (var k in meshMap) {
+        if (meshMap[k]._conect && meshMap[k].visible !== false) targets.push(meshMap[k])
+      }
+      var hits = raycaster.intersectObjects(targets, true)
+      if (hits.length > 0) {
+        var hit = hits[0]
+        var hitMesh = hit.object
+        // Subir na hierarquia até encontrar um mesh com _conect
+        while (hitMesh && !hitMesh._conect && hitMesh.parent) hitMesh = hitMesh.parent
+        if (hitMesh && hitMesh._conect) {
+          var id = hitMesh._conect.instanceId
+          dbg('shoot: atingiu ' + (hitMesh._conect.name || id) + ' a ' + hit.distance.toFixed(1) + 'm', 'log', 'Weapon')
+          // Aplicar dano
+          if (gc.takeDamage) gc.takeDamage(id, gc._weaponDamage || 25)
+          // Disparar evento onHit no target
+          if (runtimes[id]) runtimes[id].triggerEvent('onHit', { damage: gc._weaponDamage || 25, point: [hit.point.x, hit.point.y, hit.point.z] })
+          return id
+        }
+      }
+      dbg('shoot: disparou mas não atingiu nada', 'log', 'Weapon')
+      return false
+    },
+    reload: function () {
+      var max = gc._weaponMaxAmmo || 30
+      gc._weaponAmmo = max
+      dbg('reload: munição restaurada para ' + max, 'log', 'Weapon')
+    },
+    equipWeapon: function (name) {
+      // Procurar WeaponObject na cena com este nome
+      var w = (scene.conects || []).find(function (c) { return c.type === 'WeaponObject' && c.name === name })
+      if (!w) { dbg('equipWeapon: arma "' + name + '" não encontrada', 'warning', 'Weapon'); return false }
+      gc._weaponDamage = w.damage || 25
+      gc._weaponRange = w.range || 100
+      gc._weaponMaxAmmo = w.maxAmmo || 30
+      gc._weaponAmmo = gc._weaponMaxAmmo
+      dbg('equipWeapon: ' + name + ' equipada (dano=' + gc._weaponDamage + ', alcance=' + gc._weaponRange + ', munição=' + gc._weaponMaxAmmo + ')', 'log', 'Weapon')
+      return true
+    },
     getAmmo: function () { return gc._weaponAmmo || 0 },
     takeDamage: function (id, amount) {
       for (var i = 0; i < scene.conects.length; i++) {
@@ -454,6 +517,37 @@ function startGame() {
   window.addEventListener('keydown', function (e) { keys[e.key.toLowerCase()] = true })
   window.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false })
 
+  // Câmera FPS — suporte de input (rato + setas)
+  if (!window._flirCameraRotation) {
+    window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: 1.0, enabled: true }
+  }
+  // Setas para rodar câmara
+  window.addEventListener('keydown', function (e) {
+    var sens = 0.04
+    if (e.key === 'ArrowLeft') window._flirCameraRotation.yaw += sens
+    if (e.key === 'ArrowRight') window._flirCameraRotation.yaw -= sens
+    if (e.key === 'ArrowUp') window._flirCameraRotation.pitch = Math.max(-1.4, window._flirCameraRotation.pitch + sens)
+    if (e.key === 'ArrowDown') window._flirCameraRotation.pitch = Math.min(1.4, window._flirCameraRotation.pitch - sens)
+  })
+  // Rato — arrastar para rodar câmara (estilo FPS desktop)
+  var mouseDragging = false
+  var mouseLast = null
+  canvas.addEventListener('mousedown', function (e) {
+    if (e.button !== 0) return
+    mouseDragging = true
+    mouseLast = { x: e.clientX, y: e.clientY }
+  })
+  window.addEventListener('mousemove', function (e) {
+    if (!mouseDragging || !mouseLast) return
+    var dx = e.clientX - mouseLast.x
+    var dy = e.clientY - mouseLast.y
+    mouseLast = { x: e.clientX, y: e.clientY }
+    var sens = 0.005
+    window._flirCameraRotation.yaw -= dx * sens
+    window._flirCameraRotation.pitch = Math.max(-1.4, Math.min(1.4, window._flirCameraRotation.pitch - dy * sens))
+  })
+  window.addEventListener('mouseup', function () { mouseDragging = false; mouseLast = null })
+
   // UI rendering
   function renderUI() {
     var overlay = document.getElementById('ui-overlay')
@@ -513,8 +607,39 @@ function startGame() {
     // Camera follow
     if (activeView && activeView.cameraRole === 'player' && player && meshMap[player.instanceId]) {
       var pm = meshMap[player.instanceId]
-      camera.position.lerp(new THREE.Vector3(pm.position.x, pm.position.y + (activeView.followHeight || 3), pm.position.z + (activeView.followDistance || 6)), 0.1)
-      camera.lookAt(pm.position)
+      var mode = activeView.followMode || 'none'
+      var camRot = window._flirCameraRotation || { yaw: 0, pitch: 0, enabled: false }
+      if (mode === 'first') {
+        // First-person: câmara nos olhos do jogador, rotação pelo toque/setas
+        var eyeH = activeView.eyeHeight || 1.6
+        camera.position.set(pm.position.x, pm.position.y + eyeH, pm.position.z)
+        if (camRot.enabled) {
+          camera.rotation.set(camRot.pitch, camRot.yaw, 0, 'YXZ')
+        }
+      } else if (mode === 'third' && camRot.enabled) {
+        // Third-person orbit (FPS-style quando há touch input)
+        var dist3 = activeView.followDistance || 6
+        var h3 = activeView.followHeight || 3
+        var offY = Math.sin(camRot.pitch) * dist3
+        var offX = Math.sin(camRot.yaw) * Math.cos(camRot.pitch) * dist3
+        var offZ = Math.cos(camRot.yaw) * Math.cos(camRot.pitch) * dist3
+        camera.position.set(pm.position.x + offX, pm.position.y + h3 + offY, pm.position.z + offZ)
+        camera.lookAt(pm.position.x, pm.position.y + 1, pm.position.z)
+      } else if (mode === 'none' || !mode) {
+        // Default: third-person clássico
+        camera.position.lerp(new THREE.Vector3(pm.position.x, pm.position.y + (activeView.followHeight || 3), pm.position.z + (activeView.followDistance || 6)), 0.1)
+        camera.lookAt(pm.position)
+      } else {
+        // Outros modos (top/side) sem touch input
+        camera.position.lerp(new THREE.Vector3(pm.position.x, pm.position.y + (activeView.followHeight || 3), pm.position.z + (activeView.followDistance || 6)), 0.1)
+        camera.lookAt(pm.position)
+      }
+    } else if (activeView && (!activeView.cameraRole || activeView.cameraRole !== 'player')) {
+      // Câmara estática — mas permite olhar à volta com touch
+      var camRot2 = window._flirCameraRotation
+      if (camRot2 && camRot2.enabled) {
+        camera.rotation.set(camRot2.pitch, camRot2.yaw, 0, 'YXZ')
+      }
     }
 
     renderer.render(scene3d, camera)

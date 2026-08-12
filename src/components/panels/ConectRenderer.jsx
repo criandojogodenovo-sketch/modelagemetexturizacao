@@ -91,6 +91,31 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
     return <AmbientLightMesh conect={conect} setMeshRef={setMeshRef} />
   }
 
+  // SpawnObject: ponto de spawn (gizmo em forma de estrela)
+  if (conect.type === 'SpawnObject') {
+    return <SpawnMarkerMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // NavigatorObject: portal para outra cena
+  if (conect.type === 'NavigatorObject') {
+    return <NavigatorMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // WeaponObject: arma visual (gizmo em forma de arma)
+  if (conect.type === 'WeaponObject') {
+    return <WeaponMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // ItemObject: item coleccionável (gizmo em forma de diamante rotativo)
+  if (conect.type === 'ItemObject') {
+    return <ItemMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // AreaObject: área de influência (gizmo wireframe)
+  if (conect.type === 'AreaObject') {
+    return <AreaMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
   // ReferenceObject: renderiza conteúdo de outra cena
   if (conect.type === 'ReferenceObject') {
     return <ReferenceMesh conect={conect} setMeshRef={setMeshRef} />
@@ -878,6 +903,145 @@ function ReferenceMesh({ conect, setMeshRef }) {
   return (
     <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
       {refObjects}
+    </group>
+  )
+}
+
+// ===== SpawnObject — ponto de spawn (seta para cima + anel) =====
+function SpawnMarkerMesh({ conect, setMeshRef }) {
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      {/* Seta para cima */}
+      <mesh position={[0, 1, 0]} castShadow>
+        <coneGeometry args={[0.3, 0.8, 4]} />
+        <meshStandardMaterial color="#10b981" emissive="#10b981" emissiveIntensity={0.4} roughness={0.4} />
+      </mesh>
+      {/* Anel base */}
+      <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.6, 0.8, 16]} />
+        <meshBasicMaterial color="#10b981" transparent opacity={0.5} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Cilindro fino para visualizar */}
+      <mesh position={[0, 0.5, 0]}>
+        <cylinderGeometry args={[0.05, 0.05, 1, 8]} />
+        <meshStandardMaterial color="#10b981" emissive="#10b981" emissiveIntensity={0.3} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== NavigatorObject — portal (anel rotativo com partículas) =====
+function NavigatorMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  useFrame((_, dt) => {
+    if (ref.current) ref.current.rotation.y += dt * 0.8
+  })
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      <group ref={ref}>
+        {/* Anel exterior */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[1, 0.1, 16, 32]} />
+          <meshStandardMaterial color="#a855f7" emissive="#a855f7" emissiveIntensity={0.6} roughness={0.3} />
+        </mesh>
+        {/* Anel interior */}
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.7, 0.05, 16, 32]} />
+          <meshStandardMaterial color="#c084fc" emissive="#c084fc" emissiveIntensity={0.5} />
+        </mesh>
+      </group>
+      {/* Disco central translúcido */}
+      <mesh>
+        <circleGeometry args={[0.95, 32]} />
+        <meshBasicMaterial color="#a855f7" transparent opacity={0.2} side={THREE.DoubleSide} />
+      </mesh>
+      <pointLight color="#a855f7" intensity={2} distance={5} />
+    </group>
+  )
+}
+
+// ===== WeaponObject — arma visual (caixa + cano) =====
+function WeaponMesh({ conect, setMeshRef }) {
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      {/* Corpo da arma */}
+      <mesh castShadow>
+        <boxGeometry args={[0.15, 0.2, 0.6]} />
+        <meshStandardMaterial color="#1f2937" roughness={0.6} metalness={0.4} />
+      </mesh>
+      {/* Cano */}
+      <mesh position={[0, 0.05, -0.4]} castShadow>
+        <cylinderGeometry args={[0.04, 0.04, 0.4, 8]} rotation={[Math.PI / 2, 0, 0]} />
+        <meshStandardMaterial color="#374151" roughness={0.4} metalness={0.7} />
+      </mesh>
+      {/* Gatilho */}
+      <mesh position={[0, -0.15, 0.1]}>
+        <boxGeometry args={[0.04, 0.1, 0.08]} />
+        <meshStandardMaterial color="#111827" />
+      </mesh>
+      {/* Mira */}
+      <mesh position={[0, 0.18, -0.2]}>
+        <boxGeometry args={[0.02, 0.06, 0.02]} />
+        <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={0.5} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== ItemObject — item coleccionável (octaedro rotativo + brilho) =====
+function ItemMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  useFrame((_, dt) => {
+    if (ref.current) {
+      ref.current.rotation.y += dt * 1.5
+      ref.current.rotation.x += dt * 0.5
+      // Hover
+      ref.current.position.y = 1 + Math.sin(performance.now() * 0.003) * 0.15
+    }
+  })
+  const color = conect.color || '#fbbf24'
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      <mesh ref={ref} position={[0, 1, 0]} castShadow>
+        <octahedronGeometry args={[0.3, 0]} />
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={0.6}
+          roughness={0.1}
+          metalness={0.8}
+          flatShading
+        />
+      </mesh>
+      {/* Anel no chão */}
+      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.4, 0.5, 16]} />
+        <meshBasicMaterial color={color} transparent opacity={0.4} side={THREE.DoubleSide} />
+      </mesh>
+      <pointLight color={color} intensity={1.5} distance={3} position={[0, 1, 0]} />
+    </group>
+  )
+}
+
+// ===== AreaObject — área de influência (caixa wireframe) =====
+function AreaMesh({ conect, setMeshRef }) {
+  const size = conect.size || [4, 4, 4]
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      <mesh>
+        <boxGeometry args={size} />
+        <meshBasicMaterial color="#3b82f6" wireframe transparent opacity={0.5} />
+      </mesh>
+      {/* Preenchimento translúcido */}
+      <mesh>
+        <boxGeometry args={size} />
+        <meshBasicMaterial color="#3b82f6" transparent opacity={0.08} depthWrite={false} />
+      </mesh>
+      {/* Centro */}
+      <mesh>
+        <sphereGeometry args={[0.15, 8, 8]} />
+        <meshBasicMaterial color="#3b82f6" />
+      </mesh>
     </group>
   )
 }

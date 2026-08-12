@@ -306,10 +306,28 @@ function CameraTouchZoneControl({ zone, sensitivity, invertY, minPitch, maxPitch
 
   useEffect(() => {
     if (!window._flirCameraRotation) {
-      window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: sensitivity }
+      window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: sensitivity, enabled: true }
     }
     window._flirCameraRotation.sensitivity = sensitivity
-  }, [sensitivity])
+    window._flirCameraRotation.enabled = true
+
+    // Suporte para teclado (setas) — útil em desktop sem rato a arrastar
+    const keys = window._flirKeys || {}
+    const onKeyDown = (e) => {
+      if (window._flirCameraRotation) {
+        const sens = 0.04
+        if (e.key === 'ArrowLeft') window._flirCameraRotation.yaw += sens
+        if (e.key === 'ArrowRight') window._flirCameraRotation.yaw -= sens
+        if (e.key === 'ArrowUp') window._flirCameraRotation.pitch = Math.max(minPitch, window._flirCameraRotation.pitch + sens)
+        if (e.key === 'ArrowDown') window._flirCameraRotation.pitch = Math.min(maxPitch, window._flirCameraRotation.pitch - sens)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      if (window._flirCameraRotation) window._flirCameraRotation.enabled = false
+    }
+  }, [sensitivity, minPitch, maxPitch])
 
   const z = zone || { x: 50, y: 0, w: 50, h: 100 }
   const zoneStyle = {

@@ -92,6 +92,7 @@ const initialScene = {
     waterQuality: 'basic', // basic | professional
     pixelRatio: 1,
   },
+  projectName: 'Novo Projeto',
 }
 
 // Níveis de Qualidade Gráfica
@@ -1431,6 +1432,7 @@ export const useStore = create(
           renderSettings: { ...s.renderSettings, ...preset.settings, qualityLevel: level },
         }))
       },
+      setProjectName: (name) => set({ projectName: name }),
 
       animStudioOpen: false,
       openAnimStudio: () => set({ animStudioOpen: true }),
@@ -1547,6 +1549,9 @@ export const useStore = create(
             // UI screens — só manter se o projeto exportar as suas
             uiScreens: data.uiScreens || [],
             activeUIScreenId: data.uiScreens?.[0]?.id || null,
+            // Render settings + project name (se vierem do projeto)
+            renderSettings: data.renderSettings || get().renderSettings,
+            projectName: data.projectName || get().projectName,
             // History — limpar (não desfazer para o projeto anterior)
             past: [],
             future: [],
@@ -1586,8 +1591,10 @@ export const useStore = create(
         appMode: state.appMode,
         uiScreens: state.uiScreens,
         activeUIScreenId: state.activeUIScreenId,
+        renderSettings: state.renderSettings,
+        projectName: state.projectName,
       }),
-      version: 3,
+      version: 4,
     }
   )
 )

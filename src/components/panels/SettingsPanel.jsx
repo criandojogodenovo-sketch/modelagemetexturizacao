@@ -7,7 +7,7 @@
  *  - Guardar/Abrir .flirengine
  *  - Atalhos de teclado
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useStore, QUALITY_PRESETS } from '../../store/useStore'
 import { IconClose } from '../ui/Icons'
 import { Icon } from '../ui/iconMap'
@@ -29,12 +29,20 @@ export default function SettingsPanel({ onClose }) {
   const renderSettings = useStore((s) => s.renderSettings)
   const setRenderSettings = useStore((s) => s.setRenderSettings)
   const setQualityLevel = useStore((s) => s.setQualityLevel)
-  const [projectName, setProjectName] = useState(() => {
-    try {
-      const data = JSON.parse(localStorage.getItem('me3d.project.v1') || '{}')
-      return data.state?.projectName || 'Meu Jogo'
-    } catch { return 'Meu Jogo' }
-  })
+  const storeProjectName = useStore((s) => s.projectName) || 'Meu Jogo'
+  const setStoreProjectName = useStore((s) => s.setProjectName)
+  const [projectName, setProjectName] = useState(storeProjectName)
+
+  // Sincronizar com store quando este muda externamente
+  useEffect(() => {
+    setProjectName(storeProjectName)
+  }, [storeProjectName])
+
+  const handleProjectNameChange = (e) => {
+    const v = e.target.value
+    setProjectName(v)
+    setStoreProjectName(v)
+  }
 
   const saveAsFlirengine = () => {
     const json = exportProjectJSON()
@@ -94,7 +102,7 @@ export default function SettingsPanel({ onClose }) {
             <h4>Projeto</h4>
             <div className="prop-row">
               <label>Nome do projeto</label>
-              <input type="text" value={projectName} onChange={(e) => setProjectName(e.target.value)} />
+              <input type="text" value={projectName} onChange={handleProjectNameChange} />
             </div>
             <button onClick={saveAsFlirengine} className="primary" style={{ width: '100%', marginTop: 8 }}>
               <Icon name="save" size={12} />

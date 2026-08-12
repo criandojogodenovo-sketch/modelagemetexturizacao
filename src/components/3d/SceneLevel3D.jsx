@@ -737,6 +737,15 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     }
     window._flirGameContext = gameContext
     window._flirInventory = inventoryRef.current
+    // Inicializar rotação da câmara (FPS/BR) — lida pelo GameMode no useFrame
+    if (!window._flirCameraRotation) {
+      window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: 1.0, enabled: true }
+    } else {
+      // Reset ao re-entrar no jogo
+      window._flirCameraRotation.yaw = 0
+      window._flirCameraRotation.pitch = 0
+      window._flirCameraRotation.enabled = true
+    }
 
     // Física
     const gravity = setupScene.physics?.gravity || [0, -9.82, 0]
@@ -1021,6 +1030,34 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     // Câmara: ViewObject ativa
     const viewConects = (activeScene.conects || []).filter((c) => c.type === 'ViewObject')
     const activeView = viewConects.find((c) => c.cameraRole === 'player') || viewConects.find((c) => c.cameraRole === 'primary') || viewConects[0]
+    // Aplicar FOV/Near/Far da ViewObject (ou gameCamera) à câmara do Canvas
+    if (activeView) {
+      const targetFov = activeView.fov || activeScene.gameCamera?.fov || 60
+      const targetNear = activeView.near || activeScene.gameCamera?.near || 0.1
+      const targetFar = activeView.far || activeScene.gameCamera?.far || 200
+      if (camera.fov !== targetFov) {
+        camera.fov = targetFov
+        camera.near = targetNear
+        camera.far = targetFar
+        camera.updateProjectionMatrix()
+      }
+    } else if (activeScene.gameCamera) {
+      // Sem ViewObject — usar gameCamera
+      const gc = activeScene.gameCamera
+      const targetFov = gc.fov || 60
+      const targetNear = gc.near || 0.1
+      const targetFar = gc.far || 200
+      if (camera.fov !== targetFov) {
+        camera.fov = targetFov
+        camera.near = targetNear
+        camera.far = targetFar
+        camera.updateProjectionMatrix()
+      }
+    }
+
+    // Ler rotação da CameraTouchZone (FPS/BR-style)
+    const camRotation = window._flirCameraRotation || { yaw: 0, pitch: 0, enabled: false }
+
     if (activeView) {
       // Se cameraRole='player' e não tem followTarget, seguir PersonalObject
       let targetId = activeView.followTarget
@@ -1028,15 +1065,51 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         const player = (activeScene.conects || []).find((c) => c.type === 'PersonalObject')
         if (player) targetId = player.instanceId
       }
-      if (targetId && activeView.followMode && activeView.followMode !== 'none') {
+      const mode = activeView.followMode || 'none'
+      if (targetId && mode !== 'none') {
         const targetMesh = meshRefs.current.get(targetId) || conectMeshRefs.current.get(targetId)
         if (targetMesh) {
-          const mode = activeView.followMode
           const dist = activeView.followDistance || 6
           const height = activeView.followHeight || 3
-          if (mode === 'third') {
-            camera.position.lerp(new THREE.Vector3(targetMesh.position.x, targetMesh.position.y + height, targetMesh.position.z + dist), 0.1)
-            camera.lookAt(targetMesh.position)
+          if (mode === 'first') {
+            // First-person: câmara na posição dos olhos do jogador, rotação pelo toque
+            const eyeHeight = activeView.eyeHeight || 1.6
+            camera.position.set(
+              targetMesh.position.x,
+              targetMesh.position.y + eyeHeight,
+              targetMesh.position.z
+            )
+            // Aplicar rotação da CameraTouchZone (FPS)
+            if (camRotation.enabled) {
+              // YXZ order = yaw (Y) depois pitch (X) — padrão FPS
+              camera.rotation.set(camRotation.pitch, camRotation.yaw, 0, 'YXZ')
+            } else {
+              // Sem touch input — olhar para frente
+              const rot = activeView.rotation || [0, 0, 0]
+              camera.rotation.set(rot[0], rot[1], rot[2], 'YXZ')
+            }
+          } else if (mode === 'third') {
+            // Third-person: se há touch input, orbita à volta do jogador
+            if (camRotation.enabled) {
+              const orbitDist = dist
+              const offsetY = Math.sin(camRotation.pitch) * orbitDist
+              const offsetX = Math.sin(camRotation.yaw) * Math.cos(camRotation.pitch) * orbitDist
+              const offsetZ = Math.cos(camRotation.yaw) * Math.cos(camRotation.pitch) * orbitDist
+              camera.position.set(
+                targetMesh.position.x + offsetX,
+                targetMesh.position.y + height + offsetY,
+                targetMesh.position.z + offsetZ
+              )
+              camera.lookAt(targetMesh.position.x, targetMesh.position.y + 1, targetMesh.position.z)
+            } else {
+              // Third-person clássico
+              camera.position.lerp(new THREE.Vector3(
+                targetMesh.position.x,
+                targetMesh.position.y + height,
+                targetMesh.position.z + dist
+              ), 0.1)
+              camera.lookAt(targetMesh.position)
+            }
           } else if (mode === 'top') {
             camera.position.lerp(new THREE.Vector3(targetMesh.position.x, targetMesh.position.y + dist, targetMesh.position.z), 0.1)
             camera.lookAt(targetMesh.position)
@@ -1048,8 +1121,25 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       } else {
         // Câmara estática na posição da ViewObject
         camera.position.set(...(activeView.position || [5, 4, 6]))
-        if (activeView.rotation) camera.rotation.set(...activeView.rotation)
-        else camera.lookAt(0, 0, 0)
+        if (camRotation.enabled) {
+          // Mesmo em câmara estática, permite olhar à volta com touch
+          camera.rotation.set(camRotation.pitch, camRotation.yaw, 0, 'YXZ')
+        } else if (activeView.rotation) {
+          camera.rotation.set(...activeView.rotation)
+        } else {
+          camera.lookAt(0, 0, 0)
+        }
+      }
+    } else if (activeScene.gameCamera) {
+      // Sem ViewObject — usar gameCamera estática
+      const gc = activeScene.gameCamera
+      camera.position.set(...(gc.position || [5, 4, 6]))
+      if (camRotation.enabled) {
+        camera.rotation.set(camRotation.pitch, camRotation.yaw, 0, 'YXZ')
+      } else if (gc.rotation) {
+        camera.rotation.set(...gc.rotation)
+      } else {
+        camera.lookAt(0, 0, 0)
       }
     }
 

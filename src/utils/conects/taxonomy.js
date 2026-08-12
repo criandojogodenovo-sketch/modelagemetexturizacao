@@ -492,6 +492,7 @@ export const CONECT_TAXONOMY = [
       followMode: 'none',
       followDistance: 6,
       followHeight: 3,
+      eyeHeight: 1.6,
       isActive: true,
       cameraRole: 'primary', // primary | secondary | player
     },
@@ -504,9 +505,10 @@ export const CONECT_TAXONOMY = [
       prop('near', 'Near (plano próximo)', 'number', 0.1, { min: 0.01, max: 5, step: 0.1 }),
       prop('far', 'Far (plano longe)', 'number', 200, { min: 10, max: 1000, step: 10 }),
       prop('followTarget', 'Seguir objeto', 'objectRef', null),
-      prop('followMode', 'Modo de seguir', 'select', 'none', { options: ['none', 'third', 'top', 'side'] }),
-      prop('followDistance', 'Distância', 'number', 6, { min: 1, max: 30, step: 0.5 }),
-      prop('followHeight', 'Altura', 'number', 3, { min: 0, max: 20, step: 0.5 }),
+      prop('followMode', 'Modo de seguir', 'select', 'none', { options: ['none', 'first', 'third', 'top', 'side'] }),
+      prop('followDistance', 'Distância (3rd/side)', 'number', 6, { min: 1, max: 30, step: 0.5 }),
+      prop('followHeight', 'Altura (3rd/side)', 'number', 3, { min: 0, max: 20, step: 0.5 }),
+      prop('eyeHeight', 'Altura dos olhos (1st)', 'number', 1.6, { min: 0.5, max: 3, step: 0.1 }),
     ],
   },
   // FASE 8: Zona de toque para rodar câmara (FPS/BR-style)

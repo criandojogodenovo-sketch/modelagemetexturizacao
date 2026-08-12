@@ -12,6 +12,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../../store/useStore'
 import { listProjects, loadProject, deleteProject } from '../../utils/db'
+import { flirQuestArenaJSON } from '../../utils/game/flirQuestArena'
 import Ebook from './Ebook'
 import { Icon } from '../ui/iconMap'
 
@@ -84,6 +85,17 @@ export default function HomePage({ onOpenProject }) {
     toast('Projeto apagado', 'info')
   }
 
+  // Carregar jogo demo "FlirQuest Arena" (FPS 3D completo)
+  const handleLoadDemo = () => {
+    try {
+      loadProjectJSON(flirQuestArenaJSON)
+      toast('FlirQuest Arena carregado! Clica em Play para jogar.', 'success', 4000)
+      onOpenProject?.()
+    } catch (err) {
+      toast('Erro ao carregar demo: ' + err.message, 'error')
+    }
+  }
+
   if (showEbook) {
     return <Ebook onClose={() => setShowEbook(false)} />
   }
@@ -112,6 +124,10 @@ export default function HomePage({ onOpenProject }) {
               <button onClick={handleOpenFlirEngine} title="Abrir projeto .flirengine">
                 <Icon name="folder-open" size={12} />
                 <span>Abrir</span>
+              </button>
+              <button onClick={handleLoadDemo} title="Carregar jogo demo FPS 3D completo" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                <Icon name="gamepad-2" size={12} />
+                <span>Demo FPS 3D</span>
               </button>
               <button className="primary" onClick={handleNew}>
                 <Icon name="plus" size={12} />

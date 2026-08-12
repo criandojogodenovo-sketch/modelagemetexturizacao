@@ -1,8 +1,217 @@
-# Modelagem & Texturização 3D
+# Modelagem & Texturização 3D — FlirScript Engine
 
 Engine web de modelagem, texturização, animação e edição de cenas 3D — funciona offline como PWA instalável. Construída com **React + Vite + Three.js**, inspirada em Blender e Spline, com interface escura e responsiva (desktop + telemóvel/tablet).
 
 > Todo o código corre 100% no browser (client-side). Não há backend obrigatório. Instalável como app no telemóvel/desktop.
+
+---
+
+## 📋 Estado Real da Engine (Auditoria Honesta — Agosto 2026)
+
+Esta secção documenta o estado REAL da engine após auditoria exaustiva. Sê cético sobre o que encontras em caches antigas — lê isto primeiro.
+
+### ✅ O que FUNCIONA (testado e operacional)
+
+- **Editor de modelagem 3D** — primitivas, edit, sculpt, materiais PBR, UV, animação, rig, esqueleto, FBX/GLB/OBJ import, GLB/OBJ/JSON export
+- **Editor de cenas** — level editor com drag-and-drop, múltiplas cenas, gameCamera configurável
+- **42 tipos de Conects** com renderers dedicados — ver secção Conects
+- **Modo de jogo** — física cannon-es, FlirCode runtime, animações, checkpoints, save/respawn
+- **Câmara FPS/Third-person** — `ViewObject` com `followMode: 'first' | 'third' | 'top' | 'side'`, integrado com `CameraTouchZone` (toque + rato + setas)
+- **Combate** — `shoot()`, `reload()`, `equipWeapon()`, `takeDamage()`, `getHealth()`, `getAmmo()` — funcionam tanto no preview como no jogo exportado
+- **Shaders Pro** — skyShaderPro (Rayleigh+Mie), waterShaderPro (Gerstner+caustics), parallaxOcclusionMappingPro (raymarching)
+- **Hardware Instancing** — `InstancedMesh` + frustum culling + LOD + GPU variation via `InstancingPanel`
+- **terrainNoise** — Simplex + Ridged + Domain Warping + Terracing + Erosão térmica, integrado no TerrainEditor
+- **Escultura 3D direta no viewport** — raycast + cursor 3D + aplicação em tempo real
+- **GLTF com .bin externo** — multi-file selector + `LoadingManager.setURLModifier`
+- **PWA** — instalável, offline, auto-save IndexedDB
+- **Exportação de jogo** — HTML standalone + APK Android (Capacitor)
+- **FlirQuest Arena** — jogo demo FPS 3D completo incluído (botão "Demo FPS 3D" na HomePage)
+
+### ⚠️ O que NÃO funciona (limitações conhecidas)
+
+| Sistema | Estado | Notas |
+|---|---|---|
+| **Marketplace** | UI pronta, backend NÃO deployado | As serverless functions em `/api/marketplace/` existem mas não estão activas na Vercel. Para activar: deploy das functions + configurar `NEON_DATABASE_URL` env var |
+| **Multiplayer** | Stub com servidor de echo | Usa `wss://echo.websocket.org` — cada cliente só recebe as suas próprias mensagens. Para multiplayer real: configurar servidor WebSocket próprio (ex: `wss://seu-servidor.com`) |
+| **FlirGI** | Flag existe, sem implementação | `applyFlirGI` em `flirGI.js` nunca é chamado. Marca checkbox mas não tem efeito visual |
+| **FlirAdaptiveMesh** | Flag existe, sem implementação | `createAdaptiveLOD` nunca é chamado |
+| **Shader Graph → GLSL** | Ficheiro existe, não integrado | `shaderGraphToGLSL.js` nunca é importado pelo `ShaderEditor` |
+| **physicsSystem.rapier.js** | Código morto | Ficheiro completo de 289 linhas com física Rapier WASM, mas nunca importado. `physicsSystem.js` (cannon-es) é o usado |
+
+### 📊 Estatísticas do código
+
+- **~16.500 linhas** de código em `src/`
+- **42 tipos de Conects** (37 com renderer dedicado, 5 genéricos)
+- **~15 ficheiros utilitários** com funções parcialmente não usadas (ver secção "Código morto" abaixo)
+- **Build size**: ~2.9 MB (PWA precache)
+- **Lint**: 0 erros, ~34 warnings
+
+---
+
+## 🎮 FlirQuest Arena — Jogo Demo Incluído
+
+Um FPS 3D completo gerado programaticamente, incluído como demo. Para jogar:
+
+1. Abre a engine (homepage)
+2. Clica em **"Demo FPS 3D"** (botão azul ao lado de "Novo Projeto")
+3. Muda para modo **Cena** (no rail vertical esquerdo)
+4. Clica em **▶ Play** para entrar no modo de jogo
+
+### Controles
+- **WASD / setas** — mover
+- **Setas** — rodar câmara (também)
+- **Rato (arrastar)** — rodar câmara (FPS)
+- **Touch (mobile)** — joystick virtual esquerdo + botões direita
+- **Espaço** — saltar
+- **Botão TIRO** (mobile) ou **`shoot()` via FlirCode** — disparar
+
+### Conteúdo do jogo
+- Terreno procedural 60×60m (Simplex + Ridged + Warping, 64×64 heightmap)
+- 4 pilares + 4 muros (cover tático)
+- 3 inimigos com IA (perseguir + atacar)
+- 5 gemas coleccionáveis (cores diferentes)
+- 1 checkpoint
+- Sky procedural + sol + ambiente
+- HUD completo (vida, munição, aviso, botões)
+- ViewObject FPS (followMode='first') + CameraTouchZone
+
+---
+
+## 🏗️ Arquitetura
+
+### Estrutura de pastas
+```
+src/
+├── components/
+│   ├── 3d/              # Viewports Three.js (Scene3D, SceneLevel3D, SceneObject, SkeletonGizmo, TerrainSculpt3D)
+│   ├── panels/          # Painéis da UI (TopBar, LeftPanel, RightPanel, TerrainEditor, ...)
+│   ├── home/            # HomePage + Ebook
+│   └── ui/              # Componentes reutilizáveis (Icons, VerticalRail, MainMenu, ...)
+├── store/
+│   └── useStore.js      # Estado global Zustand com persistência
+├── utils/
+│   ├── conects/         # Taxonomia de Conects + física (cannon-es) + NPC AI + anim controller
+│   ├── flirscript/      # FlirScript (visual) + FlirCode (textual) runtime
+│   ├── terrain/         # terrainMath (Perlin) + terrainNoise (Simplex+Voronoi+Ridged)
+│   ├── game/            # gameRuntime.js (exportado) + gameExporter.js + flirQuestArena.js (demo)
+│   └── ...              # waterShader, skyShader, hardwareInstancing, etc.
+├── workers/             # Web Workers (FBX import)
+└── styles/global.css    # CSS único (5.2k linhas)
+```
+
+### Conects (42 tipos)
+
+Cada Conect é um objeto de jogo com semântica própria. Todos têm renderer dedicado no `ConectRenderer.jsx`:
+
+| Categoria | Tipos |
+|---|---|
+| **Física** | RigidObject, StaticObject, StopObject, PersonalObject (jogador), NpcObject, TriggerObject, JointObject |
+| **Visual** | VisualObject (catálogo), LuminousObject, SunObject, PointObject, SpotObject, AreaObject, AmbientObject, ReflectObject |
+| **Ambiente** | SkyObject, TerrainObject, WaterObject, FogObject, ParticleObject, TrailObject |
+| **Câmara** | ViewObject (com followMode: none/first/third/top/side), CameraTouchZone |
+| **Áudio** | SoundObject |
+| **UI** | ButtonObject, JoystickObject, TextObject, ImageObject, PanelObject |
+| **Gameplay** | SpawnObject, NavigatorObject (portal), CheckpointObject, TimerObject, PathObject, WeaponObject, ItemObject |
+| **Sistema** | AnimationBoostObject, GameStateObject, PrefabObject, RoguelikeGenerator, GroupObject, ReferenceObject |
+
+---
+
+## 🔧 Correções recentes (Agosto 2026)
+
+### Câmara FPS agora funciona
+- **Problema**: `CameraTouchZone` escrevia em `window._flirCameraRotation` mas o GameMode nunca aplicava à câmara — feature era um no-op.
+- **Solução**: GameMode agora lê `window._flirCameraRotation` e aplica `camera.rotation.set(pitch, yaw, 0, 'YXZ')` em cada frame.
+- Adicionado `followMode: 'first'` (first-person) ao `ViewObject` com `eyeHeight` configurável.
+- Suporte para teclado (setas) + rato (arrastar) + touch (mobile).
+
+### Combate exportado
+- **Problema**: `shoot()`, `reload()`, `equipWeapon()`, `spawnObject()` no `gameRuntime.js` (exportado) eram stubs (só `dbg()`). Jogos exportados perdiam combate.
+- **Solução**: Implementação real com `THREE.Raycaster` para `shoot()`, procura em catálogo para `spawnObject()`, leitura de `WeaponObject` para `equipWeapon()`.
+
+### FOV/Near/Far aplicados ao Canvas
+- **Problema**: `scene.gameCamera.fov/near/far` eram ignorados — Canvas tinha `fov: 50` hardcoded.
+- **Solução**: GameMode agora chama `camera.fov = targetFov; camera.updateProjectionMatrix()` quando muda.
+
+### 5 Conects com renderer dedicado
+- **Problema**: `SpawnObject`, `NavigatorObject`, `WeaponObject`, `ItemObject`, `AreaObject` caíam em `PlaceholderMesh` (cubo cinza).
+- **Solução**: Renderers dedicados:
+  - `SpawnMarkerMesh` — seta verde + anel (ponto de spawn)
+  - `NavigatorMesh` — portal roxo rotativo + luz
+  - `WeaponMesh` — modelo de arma (corpo + cano + gatilho + mira)
+  - `ItemMesh` — octaedro rotativo + hover + luz colorida
+  - `AreaMesh` — wireframe + preenchimento translúcido
+
+### Persistência de configurações
+- **Problema**: `renderSettings` e `projectName` não eram persistidos no `partialize` — perdiam-se ao recarregar.
+- **Solução**: Adicionados ao `partialize` (versão 4 do storage).
+
+---
+
+## 🚀 Começar
+
+### Desenvolvimento
+```bash
+cd modelagemetexturizacao
+npm install
+npm run dev      # http://localhost:5173
+```
+
+### Build produção
+```bash
+npm run build    # gera dist/
+npm run preview  # testar build
+```
+
+### Deploy
+- **Vercel**: push para `main` → deploy automático
+- **Netlify**: configuração em `netlify.toml`
+- **APK Android**: usa Capacitor (ver `GameExportModal`)
+
+---
+
+## 📚 Código morto (a limpar numa futura iteração)
+
+Estes ficheiros existem mas as suas funções nunca são chamadas em componentes React:
+
+| Ficheiro | Estado | Razão |
+|---|---|---|
+| `src/utils/waterShader.js` | Morto | Substituído por `waterShaderPro.js` |
+| `src/utils/flirSkyShader.js` | Morto | Substituído por `skyShaderPro.js` |
+| `src/utils/parallaxOcclusionMapping.js` | Morto | Substituído por `parallaxOcclusionMappingPro.js` |
+| `src/utils/buildingGenerator.js` | Morto | Nunca integrado na UI |
+| `src/utils/shaderGraphToGLSL.js` | Morto | `ShaderEditor` não o usa |
+| `src/utils/flirAdaptiveMesh.js` | Morto | Flag existe, sem caller |
+| `src/utils/flirGI.js` | Morto | Flag existe, sem caller |
+| `src/utils/instancedRenderer.js` | Morto | Substituído por `hardwareInstancing.js` + InstancingRenderer interno |
+| `src/utils/conects/physicsSystem.rapier.js` | Morto | cannon-es é usado |
+
+**Nota**: Estes ficheiros não causam erros nem aumentam o bundle (tree-shaking remove-os). Mas confundem quem lê o código. Remoção planeada.
+
+---
+
+## 🛣️ Roadmap futuro
+
+### Prioridade alta
+1. **Activar backend do Marketplace** — deploy das serverless functions + Neon PostgreSQL
+2. **Multiplayer real** — servidor WebSocket próprio (não echo)
+3. **Implementar FlirGI** — global illumination real
+4. **Integrar shaderGraphToGLSL** no ShaderEditor
+5. **Migrar para Rapier** — física WASM mais rápida que cannon-es
+
+### Prioridade média
+6. **WebRTC para multiplayer P2P** — sem servidor
+7. **Terrain erosion hidráulica** — simulação de água
+8. **PBR material editor avançado** — node graph
+9. **Animation retargeting** — aplicar animações de um rig noutro
+10. **Voxel terrain** — alternativa ao heightmap
+
+### Prioridade baixa
+11. **WebGPU backend** — quando tiver adoção >80%
+12. **VR/AR mode** — WebXR
+13. **AI NPC avançada** — pathfinding A*, behavior trees
+14. **Multiplayer server dedicated** — em Rust/Go
+
+---
 
 ## 🆕 Fase 1 — PWA + Editor de Cenas
 
