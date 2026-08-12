@@ -1,0 +1,1580 @@
+     1→/**
+     2→ * Store principal da aplicação — Zustand.
+     3→ *
+     4→ * Estado gerido:
+     5→ *  - Cena: objetos, seleção, transform mode, fundo, grelha, luzes
+     6→ *  - UI: painéis, modo ativo (object/edit/sculpt/uv/paint/rig/animate), toasts, loading
+     7→ *  - Histórico Undo/Redo
+     8→ *  - Persistência localStorage
+     9→ *
+    10→ * Ações expostas (além das originais):
+    11→ *  - setMode(mode)                              — alternar entre object/edit/sculpt/uv/paint/rig/animate
+    12→ *  - setEditModeSelection(mode)                 — vertex/edge/face
+    13→ *  - addModifier(id, type)                      — adicionar modificador
+    14→ *  - updateModifier(id, index, patch)           — atualizar parâmetros
+    15→ *  - removeModifier(id, index)                  — remover modificador
+    16→ *  - applyModifierStack(id)                     — calcular geometria final com modificadores
+    17→ *  - applyBooleanOp(targetId, toolId, op)       — booleana entre dois objetos
+    18→ *  - applyMeshOp(id, op, params)                — extrude/inset/bevel/loop cut/merge/subdivide
+    19→ *  - sculptStrokeAt(id, point, normal, params)  — pincelada de esculpir
+    20→ *  - setParent(childId, parentId)               — hierarquia
+    21→ *  - clearParent(childId)                       — remover parent
+    22→ *  - applyMaterialPreset(id, presetId)          — aplicar material predefinido
+    23→ *  - addTextureLayer(id, layer)                 — adicionar camada de textura
+    24→ *  - updateTextureLayer(id, index, patch)
+    25→ *  - removeTextureLayer(id, index)
+    26→ *  - unwrapUV(id, method)                       — unwrap automático
+    27→ *  - addBone(objId, position)                   — adicionar osso ao esqueleto
+    28→ *  - updateBone(objId, boneId, patch)
+    29→ *  - removeBone(objId, boneId)
+    30→ *  - addKeyframe(objId, clipName, boneId, frame, transform)
+    31→ *  - removeKeyframe(objId, clipName, keyframeId)
+    32→ *  - playAnimation(objId, clipName)
+    33→ *  - pauseAnimation()
+    34→ *  - setAnimationTime(time)
+    35→ */
+    36→import { create } from 'zustand'
+    37→import { persist } from 'zustand/middleware'
+    38→import * as THREE from 'three'
+    39→import { createSceneObject, defaultMaterial, PRIMITIVES } from '../utils/primitives'
+    40→import { findMaterial } from '../utils/materialLibrary'
+    41→import * as meshOps from '../utils/meshOperations'
+    42→import { createConectInstance, findConectDefinition } from '../utils/conects/taxonomy'
+    43→
+    44→const STORAGE_KEY = 'me3d.project.v1'
+    45→
+    46→const MAX_HISTORY = 60
+    47→
+    48→function snapshot(objects) {
+    49→  // Clona profundamente mas descarta bufferGeometry (não serializável)
+    50→  return JSON.parse(JSON.stringify(objects, (key, value) => {
+    51→    if (key === 'bufferGeometry' && value && typeof value === 'object') return undefined
+    52→    return value
+    53→  }))
+    54→}
+    55→
+    56→const initialScene = {
+    57→  objects: [],
+    58→  selectedId: null,
+    59→  transformMode: 'translate',
+    60→  background: {
+    61→    type: 'solid',
+    62→    color: '#0d1117',
+    63→    gradientTop: '#1a2332',
+    64→    gradientBottom: '#0a0d12',
+    65→  },
+    66→  grid: {
+    67→    visible: true,
+    68→    size: 20,
+    69→    divisions: 20,
+    70→    color: '#30363d',
+    71→  },
+    72→  lights: {
+    73→    ambient: { intensity: 0.6, color: '#ffffff' },
+    74→    directional: {
+    75→      intensity: 1.2,
+    76→      color: '#ffffff',
+    77→      position: [5, 8, 5],
+    78→    },
+    79→    hdri: null, // dataURL do HDRI ou null
+    80→  },
+    81→}
+    82→
+    83→// Modos da aplicação
+    84→export const APP_MODES = ['object', 'edit', 'sculpt', 'uv', 'paint', 'rig', 'animate']
+    85→
+    86→// Modos de seleção em edit mode
+    87→export const EDIT_SELECTION_MODES = ['vertex', 'edge', 'face']
+    88→
+    89→// Tipos de modificadores suportados
+    90→export const MODIFIER_TYPES = {
+    91→  subdivision: {
+    92→    label: 'Subdivision Surface',
+    93→    icon: 'subdivide',
+    94→    defaultParams: { levels: 1 },
+    95→    description: 'Suaviza a malha subdividindo cada face',
+    96→  },
+    97→  mirror: {
+    98→    label: 'Mirror (Espelho)',
+    99→    icon: 'mirror',
+   100→    defaultParams: { axis: 'x' },
+   101→    description: 'Espelha a geometria num eixo',
+   102→  },
+   103→  array: {
+   104→    label: 'Array (Repetição)',
+   105→    icon: 'array',
+   106→    defaultParams: { count: 3, offset: [1.5, 0, 0] },
+   107→    description: 'Repete a geometria N vezes',
+   108→  },
+   109→  solidify: {
+   110→    label: 'Solidify (Espessura)',
+   111→    icon: 'solidify',
+   112→    defaultParams: { thickness: 0.1 },
+   113→    description: 'Dá espessura a uma superfície',
+   114→  },
+   115→}
+   116→
+   117→// Tipos de operações booleanas
+   118→export const BOOLEAN_OPS = [
+   119→  { id: 'union', label: 'União', description: 'A ∪ B' },
+   120→  { id: 'subtract', label: 'Subtração', description: 'A − B' },
+   121→  { id: 'intersect', label: 'Interseção', description: 'A ∩ B' },
+   122→]
+   123→
+   124→function newProjectState() {
+   125→  return {
+   126→    // Cena/objetos
+   127→    ...initialScene,
+   128→    objects: [],
+   129→    selectedId: null,
+   130→    // Multi-cena — LIMPAR (era o bug P1: conects/scripts persistiam entre projetos)
+   131→    scenes: [],
+   132→    activeSceneId: null,
+   133→    selectedConectId: null,
+   134→    // App mode — voltar a modeling
+   135→    appMode: 'modeling',
+   136→    flirScriptTarget: null,
+   137→    // UI Editor — limpar telas
+   138→    uiScreens: [],
+   139→    activeUIScreenId: null,
+   140→    selectedUIElementId: null,
+   141→    // Animation
+   142→    animation: {
+   143→      playing: false,
+   144→      currentTime: 0,
+   145→      duration: 60,
+   146→      fps: 30,
+   147→      activeClip: 'idle',
+   148→      loop: true,
+   149→    },
+   150→    // Edit mode
+   151→    editSelectionMode: 'face',
+   152→    selectedVertices: [],
+   153→    selectedEdges: [],
+   154→    selectedFaces: [],
+   155→    // History — limpar (não faz sentido desfazer para o projeto anterior)
+   156→    past: [],
+   157→    future: [],
+   158→  }
+   159→}
+   160→
+   161→export const useStore = create(
+   162→  persist(
+   163→    (set, get) => ({
+   164→      // ===== Estado da cena =====
+   165→      ...initialScene,
+   166→      objects: [],
+   167→      selectedId: null,
+   168→      transformMode: 'translate',
+   169→
+   170→      // ===== Modo da aplicação =====
+   171→      mode: 'object',           // object | edit | sculpt | uv | paint | rig | animate
+   172→      editSelectionMode: 'face', // vertex | edge | face
+   173→      selectedVertices: [],     // índices de vértices selecionados em edit mode
+   174→      selectedEdges: [],
+   175→      selectedFaces: [],
+   176→
+   177→      // ===== Sculpt =====
+   178→      sculptSettings: {
+   179→        brushSize: 0.5,
+   180→        brushStrength: 0.05,
+   181→        mode: 'raise', // raise | lower | smooth | flatten
+   182→      },
+   183→
+   184→      // ===== Texture painting =====
+   185→      paintSettings: {
+   186→        color: '#ff5555',
+   187→        brushSize: 16,
+   188→        opacity: 0.8,
+   189→      },
+   190→
+   191→      // ===== Animation =====
+   192→      animation: {
+   193→        playing: false,
+   194→        currentTime: 0,
+   195→        duration: 60,
+   196→        fps: 30,
+   197→        activeClip: 'idle',
+   198→        loop: true,
+   199→      },
+   200→
+   201→      // ===== Estado da UI =====
+   202→      ui: {
+   203→        leftDrawerOpen: false,
+   204→        rightDrawerOpen: false,
+   205→        moreToolsOpen: false,  // grelha de "mais ferramentas" em ecrã cheia
+   206→        bottomBarOpen: false,  // drawer de ferramentas em mobile
+   207→        loading: false,
+   208→        loadingMessage: '',
+   209→        activePanel: 'tools', // tools | modifiers | materials | animation | scene
+   210→      },
+   211→
+   212→      // ===== Histórico =====
+   213→      past: [],
+   214→      future: [],
+   215→
+   216→      // ===== Toasts =====
+   217→      toasts: [],
+   218→
+   219→      // ---------- Helpers internos ----------
+   220→      _pushHistory: () => {
+   221→        const { objects, past } = get()
+   222→        const next = [...past, snapshot(objects)]
+   223→        if (next.length > MAX_HISTORY) next.shift()
+   224→        set({ past: next, future: [] })
+   225→      },
+   226→
+   227→      _pushHistoryCoalesced: (() => {
+   228→        let lastKey = null
+   229→        return (key) => {
+   230→          const { objects, past } = get()
+   231→          if (lastKey === key && past.length > 0) {
+   232→            const next = [...past.slice(0, -1), snapshot(objects)]
+   233→            set({ past: next })
+   234→          } else {
+   235→            const next = [...past, snapshot(objects)]
+   236→            if (next.length > MAX_HISTORY) next.shift()
+   237→            set({ past: next, future: [] })
+   238→          }
+   239→          lastKey = key
+   240→        }
+   241→      })(),
+   242→
+   243→      // ---------- Toasts ----------
+   244→      toast: (message, type = 'info', duration = 2400) => {
+   245→        const id = Math.random().toString(36).slice(2)
+   246→        set((s) => ({ toasts: [...s.toasts, { id, message, type }] }))
+   247→        setTimeout(() => {
+   248→          set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
+   249→        }, duration)
+   250→      },
+   251→
+   252→      dismissToast: (id) =>
+   253→        set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+   254→
+   255→      // ---------- UI ----------
+   256→      setUI: (partial) => set((s) => ({ ui: { ...s.ui, ...partial } })),
+   257→      toggleLeftDrawer: () =>
+   258→        set((s) => ({ ui: { ...s.ui, leftDrawerOpen: !s.ui.leftDrawerOpen } })),
+   259→      toggleRightDrawer: () =>
+   260→        set((s) => ({ ui: { ...s.ui, rightDrawerOpen: !s.ui.rightDrawerOpen } })),
+   261→      toggleMoreTools: () =>
+   262→        set((s) => ({ ui: { ...s.ui, moreToolsOpen: !s.ui.moreToolsOpen } })),
+   263→      toggleBottomBar: () =>
+   264→        set((s) => ({ ui: { ...s.ui, bottomBarOpen: !s.ui.bottomBarOpen } })),
+   265→      closeDrawers: () =>
+   266→        set((s) => ({ ui: { ...s.ui, leftDrawerOpen: false, rightDrawerOpen: false, moreToolsOpen: false, bottomBarOpen: false } })),
+   267→      setActivePanel: (panel) =>
+   268→        set((s) => ({ ui: { ...s.ui, activePanel: panel, moreToolsOpen: false } })),
+   269→
+   270→      // ---------- Modo ----------
+   271→      setMode: (mode) => {
+   272→        set({ mode, selectedVertices: [], selectedEdges: [], selectedFaces: [] })
+   273→        if (mode === 'edit') set({ transformMode: 'translate' })
+   274→        if (mode === 'sculpt' || mode === 'paint') {
+   275→          // desligar TransformControls nestes modos
+   276→        }
+   277→      },
+   278→      setEditModeSelection: (mode) => set({ editSelectionMode: mode }),
+   279→      setSculptSettings: (patch) =>
+   280→        set((s) => ({ sculptSettings: { ...s.sculptSettings, ...patch } })),
+   281→      setPaintSettings: (patch) =>
+   282→        set((s) => ({ paintSettings: { ...s.paintSettings, ...patch } })),
+   283→
+   284→      // ---------- Projeto ----------
+   285→      newProject: () => {
+   286→        get()._pushHistory()
+   287→        set({ ...newProjectState() })
+   288→        // Limpar o auto-save do IndexedDB (PROJECT_ID = 'default') para que
+   289→        // o projeto anterior não seja restaurado acidentalmente num refresh.
+   290→        // Import dinâmico para evitar circular dependency.
+   291→        import('../utils/db').then(({ deleteProject, isIndexedDBAvailable }) => {
+   292→          if (isIndexedDBAvailable()) {
+   293→            deleteProject('default').catch(() => {})
+   294→          }
+   295→        }).catch(() => {})
+   296→        get().toast('Novo projeto criado', 'info')
+   297→      },
+   298→
+   299→      // ---------- Objetos ----------
+   300→      addObject: (type, position) => {
+   301→        get()._pushHistory()
+   302→        const existing = get().objects.length
+   303→        const offset = position || [
+   304→          (existing % 4) * 1.2 - 1.8,
+   305→          0.5,
+   306→          Math.floor(existing / 4) * 1.2,
+   307→        ]
+   308→        const obj = createSceneObject(type, offset)
+   309→        set((s) => ({
+   310→          objects: [...s.objects, obj],
+   311→          selectedId: obj.id,
+   312→        }))
+   313→        return obj
+   314→      },
+   315→
+   316→      addImportedObject: (objData) => {
+   317→        get()._pushHistory()
+   318→        set((s) => ({
+   319→          objects: [...s.objects, objData],
+   320→          selectedId: objData.id,
+   321→        }))
+   322→      },
+   323→
+   324→      selectObject: (id) => set({ selectedId: id, selectedVertices: [], selectedEdges: [], selectedFaces: [] }),
+   325→      deselect: () => set({ selectedId: null, selectedVertices: [], selectedEdges: [], selectedFaces: [] }),
+   326→
+   327→      renameObject: (id, name) => {
+   328→        get()._pushHistory()
+   329→        set((s) => ({
+   330→          objects: s.objects.map((o) => (o.id === id ? { ...o, name } : o)),
+   331→        }))
+   332→      },
+   333→
+   334→      updateObject: (id, patch) => {
+   335→        set((s) => ({
+   336→          objects: s.objects.map((o) => (o.id === id ? { ...o, ...patch } : o)),
+   337→        }))
+   338→      },
+   339→
+   340→      updateMaterial: (id, patch) => {
+   341→        set((s) => ({
+   342→          objects: s.objects.map((o) =>
+   343→            o.id === id ? { ...o, material: { ...o.material, ...patch } } : o
+   344→          ),
+   345→        }))
+   346→      },
+   347→
+   348→      commitMaterial: (id, patch) => {
+   349→        get()._pushHistory()
+   350→        set((s) => ({
+   351→          objects: s.objects.map((o) =>
+   352→            o.id === id ? { ...o, material: { ...o.material, ...patch } } : o
+   353→          ),
+   354→        }))
+   355→      },
+   356→
+   357→      transformObject: (id, transform) => {
+   358→        get()._pushHistoryCoalesced(`transform:${id}`)
+   359→        set((s) => ({
+   360→          objects: s.objects.map((o) => (o.id === id ? { ...o, ...transform } : o)),
+   361→        }))
+   362→      },
+   363→
+   364→      duplicateObject: (id) => {
+   365→        const obj = get().objects.find((o) => o.id === id)
+   366→        if (!obj) return
+   367→        get()._pushHistory()
+   368→        const copy = JSON.parse(JSON.stringify(obj))
+   369→        copy.id = `obj_${Math.random().toString(36).slice(2, 10)}`
+   370→        copy.name = `${obj.name} (cópia)`
+   371→        copy.position = [obj.position[0] + 0.5, obj.position[1], obj.position[2] + 0.5]
+   372→        // limpar parent para não herdar transformações
+   373→        copy.parentId = null
+   374→        set((s) => ({
+   375→          objects: [...s.objects, copy],
+   376→          selectedId: copy.id,
+   377→        }))
+   378→        get().toast('Objeto duplicado', 'success')
+   379→      },
+   380→
+   381→      deleteObject: (id) => {
+   382→        get()._pushHistory()
+   383→        set((s) => ({
+   384→          objects: s.objects
+   385→            .filter((o) => o.id !== id)
+   386→            .map((o) => (o.parentId === id ? { ...o, parentId: null } : o)),
+   387→          selectedId: s.selectedId === id ? null : s.selectedId,
+   388→        }))
+   389→        get().toast('Objeto eliminado', 'info')
+   390→      },
+   391→
+   392→      toggleVisibility: (id) => {
+   393→        get()._pushHistory()
+   394→        set((s) => ({
+   395→          objects: s.objects.map((o) =>
+   396→            o.id === id ? { ...o, visible: !o.visible } : o
+   397→          ),
+   398→        }))
+   399→      },
+   400→
+   401→      extrudeObject: (id, amount = 0.5) => {
+   402→        const obj = get().objects.find((o) => o.id === id)
+   403→        if (!obj) return
+   404→        get()._pushHistory()
+   405→        const scaled = {
+   406→          ...JSON.parse(JSON.stringify(obj)),
+   407→          scale: [obj.scale[0], obj.scale[1] * (1 + amount), obj.scale[2]],
+   408→        }
+   409→        set((s) => ({
+   410→          objects: s.objects.map((o) => (o.id === id ? scaled : o)),
+   411→        }))
+   412→        get().toast(`Extrude aplicado (${amount.toFixed(2)})`, 'success')
+   413→      },
+   414→
+   415→      // ---------- Hierarquia (parent/child) ----------
+   416→      setParent: (childId, parentId) => {
+   417→        if (childId === parentId) return
+   418→        // Evitar ciclos: o parentId não pode ser descendente do childId
+   419→        const objects = get().objects
+   420→        const wouldCycle = (id, target) => {
+   421→          if (id === target) return true
+   422→          const obj = objects.find((o) => o.id === id)
+   423→          if (!obj || !obj.parentId) return false
+   424→          return wouldCycle(obj.parentId, target)
+   425→        }
+   426→        if (wouldCycle(parentId, childId)) {
+   427→          get().toast('Não é possível criar ciclo de parentesco', 'error')
+   428→          return
+   429→        }
+   430→        get()._pushHistory()
+   431→        set((s) => ({
+   432→          objects: s.objects.map((o) =>
+   433→            o.id === childId ? { ...o, parentId: parentId || null } : o
+   434→          ),
+   435→        }))
+   436→        get().toast('Objetos agrupados', 'success')
+   437→      },
+   438→
+   439→      clearParent: (childId) => {
+   440→        get()._pushHistory()
+   441→        set((s) => ({
+   442→          objects: s.objects.map((o) =>
+   443→            o.id === childId ? { ...o, parentId: null } : o
+   444→          ),
+   445→        }))
+   446→      },
+   447→
+   448→      // ---------- Modificadores (não destrutivos) ----------
+   449→      addModifier: (id, type) => {
+   450→        const def = MODIFIER_TYPES[type]
+   451→        if (!def) return
+   452→        get()._pushHistory()
+   453→        const modifier = {
+   454→          id: `mod_${Math.random().toString(36).slice(2, 10)}`,
+   455→          type,
+   456→          enabled: true,
+   457→          params: { ...def.defaultParams },
+   458→        }
+   459→        set((s) => ({
+   460→          objects: s.objects.map((o) =>
+   461→            o.id === id ? { ...o, modifiers: [...(o.modifiers || []), modifier] } : o
+   462→          ),
+   463→        }))
+   464→        get().toast(`Modificador "${def.label}" adicionado`, 'success')
+   465→      },
+   466→
+   467→      updateModifier: (id, modifierId, patch) => {
+   468→        set((s) => ({
+   469→          objects: s.objects.map((o) =>
+   470→            o.id === id
+   471→              ? {
+   472→                  ...o,
+   473→                  modifiers: (o.modifiers || []).map((m) =>
+   474→                    m.id === modifierId ? { ...m, ...patch, params: { ...m.params, ...(patch.params || {}) } } : m
+   475→                  ),
+   476→                }
+   477→              : o
+   478→          ),
+   479→        }))
+   480→      },
+   481→
+   482→      removeModifier: (id, modifierId) => {
+   483→        get()._pushHistory()
+   484→        set((s) => ({
+   485→          objects: s.objects.map((o) =>
+   486→            o.id === id
+   487→              ? { ...o, modifiers: (o.modifiers || []).filter((m) => m.id !== modifierId) }
+   488→              : o
+   489→          ),
+   490→        }))
+   491→        get().toast('Modificador removido', 'info')
+   492→      },
+   493→
+   494→      // ---------- Operações de malha (edit mode) ----------
+   495→      // Aplica uma operação de malha e guarda o resultado em customGeometry
+   496→      applyMeshOp: (id, op, params = {}) => {
+   497→        const obj = get().objects.find((o) => o.id === id)
+   498→        if (!obj) return
+   499→        get()._pushHistory()
+   500→
+   501→        // Construir geometria atual
+   502→        let geometry
+   503→        if (obj.customGeometry) {
+   504→          geometry = new THREE.BufferGeometry()
+   505→          geometry.setAttribute('position', new THREE.Float32BufferAttribute(obj.customGeometry.positions, 3))
+   506→          if (obj.customGeometry.normals) {
+   507→            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(obj.customGeometry.normals, 3))
+   508→          }
+   509→          if (obj.customGeometry.uvs) {
+   510→            geometry.setAttribute('uv', new THREE.Float32BufferAttribute(obj.customGeometry.uvs, 2))
+   511→          }
+   512→        } else if (obj.imported && obj.bufferGeometry) {
+   513→          geometry = obj.bufferGeometry
+   514→        } else {
+   515→          const def = PRIMITIVES[obj.type]
+   516→          geometry = def ? def.build(THREE, obj.args) : new THREE.BoxGeometry(1, 1, 1)
+   517→        }
+   518→
+   519→        let result = geometry
+   520→        switch (op) {
+   521→          case 'subdivide':
+   522→            result = meshOps.subdivide(geometry, params.levels || 1)
+   523→            break
+   524→          case 'extrude':
+   525→            result = meshOps.extrudeFaces(geometry, params.amount ?? 0.5)
+   526→            break
+   527→          case 'inset':
+   528→            result = meshOps.insetFaces(geometry, params.amount ?? 0.1)
+   529→            break
+   530→          case 'bevel':
+   531→            result = meshOps.bevelGeometry(geometry, params.radius ?? 0.05, params.segments ?? 2)
+   532→            break
+   533→          case 'loopCut':
+   534→            result = meshOps.loopCut(geometry, params.axis || 'y', params.position || 0)
+   535→            break
+   536→          case 'merge':
+   537→            result = meshOps.mergeVertices(geometry, params.threshold ?? 0.001)
+   538→            break
+   539→          case 'unwrap':
+   540→            result = meshOps.unwrapUV(geometry, params.method || 'planar')
+   541→            break
+   542→          default:
+   543→            get().toast(`Operação desconhecida: ${op}`, 'error')
+   544→            return
+   545→        }
+   546→
+   547→        // Serializar para o store
+   548→        const positions = result.getAttribute('position').array
+   549→        const normals = result.getAttribute('normal')?.array
+   550→        const uvs = result.getAttribute('uv')?.array
+   551→        set((s) => ({
+   552→          objects: s.objects.map((o) =>
+   553→            o.id === id
+   554→              ? {
+   555→                  ...o,
+   556→                  customGeometry: {
+   557→                    positions: Array.from(positions),
+   558→                    normals: normals ? Array.from(normals) : null,
+   559→                    uvs: uvs ? Array.from(uvs) : null,
+   560→                  },
+   561→                }
+   562→              : o
+   563→          ),
+   564→        }))
+   565→        get().toast(`Operação "${op}" aplicada`, 'success')
+   566→      },
+   567→
+   568→      // ---------- Booleanas entre objetos ----------
+   569→      applyBooleanOp: (targetId, toolId, op) => {
+   570→        const objects = get().objects
+   571→        const target = objects.find((o) => o.id === targetId)
+   572→        const tool = objects.find((o) => o.id === toolId)
+   573→        if (!target || !tool) return
+   574→        get()._pushHistory()
+   575→
+   576→        const buildGeo = (obj) => {
+   577→          if (obj.customGeometry) {
+   578→            const g = new THREE.BufferGeometry()
+   579→            g.setAttribute('position', new THREE.Float32BufferAttribute(obj.customGeometry.positions, 3))
+   580→            if (obj.customGeometry.normals) {
+   581→              g.setAttribute('normal', new THREE.Float32BufferAttribute(obj.customGeometry.normals, 3))
+   582→            }
+   583→            return g
+   584→          }
+   585→          if (obj.imported && obj.bufferGeometry) return obj.bufferGeometry
+   586→          const def = PRIMITIVES[obj.type]
+   587→          return def ? def.build(THREE, obj.args) : new THREE.BoxGeometry(1, 1, 1)
+   588→        }
+   589→
+   590→        const geoA = buildGeo(target)
+   591→        const geoB = buildGeo(tool)
+   592→        // Aplicar transform do tool ao geoB
+   593→        geoB.applyMatrix4(new THREE.Matrix4().compose(
+   594→          new THREE.Vector3(...tool.position),
+   595→          new THREE.Quaternion().setFromEuler(new THREE.Euler(...tool.rotation)),
+   596→          new THREE.Vector3(...tool.scale)
+   597→        ))
+   598→        const result = meshOps.booleanOp(geoA, geoB, op)
+   599→
+   600→        const positions = result.getAttribute('position').array
+   601→        const normals = result.getAttribute('normal')?.array
+   602→        set((s) => ({
+   603→          objects: s.objects.map((o) =>
+   604→            o.id === targetId
+   605→              ? {
+   606→                  ...o,
+   607→                  customGeometry: {
+   608→                    positions: Array.from(positions),
+   609→                    normals: normals ? Array.from(normals) : null,
+   610→                    uvs: null,
+   611→                  },
+   612→                }
+   613→              : o
+   614→          ),
+   615→        }))
+   616→        // Remover o objeto ferramenta
+   617→        set((s) => ({
+   618→          objects: s.objects.filter((o) => o.id !== toolId),
+   619→          selectedId: targetId,
+   620→        }))
+   621→        get().toast(`Booleana "${op}" aplicada`, 'success')
+   622→      },
+   623→
+   624→      // ---------- Sculpt ----------
+   625→      sculptStrokeAt: (id, point, normal, params = {}) => {
+   626→        const obj = get().objects.find((o) => o.id === id)
+   627→        if (!obj) return
+   628→
+   629→        // Construir geometria
+   630→        let geometry
+   631→        if (obj.customGeometry) {
+   632→          geometry = new THREE.BufferGeometry()
+   633→          geometry.setAttribute('position', new THREE.Float32BufferAttribute(obj.customGeometry.positions, 3))
+   634→          if (obj.customGeometry.normals) {
+   635→            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(obj.customGeometry.normals, 3))
+   636→          }
+   637→        } else if (obj.imported && obj.bufferGeometry) {
+   638→          geometry = obj.bufferGeometry.clone()
+   639→        } else {
+   640→          const def = PRIMITIVES[obj.type]
+   641→          geometry = def ? def.build(THREE, obj.args) : new THREE.BoxGeometry(1, 1, 1)
+   642→        }
+   643→        geometry.computeVertexNormals()
+   644→
+   645→        const settings = { ...get().sculptSettings, ...params }
+   646→        const result = meshOps.sculptStroke(
+   647→          geometry,
+   648→          point,
+   649→          normal,
+   650→          settings.brushSize,
+   651→          settings.brushStrength,
+   652→          settings.mode
+   653→        )
+   654→
+   655→        const positions = result.getAttribute('position').array
+   656→        const normals = result.getAttribute('normal').array
+   657→        // Coalesced history
+   658→        get()._pushHistoryCoalesced(`sculpt:${id}`)
+   659→        set((s) => ({
+   660→          objects: s.objects.map((o) =>
+   661→            o.id === id
+   662→              ? {
+   663→                  ...o,
+   664→                  customGeometry: {
+   665→                    positions: Array.from(positions),
+   666→                    normals: Array.from(normals),
+   667→                    uvs: obj.customGeometry?.uvs || null,
+   668→                  },
+   669→                }
+   670→              : o
+   671→          ),
+   672→        }))
+   673→      },
+   674→
+   675→      // ---------- Material presets ----------
+   676→      applyMaterialPreset: (id, presetId) => {
+   677→        const preset = findMaterial(presetId)
+   678→        if (!preset) return
+   679→        get()._pushHistory()
+   680→        set((s) => ({
+   681→          objects: s.objects.map((o) =>
+   682→            o.id === id ? { ...o, material: { ...preset.material } } : o
+   683→          ),
+   684→        }))
+   685→        get().toast(`Material "${preset.name}" aplicado`, 'success')
+   686→      },
+   687→
+   688→      // ---------- Camadas de textura ----------
+   689→      addTextureLayer: (id, layer) => {
+   690→        get()._pushHistory()
+   691→        set((s) => ({
+   692→          objects: s.objects.map((o) =>
+   693→            o.id === id
+   694→              ? {
+   695→                  ...o,
+   696→                  material: {
+   697→                    ...o.material,
+   698→                    layers: [...(o.material.layers || []), { ...layer }],
+   699→                  },
+   700→                }
+   701→              : o
+   702→          ),
+   703→        }))
+   704→      },
+   705→      updateTextureLayer: (id, index, patch) => {
+   706→        set((s) => ({
+   707→          objects: s.objects.map((o) =>
+   708→            o.id === id
+   709→              ? {
+   710→                  ...o,
+   711→                  material: {
+   712→                    ...o.material,
+   713→                    layers: (o.material.layers || []).map((l, i) =>
+   714→                      i === index ? { ...l, ...patch } : l
+   715→                    ),
+   716→                  },
+   717→                }
+   718→              : o
+   719→          ),
+   720→        }))
+   721→      },
+   722→      removeTextureLayer: (id, index) => {
+   723→        get()._pushHistory()
+   724→        set((s) => ({
+   725→          objects: s.objects.map((o) =>
+   726→            o.id === id
+   727→              ? {
+   728→                  ...o,
+   729→                  material: {
+   730→                    ...o.material,
+   731→                    layers: (o.material.layers || []).filter((_, i) => i !== index),
+   732→                  },
+   733→                }
+   734→              : o
+   735→          ),
+   736→        }))
+   737→      },
+   738→
+   739→      // ---------- Skeleton / Rigging ----------
+   740→      addBone: (objId, position = [0, 0, 0]) => {
+   741→        get()._pushHistory()
+   742→        const bone = {
+   743→          id: `bone_${Math.random().toString(36).slice(2, 10)}`,
+   744→          name: 'Osso',
+   745→          position: [...position],
+   746→          rotation: [0, 0, 0],
+   747→          scale: [1, 1, 1],
+   748→          parentId: null,
+   749→          length: 0.5,
+   750→        }
+   751→        set((s) => ({
+   752→          objects: s.objects.map((o) =>
+   753→            o.id === objId
+   754→              ? {
+   755→                  ...o,
+   756→                  skeleton: o.skeleton
+   757→                    ? { ...o.skeleton, bones: [...o.skeleton.bones, bone] }
+   758→                    : { bones: [bone] },
+   759→                }
+   760→              : o
+   761→          ),
+   762→        }))
+   763→        get().toast('Osso adicionado', 'success')
+   764→      },
+   765→
+   766→      updateBone: (objId, boneId, patch) => {
+   767→        set((s) => ({
+   768→          objects: s.objects.map((o) =>
+   769→            o.id === objId && o.skeleton
+   770→              ? {
+   771→                  ...o,
+   772→                  skeleton: {
+   773→                    ...o.skeleton,
+   774→                    bones: o.skeleton.bones.map((b) =>
+   775→                      b.id === boneId ? { ...b, ...patch } : b
+   776→                    ),
+   777→                  },
+   778→                }
+   779→              : o
+   780→          ),
+   781→        }))
+   782→      },
+   783→
+   784→      removeBone: (objId, boneId) => {
+   785→        get()._pushHistory()
+   786→        set((s) => ({
+   787→          objects: s.objects.map((o) =>
+   788→            o.id === objId && o.skeleton
+   789→              ? {
+   790→                  ...o,
+   791→                  skeleton: {
+   792→                    ...o.skeleton,
+   793→                    bones: o.skeleton.bones
+   794→                      .filter((b) => b.id !== boneId)
+   795→                      .map((b) => (b.parentId === boneId ? { ...b, parentId: null } : b)),
+   796→                  },
+   797→                }
+   798→              : o
+   799→          ),
+   800→        }))
+   801→      },
+   802→
+   803→      // ---------- Animação / Keyframes ----------
+   804→      addKeyframe: (objId, clipName, boneId, frame, transform) => {
+   805→        get()._pushHistory()
+   806→        const kf = {
+   807→          id: `kf_${Math.random().toString(36).slice(2, 10)}`,
+   808→          time: frame,
+   809→          boneId,
+   810→          ...transform,
+   811→          interpolation: 'ease', // linear | ease | step
+   812→        }
+   813→        set((s) => ({
+   814→          objects: s.objects.map((o) => {
+   815→            if (o.id !== objId) return o
+   816→            const anims = { ...(o.animations || {}) }
+   817→            anims[clipName] = [...(anims[clipName] || []), kf]
+   818→              .sort((a, b) => a.time - b.time)
+   819→            return { ...o, animations: anims }
+   820→          }),
+   821→        }))
+   822→        get().toast('Keyframe adicionado', 'success', 1200)
+   823→      },
+   824→
+   825→      removeKeyframe: (objId, clipName, keyframeId) => {
+   826→        get()._pushHistory()
+   827→        set((s) => ({
+   828→          objects: s.objects.map((o) => {
+   829→            if (o.id !== objId || !o.animations?.[clipName]) return o
+   830→            const anims = { ...o.animations }
+   831→            anims[clipName] = anims[clipName].filter((k) => k.id !== keyframeId)
+   832→            return { ...o, animations: anims }
+   833→          }),
+   834→        }))
+   835→      },
+   836→
+   837→      setAnimationTime: (time) =>
+   838→        set((s) => ({ animation: { ...s.animation, currentTime: time } })),
+   839→      setAnimation: (patch) =>
+   840→        set((s) => ({ animation: { ...s.animation, ...patch } })),
+   841→      playAnimation: () => set((s) => ({ animation: { ...s.animation, playing: true } })),
+   842→      pauseAnimation: () => set((s) => ({ animation: { ...s.animation, playing: false } })),
+   843→
+   844→      // ---------- Transform mode ----------
+   845→      setTransformMode: (mode) => set({ transformMode: mode }),
+   846→
+   847→      // ---------- Configuração de cena ----------
+   848→      setBackground: (patch) => {
+   849→        get()._pushHistory()
+   850→        set((s) => ({ background: { ...s.background, ...patch } }))
+   851→      },
+   852→      setGrid: (patch) => set((s) => ({ grid: { ...s.grid, ...patch } })),
+   853→      setLights: (patch) => {
+   854→        get()._pushHistory()
+   855→        set((s) => ({
+   856→          lights: {
+   857→            ...s.lights,
+   858→            ...(patch.ambient ? { ambient: { ...s.lights.ambient, ...patch.ambient } } : {}),
+   859→            ...(patch.directional
+   860→              ? { directional: { ...s.lights.directional, ...patch.directional } }
+   861→              : {}),
+   862→            ...(patch.hdri !== undefined ? { hdri: patch.hdri } : {}),
+   863→          },
+   864→        }))
+   865→      },
+   866→
+   867→      // ---------- UI Editor (Fase 6) ----------
+   868→      // Múltiplas telas de UI: Main Menu, HUD, Game Over, etc.
+   869→      // Cada tela tem elementos (Button, Label, Input, Checkbox, Slider, etc.)
+   870→      uiScreens: [],
+   871→      activeUIScreenId: null,
+   872→      selectedUIElementId: null,
+   873→
+   874→      createUIScreen: (name = 'Nova Tela') => {
+   875→        get()._pushHistory()
+   876→        const screen = {
+   877→          id: `uiscreen_${Math.random().toString(36).slice(2, 10)}`,
+   878→          name,
+   879→          elements: [],
+   880→          visible: true,
+   881→        }
+   882→        set((s) => ({
+   883→          uiScreens: [...s.uiScreens, screen],
+   884→          activeUIScreenId: screen.id,
+   885→        }))
+   886→        return screen
+   887→      },
+   888→
+   889→      deleteUIScreen: (screenId) => {
+   890→        get()._pushHistory()
+   891→        set((s) => ({
+   892→          uiScreens: s.uiScreens.filter((sc) => sc.id !== screenId),
+   893→          activeUIScreenId: s.activeUIScreenId === screenId
+   894→            ? (s.uiScreens.find((sc) => sc.id !== screenId)?.id || null)
+   895→            : s.activeUIScreenId,
+   896→        }))
+   897→      },
+   898→
+   899→      renameUIScreen: (screenId, name) => {
+   900→        get()._pushHistory()
+   901→        set((s) => ({
+   902→          uiScreens: s.uiScreens.map((sc) => (sc.id === screenId ? { ...sc, name } : sc)),
+   903→        }))
+   904→      },
+   905→
+   906→      setActiveUIScreen: (screenId) => set({ activeUIScreenId: screenId }),
+   907→
+   908→      addUIElement: (elementType, screenId) => {
+   909→        const sid = screenId || get().activeUIScreenId
+   910→        if (!sid) {
+   911→          get().createUIScreen('HUD')
+   912→          return get().addUIElement(elementType)
+   913→        }
+   914→        get()._pushHistory()
+   915→        const defaults = getUIDefaults(elementType)
+   916→        const element = {
+   917→          id: `uiel_${Math.random().toString(36).slice(2, 10)}`,
+   918→          type: elementType,
+   919→          name: `${elementType}`,
+   920→          ...defaults,
+   921→        }
+   922→        set((s) => ({
+   923→          uiScreens: s.uiScreens.map((sc) =>
+   924→            sc.id === sid
+   925→              ? { ...sc, elements: [...sc.elements, element] }
+   926→              : sc
+   927→          ),
+   928→          selectedUIElementId: element.id,
+   929→        }))
+   930→        return element
+   931→      },
+   932→
+   933→      updateUIElement: (elementId, patch) => {
+   934→        set((s) => ({
+   935→          uiScreens: s.uiScreens.map((sc) => ({
+   936→            ...sc,
+   937→            elements: sc.elements.map((el) =>
+   938→              el.id === elementId ? { ...el, ...patch } : el
+   939→            ),
+   940→          })),
+   941→        }))
+   942→      },
+   943→
+   944→      removeUIElement: (elementId) => {
+   945→        get()._pushHistory()
+   946→        set((s) => ({
+   947→          uiScreens: s.uiScreens.map((sc) => ({
+   948→            ...sc,
+   949→            elements: sc.elements.filter((el) => el.id !== elementId),
+   950→          })),
+   951→          selectedUIElementId: s.selectedUIElementId === elementId ? null : s.selectedUIElementId,
+   952→        }))
+   953→      },
+   954→
+   955→      selectUIElement: (elementId) => set({ selectedUIElementId: elementId }),
+   956→
+   957→      setUIScreenVisible: (screenId, visible) => {
+   958→        set((s) => ({
+   959→          uiScreens: s.uiScreens.map((sc) =>
+   960→            sc.id === screenId ? { ...sc, visible } : sc
+   961→          ),
+   962→        }))
+   963→      },
+   964→
+   965→      // ---------- App Mode (Modelagem vs Cena vs FlirScript) ----------
+   966→      appMode: 'modeling', // 'modeling' | 'scene' | 'flirscript' | 'ui'
+   967→      flirScriptTarget: null, // { sceneId, instanceId } — objeto cujo script estamos a editar
+   968→      setAppMode: (mode) => {
+   969→        set({ appMode: mode })
+   970→        if (mode === 'scene') {
+   971→          // Ao entrar em modo cena, garantir que há pelo menos uma cena
+   972→          const { scenes, activeSceneId } = get()
+   973→          if (scenes.length === 0) {
+   974→            get().createScene('Nível 1')
+   975→          } else if (!activeSceneId) {
+   976→            set({ activeSceneId: scenes[0].id })
+   977→          }
+   978→        }
+   979→      },
+   980→      setFlirScriptTarget: (sceneId, instanceId) => {
+   981→        set({
+   982→          flirScriptTarget: { sceneId, instanceId },
+   983→          appMode: 'flirscript',
+   984→        })
+   985→      },
+   986→      clearFlirScriptTarget: () => {
+   987→        set({ flirScriptTarget: null, appMode: 'scene' })
+   988→      },
+   989→
+   990→      // ---------- FlirScript (scripts visuais por objeto) ----------
+   991→      // Cada instância de objeto numa cena pode ter um grafo FlirScript.
+   992→      // O grafo é guardado dentro da instância (em scene.objects[].flirScript OU scene.conects[].flirScript).
+   993→      // Estrutura do grafo: { nodes: [...], links: [...], lastNodeId, lastLinkId, version }
+   994→      setInstanceFlirScript: (instanceId, graphData) => {
+   995→        const { activeSceneId, flirScriptTarget } = get()
+   996→        // Usar a sceneId do flirScriptTarget se disponível (para Conects doutra cena)
+   997→        const targetSceneId = flirScriptTarget?.sceneId || activeSceneId
+   998→        get()._pushHistory()
+   999→        set((s) => ({
+  1000→          scenes: s.scenes.map((sc) => {
+  1001→            if (sc.id !== targetSceneId) return sc
+  1002→            // Procurar em objects E conects
+  1003→            const inObjects = sc.objects?.some((o) => o.instanceId === instanceId)
+  1004→            const inConects = sc.conects?.some((o) => o.instanceId === instanceId)
+  1005→            if (inObjects) {
+  1006→              return {
+  1007→                ...sc,
+  1008→                objects: sc.objects.map((o) =>
+  1009→                  o.instanceId === instanceId
+  1010→                    ? { ...o, flirScript: graphData }
+  1011→                    : o
+  1012→                ),
+  1013→              }
+  1014→            }
+  1015→            if (inConects) {
+  1016→              return {
+  1017→                ...sc,
+  1018→                conects: (sc.conects || []).map((o) =>
+  1019→                  o.instanceId === instanceId
+  1020→                    ? { ...o, flirScript: graphData }
+  1021→                    : o
+  1022→                ),
+  1023→              }
+  1024→            }
+  1025→            return sc
+  1026→          }),
+  1027→        }))
+  1028→      },
+  1029→      getInstanceFlirScript: (instanceId) => {
+  1030→        const { scenes, activeSceneId, flirScriptTarget } = get()
+  1031→        const targetSceneId = flirScriptTarget?.sceneId || activeSceneId
+  1032→        const scene = scenes.find((s) => s.id === targetSceneId)
+  1033→        if (!scene) return null
+  1034→        const inst =
+  1035→          scene.conects?.find((o) => o.instanceId === instanceId) ||
+  1036→          scene.objects?.find((o) => o.instanceId === instanceId)
+  1037→        return inst?.flirScript || null
+  1038→      },
+  1039→
+  1040→      // ---------- Cenas / Níveis ----------
+  1041→      // Uma cena contém:
+  1042→      //  - id, name
+  1043→      //  - objects: array de referências a objetos do projeto (com position/rotation/scale
+  1044→      //    específicos da cena — o objeto em si vive no "catálogo" de objetos do projeto)
+  1045→      //  - playerObjectId: id do objeto marcado como "Jogador" (sem lógica, apenas marcação)
+  1046→      //  - gameCamera: { type: 'perspective'|'orthographic', position, rotation, fov, near, far }
+  1047→      //  - background, grid, lights específicos da cena (override opcional)
+  1048→      scenes: [],
+  1049→      activeSceneId: null,
+  1050→      scenePreviewOpen: false,
+  1051→
+  1052→      createScene: (name = 'Nova Cena') => {
+  1053→        get()._pushHistory()
+  1054→        const scene = {
+  1055→          id: `scene_${Math.random().toString(36).slice(2, 10)}`,
+  1056→          name,
+  1057→          objects: [], // [{ objectId, instanceId, position, rotation, scale }]
+  1058→          playerObjectId: null,
+  1059→          gameCamera: {
+  1060→            type: 'perspective',
+  1061→            position: [5, 4, 6],
+  1062→            rotation: [0, 0, 0],
+  1063→            fov: 50,
+  1064→            near: 0.1,
+  1065→            far: 200,
+  1066→            orthoSize: 5,
+  1067→          },
+  1068→          background: null, // null = usar global; otherwise override
+  1069→          grid: null,
+  1070→          lights: null,
+  1071→        }
+  1072→        set((s) => ({
+  1073→          scenes: [...s.scenes, scene],
+  1074→          activeSceneId: scene.id,
+  1075→        }))
+  1076→        get().toast(`Cena "${name}" criada`, 'success')
+  1077→        return scene
+  1078→      },
+  1079→
+  1080→      duplicateScene: (sceneId) => {
+  1081→        const scene = get().scenes.find((s) => s.id === sceneId)
+  1082→        if (!scene) return
+  1083→        get()._pushHistory()
+  1084→        const copy = JSON.parse(JSON.stringify(scene))
+  1085→        copy.id = `scene_${Math.random().toString(36).slice(2, 10)}`
+  1086→        copy.name = `${scene.name} (cópia)`
+  1087→        set((s) => ({
+  1088→          scenes: [...s.scenes, copy],
+  1089→          activeSceneId: copy.id,
+  1090→        }))
+  1091→        get().toast('Cena duplicada', 'success')
+  1092→      },
+  1093→
+  1094→      deleteScene: (sceneId) => {
+  1095→        const scenes = get().scenes
+  1096→        if (scenes.length <= 1) {
+  1097→          get().toast('Não é possível apagar a última cena', 'error')
+  1098→          return
+  1099→        }
+  1100→        get()._pushHistory()
+  1101→        const idx = scenes.findIndex((s) => s.id === sceneId)
+  1102→        const newScenes = scenes.filter((s) => s.id !== sceneId)
+  1103→        const newActive = get().activeSceneId === sceneId
+  1104→          ? newScenes[Math.min(idx, newScenes.length - 1)].id
+  1105→          : get().activeSceneId
+  1106→        set({ scenes: newScenes, activeSceneId: newActive })
+  1107→        get().toast('Cena eliminada', 'info')
+  1108→      },
+  1109→
+  1110→      renameScene: (sceneId, name) => {
+  1111→        get()._pushHistory()
+  1112→        set((s) => ({
+  1113→          scenes: s.scenes.map((sc) => (sc.id === sceneId ? { ...sc, name } : sc)),
+  1114→        }))
+  1115→      },
+  1116→
+  1117→      // Fase 5: Update scene properties (postProcessing, physics, etc.)
+  1118→      updateScene: (sceneId, patch) => {
+  1119→        get()._pushHistory()
+  1120→        set((s) => ({
+  1121→          scenes: s.scenes.map((sc) => (sc.id === sceneId ? { ...sc, ...patch } : sc)),
+  1122→        }))
+  1123→      },
+  1124→
+  1125→      setActiveScene: (sceneId) => set({ activeSceneId: sceneId }),
+  1126→
+  1127→      reorderScenes: (fromIndex, toIndex) => {
+  1128→        get()._pushHistory()
+  1129→        set((s) => {
+  1130→          const scenes = [...s.scenes]
+  1131→          const [moved] = scenes.splice(fromIndex, 1)
+  1132→          scenes.splice(toIndex, 0, moved)
+  1133→          return { scenes }
+  1134→        })
+  1135→      },
+  1136→
+  1137→      // Adiciona uma instância de um objeto do catálogo à cena ativa
+  1138→      addObjectToScene: (objectId, position = [0, 0.5, 0]) => {
+  1139→        const { activeSceneId, scenes } = get()
+  1140→        if (!activeSceneId) {
+  1141→          get().toast('Crie uma cena primeiro', 'error')
+  1142→          return
+  1143→        }
+  1144→        const obj = get().objects.find((o) => o.id === objectId)
+  1145→        if (!obj) {
+  1146→          get().toast('Objeto não encontrado', 'error')
+  1147→          return
+  1148→        }
+  1149→        get()._pushHistory()
+  1150→        const instance = {
+  1151→          instanceId: `inst_${Math.random().toString(36).slice(2, 10)}`,
+  1152→          objectId,
+  1153→          position: [...position],
+  1154→          rotation: [0, 0, 0],
+  1155→          scale: [1, 1, 1],
+  1156→        }
+  1157→        set((s) => ({
+  1158→          scenes: s.scenes.map((sc) =>
+  1159→            sc.id === activeSceneId
+  1160→              ? { ...sc, objects: [...sc.objects, instance] }
+  1161→              : sc
+  1162→          ),
+  1163→        }))
+  1164→        get().toast(`"${obj.name}" adicionado à cena`, 'success')
+  1165→      },
+  1166→
+  1167→      removeObjectFromScene: (instanceId) => {
+  1168→        const { activeSceneId } = get()
+  1169→        get()._pushHistory()
+  1170→        set((s) => ({
+  1171→          scenes: s.scenes.map((sc) =>
+  1172→            sc.id === activeSceneId
+  1173→              ? { ...sc, objects: sc.objects.filter((o) => o.instanceId !== instanceId) }
+  1174→              : sc
+  1175→          ),
+  1176→        }))
+  1177→        get().toast('Objeto removido da cena', 'info')
+  1178→      },
+  1179→
+  1180→      updateSceneInstance: (instanceId, patch) => {
+  1181→        const { activeSceneId } = get()
+  1182→        set((s) => ({
+  1183→          scenes: s.scenes.map((sc) =>
+  1184→            sc.id === activeSceneId
+  1185→              ? {
+  1186→                  ...sc,
+  1187→                  objects: sc.objects.map((o) =>
+  1188→                    o.instanceId === instanceId ? { ...o, ...patch } : o
+  1189→                  ),
+  1190→                }
+  1191→              : sc
+  1192→          ),
+  1193→        }))
+  1194→      },
+  1195→
+  1196→      markAsPlayer: (instanceId) => {
+  1197→        const { activeSceneId } = get()
+  1198→        get()._pushHistory()
+  1199→        set((s) => ({
+  1200→          scenes: s.scenes.map((sc) =>
+  1201→            sc.id === activeSceneId ? { ...sc, playerObjectId: instanceId } : sc
+  1202→          ),
+  1203→        }))
+  1204→        get().toast('Objeto marcado como Jogador', 'success')
+  1205→      },
+  1206→
+  1207→      updateGameCamera: (patch) => {
+  1208→        const { activeSceneId } = get()
+  1209→        get()._pushHistory()
+  1210→        set((s) => ({
+  1211→          scenes: s.scenes.map((sc) =>
+  1212→            sc.id === activeSceneId
+  1213→              ? { ...sc, gameCamera: { ...sc.gameCamera, ...patch } }
+  1214→              : sc
+  1215→          ),
+  1216→        }))
+  1217→      },
+  1218→
+  1219→      openScenePreview: () => set({ scenePreviewOpen: true, ui: { ...get().ui, leftDrawerOpen: false, rightDrawerOpen: false } }),
+  1220→      closeScenePreview: () => set({ scenePreviewOpen: false }),
+  1221→
+  1222→      // ---------- Conects (Fase 3) ----------
+  1223→      // Cada cena tem uma lista de conects (instâncias de ConectObject).
+  1224→      // Um conect tem: instanceId, type, name, position, rotation, scale,
+  1225→      // visible, flirScript (opcional), + propriedades específicas do tipo.
+  1226→      selectedConectId: null,
+  1227→      conectsWindowOpen: false,
+  1228→
+  1229→      toggleConectsWindow: () =>
+  1230→        set((s) => ({ ui: { ...s.ui, conectsWindowOpen: !s.ui.conectsWindowOpen } })),
+  1231→
+  1232→      addConectToScene: (type, position = [0, 0.5, 0]) => {
+  1233→        const { activeSceneId } = get()
+  1234→        if (!activeSceneId) {
+  1235→          get().toast('Crie uma cena primeiro', 'error')
+  1236→          return null
+  1237→        }
+  1238→        const conect = createConectInstance(type, position)
+  1239→        get()._pushHistory()
+  1240→        set((s) => ({
+  1241→          scenes: s.scenes.map((sc) =>
+  1242→            sc.id === activeSceneId
+  1243→              ? { ...sc, conects: [...(sc.conects || []), conect] }
+  1244→              : sc
+  1245→          ),
+  1246→          selectedConectId: conect.instanceId,
+  1247→        }))
+  1248→        const def = findConectDefinition(type)
+  1249→        get().toast(`"${def?.label || type}" adicionado`, 'success', 1500)
+  1250→        return conect
+  1251→      },
+  1252→
+  1253→      removeConectFromScene: (instanceId) => {
+  1254→        const { activeSceneId } = get()
+  1255→        get()._pushHistory()
+  1256→        set((s) => ({
+  1257→          scenes: s.scenes.map((sc) =>
+  1258→            sc.id === activeSceneId
+  1259→              ? { ...sc, conects: (sc.conects || []).filter((c) => c.instanceId !== instanceId) }
+  1260→              : sc
+  1261→          ),
+  1262→          selectedConectId: s.selectedConectId === instanceId ? null : s.selectedConectId,
+  1263→        }))
+  1264→        get().toast('Conect removido', 'info')
+  1265→      },
+  1266→
+  1267→      selectConect: (instanceId) => set({ selectedConectId: instanceId }),
+  1268→
+  1269→      updateConect: (instanceId, patch) => {
+  1270→        const { activeSceneId } = get()
+  1271→        set((s) => ({
+  1272→          scenes: s.scenes.map((sc) =>
+  1273→            sc.id === activeSceneId
+  1274→              ? {
+  1275→                  ...sc,
+  1276→                  conects: (sc.conects || []).map((c) =>
+  1277→                    c.instanceId === instanceId ? { ...c, ...patch } : c
+  1278→                  ),
+  1279→                }
+  1280→              : sc
+  1281→          ),
+  1282→        }))
+  1283→      },
+  1284→
+  1285→      renameConect: (instanceId, name) => {
+  1286→        get()._pushHistory()
+  1287→        get().updateConect(instanceId, { name })
+  1288→      },
+  1289→
+  1290→      duplicateConect: (instanceId) => {
+  1291→        const { activeSceneId, scenes } = get()
+  1292→        const scene = scenes.find((s) => s.id === activeSceneId)
+  1293→        const conect = scene?.conects?.find((c) => c.instanceId === instanceId)
+  1294→        if (!conect) return
+  1295→        get()._pushHistory()
+  1296→        const copy = JSON.parse(JSON.stringify(conect))
+  1297→        copy.instanceId = `conect_${Math.random().toString(36).slice(2, 10)}`
+  1298→        copy.name = `${conect.name} (cópia)`
+  1299→        copy.position = [conect.position[0] + 0.5, conect.position[1], conect.position[2] + 0.5]
+  1300→        set((s) => ({
+  1301→          scenes: s.scenes.map((sc) =>
+  1302→            sc.id === activeSceneId
+  1303→              ? { ...sc, conects: [...(sc.conects || []), copy] }
+  1304→              : sc
+  1305→          ),
+  1306→          selectedConectId: copy.instanceId,
+  1307→        }))
+  1308→        get().toast('Conect duplicado', 'success')
+  1309→      },
+  1310→
+  1311→      setConectFlirScript: (instanceId, graphData) => {
+  1312→        const { activeSceneId } = get()
+  1313→        get()._pushHistory()
+  1314→        set((s) => ({
+  1315→          scenes: s.scenes.map((sc) =>
+  1316→            sc.id === activeSceneId
+  1317→              ? {
+  1318→                  ...sc,
+  1319→                  conects: (sc.conects || []).map((c) =>
+  1320→                    c.instanceId === instanceId
+  1321→                      ? { ...c, flirScript: graphData }
+  1322→                      : c
+  1323→                  ),
+  1324→                }
+  1325→              : sc
+  1326→          ),
+  1327→        }))
+  1328→      },
+  1329→
+  1330→      // Cena: gravidade e limites de otimização
+  1331→      setScenePhysics: (sceneId, patch) => {
+  1332→        get()._pushHistory()
+  1333→        set((s) => ({
+  1334→          scenes: s.scenes.map((sc) =>
+  1335→            sc.id === sceneId
+  1336→              ? { ...sc, physics: { ...sc.physics, ...patch } }
+  1337→              : sc
+  1338→          ),
+  1339→        }))
+  1340→      },
+  1341→
+  1342→      // Exportar jogo (build standalone)
+  1343→      gameExportOpen: false,
+  1344→      openGameExport: () => set({ gameExportOpen: true }),
+  1345→      closeGameExport: () => set({ gameExportOpen: false }),
+  1346→
+  1347→      // ---------- Fase 4: Novas janelas ----------
+  1348→      uiEditorOpen: false,
+  1349→      openUIEditor: () => set({ uiEditorOpen: true }),
+  1350→      closeUIEditor: () => set({ uiEditorOpen: false }),
+  1351→
+  1352→      shaderEditorOpen: false,
+  1353→      openShaderEditor: () => set({ shaderEditorOpen: true }),
+  1354→      closeShaderEditor: () => set({ shaderEditorOpen: false }),
+  1355→
+  1356→      projectBrowserOpen: false,
+  1357→      openProjectBrowser: () => set({ projectBrowserOpen: true }),
+  1358→      closeProjectBrowser: () => set({ projectBrowserOpen: false }),
+  1359→
+  1360→      debugConsoleOpen: false,
+  1361→      openDebugConsole: () => set({ debugConsoleOpen: true }),
+  1362→      closeDebugConsole: () => set({ debugConsoleOpen: false }),
+  1363→
+  1364→      terrainEditorOpen: false,
+  1365→      openTerrainEditor: () => set({ terrainEditorOpen: true }),
+  1366→      closeTerrainEditor: () => set({ terrainEditorOpen: false }),
+  1367→
+  1368→      // Fase 5: Multiplayer + Performance + Post-processing
+  1369→      multiplayerPanelOpen: false,
+  1370→      openMultiplayerPanel: () => set({ multiplayerPanelOpen: true }),
+  1371→      closeMultiplayerPanel: () => set({ multiplayerPanelOpen: false }),
+  1372→
+  1373→      perfStatsVisible: false,
+  1374→      togglePerfStats: () => set((s) => ({ perfStatsVisible: !s.perfStatsVisible })),
+  1375→
+  1376→      postProcessingOpen: false,
+  1377→      openPostProcessing: () => set({ postProcessingOpen: true }),
+  1378→      closePostProcessing: () => set({ postProcessingOpen: false }),
+  1379→
+  1380→      animStudioOpen: false,
+  1381→      openAnimStudio: () => set({ animStudioOpen: true }),
+  1382→      closeAnimStudio: () => set({ animStudioOpen: false }),
+  1383→
+  1384→      homeVisible: true,
+  1385→      showHome: () => set({ homeVisible: true }),
+  1386→      hideHome: () => set({ homeVisible: false }),
+  1387→
+  1388→      mainMenuOpen: false,
+  1389→      toggleMainMenu: () => set((s) => ({ mainMenuOpen: !s.mainMenuOpen })),
+  1390→      closeMainMenu: () => set({ mainMenuOpen: false }),
+  1391→
+  1392→      // Menu de 3 pontos (⋯) alvo — abre o AnimationControllerEditor
+  1393→      animControllerTarget: null,
+  1394→      openAnimController: (conectId) => set({ animControllerTarget: conectId }),
+  1395→      closeAnimController: () => set({ animControllerTarget: null }),
+  1396→
+  1397→      // Atualizar animationController de um conect
+  1398→      setConectAnimationController: (instanceId, controller) => {
+  1399→        get()._pushHistory()
+  1400→        get().updateConect(instanceId, { animationController: controller })
+  1401→      },
+  1402→
+  1403→      // ---------- Undo / Redo ----------
+  1404→      undo: () => {
+  1405→        const { past, future, objects } = get()
+  1406→        if (past.length === 0) return
+  1407→        const previous = past[past.length - 1]
+  1408→        const newPast = past.slice(0, -1)
+  1409→        set({
+  1410→          past: newPast,
+  1411→          future: [snapshot(objects), ...future].slice(0, MAX_HISTORY),
+  1412→          objects: previous,
+  1413→        })
+  1414→        get().toast('Desfeito', 'info', 1200)
+  1415→      },
+  1416→
+  1417→      redo: () => {
+  1418→        const { past, future, objects } = get()
+  1419→        if (future.length === 0) return
+  1420→        const next = future[0]
+  1421→        const newFuture = future.slice(1)
+  1422→        set({
+  1423→          past: [...past, snapshot(objects)].slice(-MAX_HISTORY),
+  1424→          future: newFuture,
+  1425→          objects: next,
+  1426→        })
+  1427→        get().toast('Refeito', 'info', 1200)
+  1428→      },
+  1429→
+  1430→      canUndo: () => get().past.length > 0,
+  1431→      canRedo: () => get().future.length > 0,
+  1432→
+  1433→      // ---------- Projeto: guardar/carregar ----------
+  1434→      exportProjectJSON: () => {
+  1435→        const { objects, background, grid, lights, scenes, activeSceneId, appMode, uiScreens, activeUIScreenId } = get()
+  1436→        return JSON.stringify(
+  1437→          {
+  1438→            version: 3,
+  1439→            createdAt: new Date().toISOString(),
+  1440→            scene: { objects, background, grid, lights },
+  1441→            scenes,
+  1442→            activeSceneId,
+  1443→            appMode,
+  1444→            uiScreens,
+  1445→            activeUIScreenId,
+  1446→          },
+  1447→          null,
+  1448→          2
+  1449→        )
+  1450→      },
+  1451→
+  1452→      loadProjectJSON: (jsonString) => {
+  1453→        try {
+  1454→          const data = JSON.parse(jsonString)
+  1455→          const scene = data.scene || data
+  1456→          get()._pushHistory()
+  1457→          set({
+  1458→            objects: scene.objects || [],
+  1459→            selectedId: null,
+  1460→            background: { ...initialScene.background, ...(scene.background || {}) },
+  1461→            grid: { ...initialScene.grid, ...(scene.grid || {}) },
+  1462→            lights: { ...initialScene.lights, ...(scene.lights || {}) },
+  1463→            scenes: data.scenes || [],
+  1464→            activeSceneId: data.activeSceneId || (data.scenes && data.scenes[0]?.id) || null,
+  1465→            appMode: data.appMode || 'modeling',
+  1466→            // P1: limpar state que não é exportado mas deve ser resetado
+  1467→            selectedConectId: null,
+  1468→            flirScriptTarget: null,
+  1469→            selectedUIElementId: null,
+  1470→            // UI screens — só manter se o projeto exportar as suas
+  1471→            uiScreens: data.uiScreens || [],
+  1472→            activeUIScreenId: data.uiScreens?.[0]?.id || null,
+  1473→            // History — limpar (não desfazer para o projeto anterior)
+  1474→            past: [],
+  1475→            future: [],
+  1476→          })
+  1477→          get().toast('Projeto carregado', 'success')
+  1478→          return true
+  1479→        } catch (err) {
+  1480→          get().toast('Erro ao carregar projeto: ' + err.message, 'error')
+  1481→          return false
+  1482→        }
+  1483→      },
+  1484→
+  1485→      setObjects: (newObjects) => {
+  1486→        get()._pushHistory()
+  1487→        set({ objects: newObjects, selectedId: null })
+  1488→      },
+  1489→
+  1490→      resetAll: () => {
+  1491→        set({
+  1492→          ...initialScene,
+  1493→          past: [],
+  1494→          future: [],
+  1495→        })
+  1496→      },
+  1497→    }),
+  1498→    {
+  1499→      name: STORAGE_KEY,
+  1500→      partialize: (state) => ({
+  1501→        objects: state.objects,
+  1502→        background: state.background,
+  1503→        grid: state.grid,
+  1504→        lights: state.lights,
+  1505→        transformMode: state.transformMode,
+  1506→        mode: state.mode,
+  1507→        scenes: state.scenes,
+  1508→        activeSceneId: state.activeSceneId,
+  1509→        appMode: state.appMode,
+  1510→        uiScreens: state.uiScreens,
+  1511→        activeUIScreenId: state.activeUIScreenId,
+  1512→      }),
+  1513→      version: 3,
+  1514→    }
+  1515→  )
+  1516→)
+  1517→
+  1518→// ===== Defaults para elementos de UI =====
+  1519→function getUIDefaults(type) {
+  1520→  const base = {
+  1521→    position: [50, 50], // x, y em %
+  1522→    size: [120, 40],
+  1523→    color: '#1c2128',
+  1524→    textColor: '#e6edf3',
+  1525→    fontSize: 14,
+  1526→    borderColor: '#30363d',
+  1527→    borderWidth: 1,
+  1528→    borderRadius: 6,
+  1529→    padding: 8,
+  1530→  }
+  1531→  switch (type) {
+  1532→    case 'Button':
+  1533→      return { ...base, label: 'Botão', color: '#2f81f7', eventName: 'onClick' }
+  1534→    case 'Label':
+  1535→      return { ...base, text: 'Texto', size: [100, 24], color: 'transparent', borderWidth: 0 }
+  1536→    case 'Input':
+  1537→      return { ...base, placeholder: 'Escreve...', value: '', color: '#0d1117', eventName: 'onChange' }
+  1538→    case 'Checkbox':
+  1539→      return { ...base, label: 'Opção', checked: false, size: [20, 20], eventName: 'onChange' }
+  1540→    case 'Slider':
+  1541→      return { ...base, min: 0, max: 100, value: 50, size: [150, 20], color: '#30363d', eventName: 'onChange' }
+  1542→    case 'Form':
+  1543→      return { ...base, fields: [], submitLabel: 'Enviar', eventName: 'onSubmit', size: [200, 150] }
+  1544→    case 'Text':
+  1545→      return { ...base, text: 'Texto', size: [100, 24] }
+  1546→    case 'Image':
+  1547→      return { ...base, url: '', size: [100, 100] }
+  1548→    case 'Panel':
+  1549→      return { ...base, size: [200, 100], color: '#1c2128', opacity: 0.8 }
+  1550→    default:
+  1551→      return base
+  1552→  }
+  1553→}
+  1554→
+  1555→// ===== UI Screen helpers exportados =====
+  1556→export function useActiveUIScreen() {
+  1557→  return useStore((s) => {
+  1558→    if (!s.activeUIScreenId) return null
+  1559→    return s.uiScreens.find((sc) => sc.id === s.activeUIScreenId) || null
+  1560→  })
+  1561→}
+  1562→
+  1563→export function useSelectedUIElement() {
+  1564→  return useStore((s) => {
+  1565→    if (!s.selectedUIElementId) return null
+  1566→    for (const sc of s.uiScreens) {
+  1567→      const el = sc.elements.find((e) => e.id === s.selectedUIElementId)
+  1568→      if (el) return el
+  1569→    }
+  1570→    return null
+  1571→  })
+  1572→}
+  1573→
+  1574→export function useSelectedObject() {
+  1575→  return useStore((s) => {
+  1576→    if (!s.selectedId) return null
+  1577→    return s.objects.find((o) => o.id === s.selectedId) || null
+  1578→  })
+  1579→}
+  1580→

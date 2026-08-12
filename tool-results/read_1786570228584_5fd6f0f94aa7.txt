@@ -1,0 +1,713 @@
+     1→/**
+     2→ * FlirQuest Saga — jogo profissional completo e complexo.
+     3→ *
+     4→ * Cenário: RPG/FPS híbrido com:
+     5→ *  - Terreno procedural montanhoso (Simplex + Ridged + Warping)
+     6→ *  - Lago com água super-realista (Gerstner + refração + espuma)
+     7→ *  - 2 cenas: "Vila Inicial" + "Floresta Sombria"
+     8→ *  - Jogador FPS com ViewObject (first-person) + CameraTouchZone
+     9→ *  - Joystick + WASD + teclado
+    10→ *  - 2 armas: pistola + rifle
+    11→ *  - 6 inimigos com IA diferente:
+    12→ *    - 3 soldados (perseguem + disparam)
+    13→ *    - 2 monstros (corpo-a-corpo, dano alto)
+    14→ *    - 1 boss (1000 HP, ataque em área)
+    15→ *  - 10 itens coleccionáveis (gemas + poções)
+    16→ *  - 5 checkpoints
+    17→ *  - 2 portais (NavigatorObject) entre cenas
+    18→ *  - SkyObject procedural (pôr-do-sol)
+    19→ *  - VolumetricFogObject para atmosfera
+    20→ *  - BloomObject para highlight do sol
+    21→ *  - GIProbeObject para iluminação global
+    22→ *  - PointMarkers para marcar pontos de interesse
+    23→ *  - ArrowMarkers para indicar direcção
+    24→ *  - HUD completo: vida, munição,-score, mini-mapa, mensagens
+    25→ *  - Sistema de inventário (5 slots)
+    26→ *  - FlirCode em todos os NPCs (comportamento único)
+    27→ */
+    28→import { generateTerrainHeightmap } from '../terrain/terrainNoise.js'
+    29→
+    30→// === Helpers ===
+    31→let _idCounter = 1
+    32→const uid = () => `obj_${Date.now()}_${_idCounter++}`
+    33→
+    34→// Helper: amostrar altura do heightmap numa posição (x,z) do mundo
+    35→function sampleTerrainHeight(hm, seg, worldX, worldZ, terrainWidth, terrainDepth, heightScale) {
+    36→  const nx = (worldX / terrainWidth + 0.5) * seg
+    37→  const nz = (worldZ / terrainDepth + 0.5) * seg
+    38→  const ix = Math.max(0, Math.min(seg, Math.round(nx)))
+    39→  const iz = Math.max(0, Math.min(seg, Math.round(nz)))
+    40→  const idx = iz * (seg + 1) + ix
+    41→  const h = hm[idx] || 0
+    42→  return h * heightScale
+    43→}
+    44→
+    45→// === Geração de terrenos ===
+    46→const SEG = 64
+    47→
+    48→// Terreno da Vila — suave, com lago
+    49→const villageTerrain = generateTerrainHeightmap(SEG, {
+    50→  seed: 1111,
+    51→  scale: 40,
+    52→  octaves: 4,
+    53→  persistence: 0.4,
+    54→  lacunarity: 2.0,
+    55→  ridgedAmount: 0.15,
+    56→  warpStrength: 0.8,
+    57→  terracing: false,
+    58→  erosion: false,
+    59→})
+    60→
+    61→// Terreno da Floresta — montanhoso e agressivo
+    62→const forestTerrain = generateTerrainHeightmap(SEG, {
+    63→  seed: 9999,
+    64→  scale: 25,
+    65→  octaves: 6,
+    66→  persistence: 0.55,
+    67→  lacunarity: 2.1,
+    68→  ridgedAmount: 0.7,
+    69→  warpStrength: 1.8,
+    70→  terracing: false,
+    71→  erosion: true,
+    72→  erosionIterations: 5,
+    73→})
+    74→
+    75→function autoSplat(hm, seg, maxLayers = 4) {
+    76→  const sm = new Float32Array((seg + 1) * (seg + 1) * maxLayers)
+    77→  for (let i = 0; i < hm.length; i++) {
+    78→    const h = (hm[i] + 1) * 0.5
+    79→    if (h < 0.25) { sm[i*4]=1; sm[i*4+1]=0; sm[i*4+2]=0; sm[i*4+3]=0 }
+    80→    else if (h < 0.5) { sm[i*4]=0.4; sm[i*4+1]=0.6; sm[i*4+2]=0; sm[i*4+3]=0 }
+    81→    else if (h < 0.75) { sm[i*4]=0; sm[i*4+1]=0.5; sm[i*4+2]=0.5; sm[i*4+3]=0 }
+    82→    else { sm[i*4]=0; sm[i*4+1]=0; sm[i*4+2]=0.3; sm[i*4+3]=0.7 }
+    83→  }
+    84→  return sm
+    85→}
+    86→const villageSplat = autoSplat(villageTerrain, SEG)
+    87→const forestSplat = autoSplat(forestTerrain, SEG)
+    88→
+    89→// === Catálogo de objetos ===
+    90→const objects = [
+    91→  { id: 'obj_player', type: 'capsule', name: 'Player', args: { radius: 0.4, length: 1.2, capSegments: 8, radialSegments: 16 },
+    92→    material: { color: '#3fb950', roughness: 0.5, metalness: 0.1 } },
+    93→  { id: 'obj_enemy_soldier', type: 'capsule', name: 'Soldado', args: { radius: 0.4, length: 1.4, capSegments: 8, radialSegments: 16 },
+    94→    material: { color: '#dc2626', roughness: 0.6, metalness: 0.2 } },
+    95→  { id: 'obj_enemy_monster', type: 'sphere', name: 'Monstro', args: { radius: 0.7, widthSegments: 16, heightSegments: 12 },
+    96→    material: { color: '#7c2d12', roughness: 0.4, metalness: 0.3, emissive: '#451a03' } },
+    97→  { id: 'obj_boss', type: 'sphere', name: 'Boss', args: { radius: 1.8, widthSegments: 32, heightSegments: 24 },
+    98→    material: { color: '#581c87', roughness: 0.2, metalness: 0.8, emissive: '#3b0764', emissiveIntensity: 0.6 } },
+    99→  { id: 'obj_house', type: 'box', name: 'Casa', args: { width: 4, height: 3, depth: 4 },
+   100→    material: { color: '#92400e', roughness: 0.8 } },
+   101→  { id: 'obj_tree', type: 'cylinder', name: 'Árvore', args: { radiusTop: 0.3, radiusBottom: 0.4, height: 5, radialSegments: 8 },
+   102→    material: { color: '#5a3a1a', roughness: 0.9 } },
+   103→  { id: 'obj_rock', type: 'dodecahedron', name: 'Pedra', args: { radius: 1, detail: 0 },
+   104→    material: { color: '#6b7280', roughness: 0.95, flatShading: true } },
+   105→  { id: 'obj_wall', type: 'box', name: 'Muro', args: { width: 1, height: 1, depth: 1 },
+   106→    material: { color: '#475569', roughness: 0.9 } },
+   107→]
+   108→
+   109→// === Cena 1: Vila Inicial ===
+   110→const scene1Conects = []
+   111→
+   112→// Sky
+   113→scene1Conects.push({
+   114→  instanceId: uid(), type: 'SkyObject', name: 'Sky',
+   115→  position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   116→  skyType: 'procedural', topColor: '#1e3a8a', bottomColor: '#fb923c',
+   117→  sunPosition: [15, 8, -5], sunIntensity: 1.4, turbidity: 6, rayleigh: 2.5,
+   118→})
+   119→
+   120→// Sun + Ambient
+   121→scene1Conects.push({
+   122→  instanceId: uid(), type: 'SunObject', name: 'Sol',
+   123→  position: [15, 8, -5], rotation: [0, 0, 0], scale: [1, 1, 1],
+   124→  color: '#fff7d6', intensity: 1.5, castShadows: true,
+   125→})
+   126→scene1Conects.push({
+   127→  instanceId: uid(), type: 'AmbientObject', name: 'Ambiente',
+   128→  position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   129→  color: '#fbbf24', intensity: 0.5,
+   130→})
+   131→
+   132→// GI Probe + Bloom + VolumetricFog
+   133→scene1Conects.push({
+   134→  instanceId: uid(), type: 'GIProbeObject', name: 'GI',
+   135→  position: [0, 5, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   136→  intensity: 1.0, bounceCount: 2, resolution: 128, fadeDistance: 60,
+   137→})
+   138→scene1Conects.push({
+   139→  instanceId: uid(), type: 'BloomObject', name: 'Bloom',
+   140→  position: [15, 8, -5], rotation: [0, 0, 0], scale: [1, 1, 1],
+   141→  intensity: 1.2, threshold: 0.7, radius: 0.5,
+   142→})
+   143→scene1Conects.push({
+   144→  instanceId: uid(), type: 'VolumetricFogObject', name: 'Fog',
+   145→  position: [0, 2, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   146→  density: 0.015, scattering: 0.6, anisotropy: 0.7,
+   147→  attenuationDistance: 40, godRays: true, color: '#fbbf24',
+   148→})
+   149→
+   150→// Terreno
+   151→scene1Conects.push({
+   152→  instanceId: uid(), type: 'TerrainObject', name: 'TerrenoVila',
+   153→  position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   154→  width: 80, depth: 80, segments: SEG, heightScale: 5,
+   155→  heightmap: Array.from(villageTerrain),
+   156→  splatmap: Array.from(villageSplat),
+   157→  textureLayers: [
+   158→    { id: 'grass', label: 'Relva', color: '#5a7d3a' },
+   159→    { id: 'dirt', label: 'Terra', color: '#8b5a2b' },
+   160→    { id: 'rock', label: 'Pedra', color: '#6e7681' },
+   161→    { id: 'snow', label: 'Neve', color: '#f0f0f0' },
+   162→  ],
+   163→  maxLayers: 4,
+   164→})
+   165→
+   166→// Lago com água super-realista
+   167→scene1Conects.push({
+   168→  instanceId: uid(), type: 'RealWaterObject', name: 'Lago',
+   169→  position: [10, 0.5, 10], rotation: [0, 0, 0], scale: [1, 1, 1],
+   170→  size: [25, 25], segments: 128,
+   171→  color: '#1e90ff', deepColor: '#0a3d5c',
+   172→  clarity: 0.85, refraction: 0.5, reflection: 0.7,
+   173→  flowSpeed: 0.6, waveHeight: 0.25, waveFrequency: 1.2,
+   174→  foamThreshold: 0.65, foamColor: '#ffffff',
+   175→  fresnelPower: 5.0, ior: 1.333,
+   176→  sunDirection: [0.5, 0.8, 0.3],
+   177→})
+   178→
+   179→// Casas (5)
+   180→const housePositions = [[-15, 0, -10], [-10, 0, -15], [-20, 0, -5], [-5, 0, -20], [-25, 0, -15]]
+   181→for (let i = 0; i < housePositions.length; i++) {
+   182→  scene1Conects.push({
+   183→    instanceId: uid(), type: 'StaticObject', name: `Casa_${i+1}`,
+   184→    sourceObjectId: 'obj_house',
+   185→    position: [housePositions[i][0], 1.5, housePositions[i][2]],
+   186→    rotation: [0, i * 0.5, 0], scale: [1, 1, 1],
+   187→    physicsType: 'box', width: 4, height: 3, depth: 4,
+   188→  })
+   189→}
+   190→
+   191→// Árvores (10)
+   192→const treePositions = [
+   193→  [5, 0, -10], [8, 0, -15], [12, 0, -8], [-5, 0, 5], [-12, 0, 8],
+   194→  [15, 0, -20], [20, 0, -5], [-15, 0, 12], [25, 0, 5], [30, 0, -10],
+   195→]
+   196→for (let i = 0; i < treePositions.length; i++) {
+   197→  scene1Conects.push({
+   198→    instanceId: uid(), type: 'StaticObject', name: `Árvore_${i+1}`,
+   199→    sourceObjectId: 'obj_tree',
+   200→    position: [treePositions[i][0], 2.5, treePositions[i][2]],
+   201→    rotation: [0, Math.random() * Math.PI * 2, 0],
+   202→    scale: [0.8 + Math.random() * 0.4, 0.8 + Math.random() * 0.6, 0.8 + Math.random() * 0.4],
+   203→    physicsType: 'cylinder', width: 0.4, height: 5, depth: 0.4,
+   204→  })
+   205→}
+   206→
+   207→// Pedras (6)
+   208→const rockPositions = [
+   209→  [0, 0, -25], [3, 0, -28], [-3, 0, -22], [22, 0, 12], [-18, 0, 18], [25, 0, -18],
+   210→]
+   211→for (let i = 0; i < rockPositions.length; i++) {
+   212→  scene1Conects.push({
+   213→    instanceId: uid(), type: 'StaticObject', name: `Pedra_${i+1}`,
+   214→    sourceObjectId: 'obj_rock',
+   215→    position: [rockPositions[i][0], 0.5, rockPositions[i][2]],
+   216→    rotation: [Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI],
+   217→    scale: [0.7 + Math.random() * 0.6, 0.7 + Math.random() * 0.6, 0.7 + Math.random() * 0.6],
+   218→    physicsType: 'sphere', width: 1, height: 1, depth: 1, colliderRadius: 1,
+   219→  })
+   220→}
+   221→
+   222→// Muros (3 secções)
+   223→const wallSpecs = [
+   224→  { pos: [-8, 1, -25], rot: [0, 0, 0], scale: [16, 2, 0.5] },
+   225→  { pos: [8, 1, -25], rot: [0, 0, 0], scale: [16, 2, 0.5] },
+   226→  { pos: [-16, 1, -15], rot: [0, Math.PI / 2, 0], scale: [16, 2, 0.5] },
+   227→]
+   228→for (let i = 0; i < wallSpecs.length; i++) {
+   229→  scene1Conects.push({
+   230→    instanceId: uid(), type: 'StaticObject', name: `Muro_${i+1}`,
+   231→    sourceObjectId: 'obj_wall',
+   232→    position: wallSpecs[i].pos, rotation: wallSpecs[i].rot, scale: wallSpecs[i].scale,
+   233→    physicsType: 'box',
+   234→    width: wallSpecs[i].scale[0], height: wallSpecs[i].scale[1], depth: wallSpecs[i].scale[2],
+   235→  })
+   236→}
+   237→
+   238→// Jogador
+   239→const playerId = uid()
+   240→const player1Y = sampleTerrainHeight(villageTerrain, SEG, 0, 0, 80, 80, 5) + 2
+   241→scene1Conects.push({
+   242→  instanceId: playerId, type: 'PersonalObject', name: 'Jogador',
+   243→  position: [0, player1Y, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   244→  health: 100, maxHealth: 100,
+   245→  mass: 1, moveSpeed: 6, jumpForce: 9, canJump: true,
+   246→  fixedRotation: true, isPlayer: true,
+   247→  flirCode: `
+   248→begincode update
+   249→  set_var _vida getHealth player
+   250→  set_var _muni getAmmo
+   251→  set_var _score get_var _score
+   252→  if _vida < 30
+   253→    setUIValue aviso "VIDA BAIXA!"
+   254→  else
+   255→    setUIValue aviso ""
+   256→  endif
+   257→endcode
+   258→`,
+   259→})
+   260→
+   261→// Joystick (mobile)
+   262→scene1Conects.push({
+   263→  instanceId: uid(), type: 'JoystickObject', name: 'Joystick',
+   264→  position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   265→  side: 'left', size: 130, color: '#3b82f6',
+   266→  deadzone: 0.2, targetPersonal: playerId,
+   267→})
+   268→
+   269→// ViewObject FPS
+   270→scene1Conects.push({
+   271→  instanceId: uid(), type: 'ViewObject', name: 'CamFPS',
+   272→  position: [0, 3, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   273→  cameraType: 'perspective', fov: 80, near: 0.05, far: 300,
+   274→  followTarget: playerId, followMode: 'first',
+   275→  eyeHeight: 1.6, cameraRole: 'player',
+   276→})
+   277→
+   278→// CameraTouchZone
+   279→scene1Conects.push({
+   280→  instanceId: uid(), type: 'CameraTouchZone', name: 'TouchZone',
+   281→  position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   282→  zone: { x: 50, y: 0, w: 50, h: 100 },
+   283→  sensitivity: 1.5, invertY: false, minPitch: -1.4, maxPitch: 1.4,
+   284→})
+   285→
+   286→// Armas
+   287→const pistolId = uid()
+   288→scene1Conects.push({
+   289→  instanceId: pistolId, type: 'WeaponObject', name: 'Pistola',
+   290→  position: [0.3, 1.5, -0.5], rotation: [0, 0, 0], scale: [0.5, 0.5, 0.5],
+   291→  damage: 25, range: 60, maxAmmo: 12, fireRate: 0.4,
+   292→})
+   293→
+   294→const rifleId = uid()
+   295→scene1Conects.push({
+   296→  instanceId: rifleId, type: 'WeaponObject', name: 'Rifle',
+   297→  position: [-0.3, 1.4, -0.4], rotation: [0, 0, 0], scale: [0.6, 0.6, 0.6],
+   298→  damage: 18, range: 120, maxAmmo: 30, fireRate: 0.1,
+   299→  visible: false, // começa escondido
+   300→})
+   301→
+   302→// Inimigos — 3 soldados
+   303→const enemySpecs1 = [
+   304→  { pos: [12, 2, -8], hp: 80, type: 'soldier', dmg: 8, speed: 3.5 },
+   305→  { pos: [-8, 2, 12], hp: 80, type: 'soldier', dmg: 8, speed: 3.5 },
+   306→  { pos: [20, 2, -20], hp: 80, type: 'soldier', dmg: 8, speed: 3.5 },
+   307→]
+   308→for (let i = 0; i < enemySpecs1.length; i++) {
+   309→  const e = enemySpecs1[i]
+   310→  scene1Conects.push({
+   311→    instanceId: uid(), type: 'NpcObject', name: `Soldado_${i+1}`,
+   312→    sourceObjectId: 'obj_enemy_soldier',
+   313→    position: [e.pos[0], e.pos[1], e.pos[2]],
+   314→    rotation: [0, 0, 0], scale: [1, 1, 1],
+   315→    health: e.hp, maxHealth: e.hp, mass: 1, moveSpeed: e.speed, damage: e.dmg,
+   316→    fixedRotation: true, aiMode: 'chase',
+   317→    physicsType: 'capsule', colliderShape: 'capsule',
+   318→    colliderHeight: 1.8, colliderRadius: 0.4,
+   319→    flirCode: `
+   320→begincode update
+   321→  set_var _dist distanceTo player
+   322→  if _dist < 20
+   323→    move_towards player ${e.speed}
+   324→    if _dist < 3
+   325→      if get_var _cooldown <= 0
+   326→        set_var _cooldown 1.2
+   327→        takeDamage player ${e.dmg}
+   328→      endif
+   329→    endif
+   330→  endif
+   331→  set_var _cooldown get_var _cooldown - 0.016
+   332→endcode
+   333→
+   334→begincode onHit
+   335→  set_var _vida getHealth self
+   336→  if _vida <= 0
+   337→    hide self
+   338→    setUIValue aviso "SOLDADO ELIMINADO!"
+   339→  endif
+   340→endcode
+   341→`,
+   342→  })
+   343→}
+   344→
+   345→// Itens coleccionáveis (5 gemas)
+   346→const itemSpecs1 = [
+   347→  { pos: [5, 1, 5], color: '#fbbf24' },
+   348→  { pos: [-5, 1, -5], color: '#a855f7' },
+   349→  { pos: [15, 1, -15], color: '#3b82f6' },
+   350→  { pos: [-15, 1, 15], color: '#10b981' },
+   351→  { pos: [0, 1, -20], color: '#ef4444' },
+   352→]
+   353→for (let i = 0; i < itemSpecs1.length; i++) {
+   354→  scene1Conects.push({
+   355→    instanceId: uid(), type: 'ItemObject', name: `Gema_${i+1}`,
+   356→    position: [itemSpecs1[i].pos[0], itemSpecs1[i].pos[1], itemSpecs1[i].pos[2]],
+   357→    rotation: [0, 0, 0], scale: [1, 1, 1],
+   358→    color: itemSpecs1[i].color, value: 50, collectible: true,
+   359→    flirCode: `
+   360→begincode update
+   361→  set_var _dist distanceTo player
+   362→  if _dist < 1.5
+   363→    hide self
+   364→    setUIValue aviso "GEMA RECOLHIDA (+50)"
+   365→  endif
+   366→endcode
+   367→`,
+   368→  })
+   369→}
+   370→
+   371→// Checkpoints (3)
+   372→const checkpointPositions1 = [[0, 0, -5], [10, 0, -10], [-10, 0, -10]]
+   373→for (let i = 0; i < checkpointPositions1.length; i++) {
+   374→  scene1Conects.push({
+   375→    instanceId: uid(), type: 'CheckpointObject', name: `Checkpoint_${i+1}`,
+   376→    position: [checkpointPositions1[i][0], checkpointPositions1[i][1], checkpointPositions1[i][2]],
+   377→    rotation: [0, 0, 0], scale: [1, 1, 1], triggerRadius: 2,
+   378→  })
+   379→}
+   380→
+   381→// Portal para Floresta (NavigatorObject)
+   382→scene1Conects.push({
+   383→  instanceId: uid(), type: 'NavigatorObject', name: 'PortalFloresta',
+   384→  position: [25, 1, 0], rotation: [0, 0, 0], scale: [1.5, 1.5, 1.5],
+   385→  triggerRadius: 2.5, targetSceneId: 'scene_forest',
+   386→})
+   387→
+   388→// PointMarker — ponto de interesse
+   389→scene1Conects.push({
+   390→  instanceId: uid(), type: 'PointMarker', name: 'PontoCentro',
+   391→  position: [0, 3, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   392→  size: 0.5, color: '#3b82f6', label: 'Centro da Vila',
+   393→})
+   394→
+   395→// ArrowMarker — indicador para o portal
+   396→scene1Conects.push({
+   397→  instanceId: uid(), type: 'ArrowMarker', name: 'SetaPortal',
+   398→  position: [10, 4, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   399→  direction: [1, 0, 0], length: 2.5, color: '#a855f7',
+   400→})
+   401→
+   402→// === Cena 2: Floresta Sombria ===
+   403→const scene2Conects = []
+   404→
+   405→// Sky mais sombrio
+   406→scene2Conects.push({
+   407→  instanceId: uid(), type: 'SkyObject', name: 'SkySombrio',
+   408→  position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   409→  skyType: 'procedural', topColor: '#1e1b4b', bottomColor: '#7c3aed',
+   410→  sunPosition: [5, 12, 5], sunIntensity: 0.6, turbidity: 10, rayleigh: 4,
+   411→})
+   412→
+   413→scene2Conects.push({
+   414→  instanceId: uid(), type: 'SunObject', name: 'SolFraco',
+   415→  position: [5, 12, 5], rotation: [0, 0, 0], scale: [1, 1, 1],
+   416→  color: '#c4b5fd', intensity: 0.7, castShadows: true,
+   417→})
+   418→
+   419→scene2Conects.push({
+   420→  instanceId: uid(), type: 'AmbientObject', name: 'AmbienteSombrio',
+   421→  position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   422→  color: '#6d28d9', intensity: 0.6,
+   423→})
+   424→
+   425→// Fog denso
+   426→scene2Conects.push({
+   427→  instanceId: uid(), type: 'VolumetricFogObject', name: 'FogDenso',
+   428→  position: [0, 3, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   429→  density: 0.06, scattering: 0.9, anisotropy: 0.5,
+   430→  attenuationDistance: 25, godRays: true, color: '#4c1d95',
+   431→})
+   432→
+   433→// Bloom
+   434→scene2Conects.push({
+   435→  instanceId: uid(), type: 'BloomObject', name: 'BloomMistico',
+   436→  position: [5, 12, 5], rotation: [0, 0, 0], scale: [1, 1, 1],
+   437→  intensity: 0.8, threshold: 0.6, radius: 0.7,
+   438→})
+   439→
+   440→// Terreno montanhoso
+   441→scene2Conects.push({
+   442→  instanceId: uid(), type: 'TerrainObject', name: 'TerrenoFloresta',
+   443→  position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   444→  width: 80, depth: 80, segments: SEG, heightScale: 8,
+   445→  heightmap: Array.from(forestTerrain),
+   446→  splatmap: Array.from(forestSplat),
+   447→  textureLayers: [
+   448→    { id: 'grass', label: 'Relva', color: '#1a3a1a' },
+   449→    { id: 'dirt', label: 'Terra', color: '#3a2a1a' },
+   450→    { id: 'rock', label: 'Pedra', color: '#2d2d35' },
+   451→    { id: 'snow', label: 'Neve', color: '#cbd5e1' },
+   452→  ],
+   453→  maxLayers: 4,
+   454→})
+   455→
+   456→// Árvores densas (20)
+   457→for (let i = 0; i < 20; i++) {
+   458→  const angle = (i / 20) * Math.PI * 2
+   459→  const r = 8 + Math.random() * 25
+   460→  scene2Conects.push({
+   461→    instanceId: uid(), type: 'StaticObject', name: `ÁrvoreF_${i+1}`,
+   462→    sourceObjectId: 'obj_tree',
+   463→    position: [Math.cos(angle) * r, 2.5, Math.sin(angle) * r],
+   464→    rotation: [0, Math.random() * Math.PI * 2, 0],
+   465→    scale: [1 + Math.random() * 0.5, 1.2 + Math.random() * 0.8, 1 + Math.random() * 0.5],
+   466→    physicsType: 'cylinder', width: 0.4, height: 5, depth: 0.4,
+   467→  })
+   468→}
+   469→
+   470→// Pedras (8)
+   471→for (let i = 0; i < 8; i++) {
+   472→  const angle = Math.random() * Math.PI * 2
+   473→  const r = 5 + Math.random() * 30
+   474→  scene2Conects.push({
+   475→    instanceId: uid(), type: 'StaticObject', name: `PedraF_${i+1}`,
+   476→    sourceObjectId: 'obj_rock',
+   477→    position: [Math.cos(angle) * r, 0.5, Math.sin(angle) * r],
+   478→    rotation: [Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI],
+   479→    scale: [1 + Math.random(), 1 + Math.random(), 1 + Math.random()],
+   480→    physicsType: 'sphere', width: 1, height: 1, depth: 1, colliderRadius: 1,
+   481→  })
+   482→}
+   483→
+   484→// Jogador (mesma config)
+   485→const player2Id = uid()
+   486→const player2Y = sampleTerrainHeight(forestTerrain, SEG, 0, 0, 80, 80, 8) + 3  // +3m por terreno montanhoso
+   487→scene2Conects.push({
+   488→  instanceId: player2Id, type: 'PersonalObject', name: 'JogadorF',
+   489→  position: [0, player2Y, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   490→  health: 100, maxHealth: 100, mass: 1, moveSpeed: 6, jumpForce: 9, canJump: true,
+   491→  fixedRotation: true, isPlayer: true,
+   492→})
+   493→
+   494→scene2Conects.push({
+   495→  instanceId: uid(), type: 'JoystickObject', name: 'JoystickF',
+   496→  position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   497→  side: 'left', size: 130, targetPersonal: player2Id,
+   498→})
+   499→
+   500→scene2Conects.push({
+   501→  instanceId: uid(), type: 'ViewObject', name: 'CamFPS_F',
+   502→  position: [0, 3, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   503→  cameraType: 'perspective', fov: 80, near: 0.05, far: 300,
+   504→  followTarget: player2Id, followMode: 'first', eyeHeight: 1.6, cameraRole: 'player',
+   505→})
+   506→
+   507→scene2Conects.push({
+   508→  instanceId: uid(), type: 'CameraTouchZone', name: 'TouchZoneF',
+   509→  position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+   510→  zone: { x: 50, y: 0, w: 50, h: 100 }, sensitivity: 1.5,
+   511→  minPitch: -1.4, maxPitch: 1.4,
+   512→})
+   513→
+   514→// Arma
+   515→scene2Conects.push({
+   516→  instanceId: uid(), type: 'WeaponObject', name: 'Rifle',
+   517→  position: [0.3, 1.5, -0.5], rotation: [0, 0, 0], scale: [0.6, 0.6, 0.6],
+   518→  damage: 18, range: 120, maxAmmo: 30, fireRate: 0.1,
+   519→})
+   520→
+   521→// 2 monstros corpo-a-corpo
+   522→for (let i = 0; i < 2; i++) {
+   523→  const angle = (i / 2) * Math.PI * 2
+   524→  scene2Conects.push({
+   525→    instanceId: uid(), type: 'NpcObject', name: `Monstro_${i+1}`,
+   526→    sourceObjectId: 'obj_enemy_monster',
+   527→    position: [Math.cos(angle) * 10, 2, Math.sin(angle) * 10],
+   528→    rotation: [0, 0, 0], scale: [1.2, 1.2, 1.2],
+   529→    health: 200, maxHealth: 200, mass: 1, moveSpeed: 4, damage: 20,
+   530→    fixedRotation: true, aiMode: 'chase',
+   531→    physicsType: 'sphere', width: 1, height: 1, depth: 1, colliderRadius: 0.7,
+   532→    flirCode: `
+   533→begincode update
+   534→  set_var _dist distanceTo player
+   535→  if _dist < 25
+   536→    move_towards player 4
+   537→    if _dist < 2.5
+   538→      if get_var _cooldown <= 0
+   539→        set_var _cooldown 1.5
+   540→        takeDamage player 25
+   541→      endif
+   542→    endif
+   543→  endif
+   544→  set_var _cooldown get_var _cooldown - 0.016
+   545→endcode
+   546→
+   547→begincode onHit
+   548→  set_var _vida getHealth self
+   549→  if _vida <= 0
+   550→    hide self
+   551→    setUIValue aviso "MONSTRO ABATIDO!"
+   552→  endif
+   553→endcode
+   554→`,
+   555→  })
+   556→}
+   557→
+   558→// BOSS (1)
+   559→scene2Conects.push({
+   560→  instanceId: uid(), type: 'NpcObject', name: 'BOSS_Dragon',
+   561→  sourceObjectId: 'obj_boss',
+   562→  position: [0, 5, -25], rotation: [0, 0, 0], scale: [2, 2, 2],
+   563→  health: 1000, maxHealth: 1000, mass: 5, moveSpeed: 2, damage: 50,
+   564→  fixedRotation: true, aiMode: 'chase',
+   565→  physicsType: 'sphere', width: 2, height: 2, depth: 2, colliderRadius: 1.8,
+   566→  flirCode: `
+   567→begincode update
+   568→  set_var _dist distanceTo player
+   569→  if _dist < 35
+   570→    move_towards player 2
+   571→    if _dist < 5
+   572→      if get_var _cooldown <= 0
+   573→        set_var _cooldown 2.5
+   574→        takeDamage player 50
+   575→        setUIValue aviso "BOSS ATACOU! -50 HP"
+   576→      endif
+   577→    endif
+   578→  endif
+   579→  set_var _cooldown get_var _cooldown - 0.016
+   580→  setUIValue bossbar "BOSS: " + (getHealth self)
+   581→endcode
+   582→
+   583→begincode onHit
+   584→  set_var _vida getHealth self
+   585→  if _vida <= 0
+   586→    hide self
+   587→    setUIValue aviso "BOSS DERROTADO! VITÓRIA!"
+   588→  endif
+   589→endcode
+   590→`,
+   591→})
+   592→
+   593→// 5 gemas na floresta
+   594→for (let i = 0; i < 5; i++) {
+   595→  const angle = (i / 5) * Math.PI * 2
+   596→  const r = 10 + Math.random() * 15
+   597→  scene2Conects.push({
+   598→    instanceId: uid(), type: 'ItemObject', name: `GemaF_${i+1}`,
+   599→    position: [Math.cos(angle) * r, 1, Math.sin(angle) * r],
+   600→    rotation: [0, 0, 0], scale: [1, 1, 1],
+   601→    color: ['#fbbf24', '#a855f7', '#3b82f6', '#10b981', '#ef4444'][i],
+   602→    value: 100, collectible: true,
+   603→    flirCode: `
+   604→begincode update
+   605→  set_var _dist distanceTo player
+   606→  if _dist < 1.5
+   607→    hide self
+   608→    setUIValue aviso "GEMA RARA! (+100)"
+   609→  endif
+   610→endcode
+   611→`,
+   612→  })
+   613→}
+   614→
+   615→// Checkpoints (2)
+   616→scene2Conects.push({
+   617→  instanceId: uid(), type: 'CheckpointObject', name: 'CheckF1',
+   618→  position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], triggerRadius: 2,
+   619→})
+   620→scene2Conects.push({
+   621→  instanceId: uid(), type: 'CheckpointObject', name: 'CheckF2',
+   622→  position: [0, 0, -15], rotation: [0, 0, 0], scale: [1, 1, 1], triggerRadius: 2,
+   623→})
+   624→
+   625→// Portal de regresso
+   626→scene2Conects.push({
+   627→  instanceId: uid(), type: 'NavigatorObject', name: 'PortalVila',
+   628→  position: [-25, 1, 0], rotation: [0, 0, 0], scale: [1.5, 1.5, 1.5],
+   629→  triggerRadius: 2.5, targetSceneId: 'scene_village',
+   630→})
+   631→
+   632→// === UI Screen (HUD) ===
+   633→const uiScreens = [{
+   634→  id: uid(),
+   635→  name: 'HUD',
+   636→  visible: true,
+   637→  elements: [
+   638→    { id: uid(), type: 'Text', name: 'vida', label: 'VIDA: 100', position: [3, 5], size: [180, 30], color: '#22c55e', textColor: '#ffffff', fontSize: 18 },
+   639→    { id: uid(), type: 'Text', name: 'muni', label: 'MUNI: 12', position: [3, 10], size: [180, 30], color: '#fbbf24', textColor: '#ffffff', fontSize: 18 },
+   640→    { id: uid(), type: 'Text', name: 'aviso', label: '', position: [50, 20], size: [400, 30], color: 'transparent', textColor: '#fbbf24', fontSize: 24 },
+   641→    { id: uid(), type: 'Text', name: 'bossbar', label: '', position: [50, 80], size: [400, 25], color: 'transparent', textColor: '#dc2626', fontSize: 16 },
+   642→    { id: uid(), type: 'Button', name: 'btn_tiro', label: 'TIRO', position: [85, 85], size: [90, 70], color: '#dc2626', textColor: '#ffffff', fontSize: 18, eventName: 'onShoot' },
+   643→    { id: uid(), type: 'Button', name: 'btn_reload', label: 'RELOAD', position: [70, 90], size: [80, 50], color: '#3b82f6', textColor: '#ffffff', fontSize: 14, eventName: 'onReload' },
+   644→    { id: uid(), type: 'Button', name: 'btn_pular', label: 'PULAR', position: [15, 85], size: [80, 70], color: '#10b981', textColor: '#ffffff', fontSize: 14, eventName: 'onJump' },
+   645→    { id: uid(), type: 'Text', name: 'title', label: 'FlirQuest Saga', position: [50, 3], size: [300, 25], color: 'transparent', textColor: '#a855f7', fontSize: 20 },
+   646→  ],
+   647→}]
+   648→
+   649→// === Cenas ===
+   650→const scenes = [
+   651→  {
+   652→    id: 'scene_village',
+   653→    name: 'Vila Inicial',
+   654→    objects: [],
+   655→    conects: scene1Conects,
+   656→    gameCamera: {
+   657→      cameraType: 'perspective',
+   658→      position: [0, 5, 10], rotation: [0, 0, 0],
+   659→      fov: 80, near: 0.05, far: 300,
+   660→    },
+   661→    physics: { gravity: [0, -9.82, 0] },
+   662→    playerObjectId: playerId,
+   663→  },
+   664→  {
+   665→    id: 'scene_forest',
+   666→    name: 'Floresta Sombria',
+   667→    objects: [],
+   668→    conects: scene2Conects,
+   669→    gameCamera: {
+   670→      cameraType: 'perspective',
+   671→      position: [0, 5, 10], rotation: [0, 0, 0],
+   672→      fov: 80, near: 0.05, far: 300,
+   673→    },
+   674→    physics: { gravity: [0, -9.82, 0] },
+   675→    playerObjectId: player2Id,
+   676→  },
+   677→]
+   678→
+   679→// === Projeto ===
+   680→const project = {
+   681→  version: 4,
+   682→  projectName: 'FlirQuest Saga — RPG/FPS Profissional',
+   683→  objects,
+   684→  scenes,
+   685→  activeSceneId: 'scene_village',
+   686→  background: { type: 'gradient', gradientTop: '#1e3a8a', gradientBottom: '#fb923c', color: '#0d1117' },
+   687→  grid: { visible: false, size: 30, divisions: 30, color: '#1f2937' },
+   688→  lights: {
+   689→    ambient: { intensity: 0.5, color: '#fbbf24' },
+   690→    directional: { intensity: 1.5, color: '#fff7d6', position: [15, 8, -5] },
+   691→  },
+   692→  uiScreens,
+   693→  renderSettings: {
+   694→    qualityLevel: 'super-realista',
+   695→    flirGI: false, // flag existe mas sem implementação — ver README
+   696→    flirAdaptiveMesh: false,
+   697→    shadowOptimizations: true,
+   698→    shadowDistance: 40,
+   699→    shadowMapSize: 2048,
+   700→    vertexAO: true,
+   701→    pom: true,
+   702→    postProcessing: true,
+   703→    waterQuality: 'professional',
+   704→    pixelRatio: 1.5,
+   705→  },
+   706→}
+   707→
+   708→const json = JSON.stringify(project)
+   709→console.log('FlirQuest Saga gerado:', json.length, 'bytes')
+   710→console.log('Cenas:', scenes.length, '| Conects cena 1:', scene1Conects.length, '| Conects cena 2:', scene2Conects.length)
+   711→
+   712→export { project as flirQuestSagaProject, json as flirQuestSagaJSON }
+   713→
