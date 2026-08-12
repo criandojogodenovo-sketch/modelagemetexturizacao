@@ -151,6 +151,60 @@ export const MODIFIER_TYPES = {
     defaultParams: { thickness: 0.1 },
     description: 'Dá espessura a uma superfície',
   },
+  bevel: {
+    label: 'Bevel (Chanfro)',
+    icon: 'bevel',
+    defaultParams: { width: 0.05, segments: 2 },
+    description: 'Arredonda arestas e cantos',
+  },
+  displace: {
+    label: 'Displace (Deslocamento)',
+    icon: 'subdivide',
+    defaultParams: { strength: 0.5, scale: 1.0, textureType: 'noise' },
+    description: 'Desloca vértices com base numa textura/noise',
+  },
+  bend: {
+    label: 'Bend (Dobrar)',
+    icon: 'rotate',
+    defaultParams: { angle: 45, axis: 'y' },
+    description: 'Dobra a geometria num ângulo',
+  },
+  twist: {
+    label: 'Twist (Torcer)',
+    icon: 'rotate',
+    defaultParams: { angle: 90, axis: 'y' },
+    description: 'Torce a geometria em torno de um eixo',
+  },
+  taper: {
+    label: 'Taper (Afilar)',
+    icon: 'scale',
+    defaultParams: { amount: 0.5, axis: 'y' },
+    description: 'Afina ou alarga a geometria num eixo',
+  },
+  wireframe: {
+    label: 'Wireframe',
+    icon: 'grid',
+    defaultParams: { thickness: 0.02 },
+    description: 'Converte a malha em wireframe',
+  },
+  remesh: {
+    label: 'Remesh (Voxelizar)',
+    icon: 'cube',
+    defaultParams: { voxelSize: 0.1 },
+    description: 'Reconstrói a malha com voxels uniformes',
+  },
+  smooth: {
+    label: 'Smooth (Suavizar)',
+    icon: 'subdivide',
+    defaultParams: { iterations: 1, factor: 0.5 },
+    description: 'Suaviza a malha por laplaciano',
+  },
+  spherify: {
+    label: 'Spherify (Esferificar)',
+    icon: 'sphere',
+    defaultParams: { factor: 0.5 },
+    description: 'Deforma a malha em direcção a uma esfera',
+  },
 }
 
 // Tipos de operações booleanas

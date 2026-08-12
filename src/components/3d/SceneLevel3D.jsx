@@ -921,11 +921,14 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     const fogConect = (setupScene.conects || []).find((c) => c.type === 'FogObject')
     // FogApplier no render trata disto — basta existir na cena
 
-    // Joystick touch
-    const onTouchStart = (e) => { if (e.touches.length === 1) { joystickRef.current.active = true } }
-    const onTouchEnd = () => { joystickRef.current.active = false; joystickRef.current.x = 0; joystickRef.current.z = 0 }
-    window.addEventListener('touchstart', onTouchStart)
-    window.addEventListener('touchend', onTouchEnd)
+    // NOTA: O joystick é tratado pelo JoystickControl (GameUIOverlay) que escreve
+    // diretamente em window._flirJoystick (=== joystickRef.current).
+    // Os antigos handlers globais touchstart/touchend foram REMOVIDOS porque:
+    //  - onTouchStart setava joystickRef.current.active = true para QUALQUER toque
+    //    (incluindo toques na CameraTouchZone), causando movimento fantasma.
+    //  - onTouchEnd resetava x/z/active quando QUALQUER dedo saía do ecrã,
+    //    sobrescrevendo os valores escritos pelo JoystickControl quando o
+    //    utilizador soltava o dedo da câmara mas mantinha o dedo no joystick.
 
     // Teclado
     const keys = {}
@@ -945,8 +948,6 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       animPlayersRef.current.clear()
       physicsRef.current?.dispose()
       physicsRef.current = null
-      window.removeEventListener('touchstart', onTouchStart)
-      window.removeEventListener('touchend', onTouchEnd)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       window._flirGameContext = null
@@ -1007,19 +1008,34 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       }
     }
 
-    // Joystick → PersonalObject
+    // Joystick/WASD → PersonalObject (camera-relative movement, like Godot's Input.get_vector + transform.basis)
     const keys = window._flirKeys || {}
     if (joystickRef.current.active || keys['w'] || keys['a'] || keys['s'] || keys['d']) {
+      // Read camera yaw so movement is relative to where the player is looking (FPS standard).
+      // camera.rotation was set earlier via camera.rotation.set(pitch, yaw, 0, 'YXZ') OR will be set below.
+      // We read from window._flirCameraRotation (the source of truth updated by CameraTouchZoneControl).
+      const yaw = window._flirCameraRotation?.yaw || 0
+      const cosY = Math.cos(yaw)
+      const sinY = Math.sin(yaw)
       for (const conect of activeScene.conects || []) {
         if (conect.type === 'PersonalObject') {
-          const speed = conect.moveSpeed || 5
-          let mx = 0, mz = 0
+          const speed = conect.moveSpeed || conect.speed || 5
+          let mx = 0, mz = 0 // mx = right axis, mz = forward axis (negative = forward)
           if (joystickRef.current.active) { mx = joystickRef.current.x * speed; mz = joystickRef.current.z * speed }
           if (keys['w']) mz = -speed
           if (keys['s']) mz = speed
           if (keys['a']) mx = -speed
           if (keys['d']) mx = speed
-          physicsRef.current?.movePersonal(conect.instanceId, [mx, 0, mz], 1)
+          // Rotate (mx, mz) by camera yaw on the XZ plane:
+          //   forwardVec = (-sin(yaw), -cos(yaw))  [camera looks down -Z at yaw=0]
+          //   rightVec   = ( cos(yaw), -sin(yaw))
+          //   worldVel   = mx * rightVec + (-mz) * forwardVec
+          // Simplified:
+          //   vx =  mx * cos(yaw) + mz * sin(yaw)
+          //   vz = -mx * sin(yaw) + mz * cos(yaw)
+          const vx =  mx * cosY + mz * sinY
+          const vz = -mx * sinY + mz * cosY
+          physicsRef.current?.movePersonal(conect.instanceId, [vx, 0, vz], 1)
           if ((keys[' '] || keys['space']) && conect.canJump) {
             physicsRef.current?.jumpPersonal(conect.instanceId)
           }

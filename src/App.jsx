@@ -59,6 +59,7 @@ export default function App() {
   const toggleMoreTools = useStore((s) => s.toggleMoreTools)
   const appMode = useStore((s) => s.appMode)
   const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
+  const closeScenePreview = useStore((s) => s.closeScenePreview)
   const conectsWindowOpen = useStore((s) => s.ui.conectsWindowOpen)
   const toggleConectsWindow = useStore((s) => s.toggleConectsWindow)
   const gameExportOpen = useStore((s) => s.gameExportOpen)
@@ -144,6 +145,11 @@ export default function App() {
         if (key === 'd' && selectedId) { e.preventDefault(); duplicateObject(selectedId) }
         return
       }
+      // Em modo jogo, WASD/Space/etc. são para o jogador — não ativar atalhos do editor
+      if (scenePreviewOpen) {
+        if (key === 'escape') { closeScenePreview() }
+        return
+      }
       if (key === 'g') setTransformMode('translate')
       if (key === 'r') setTransformMode('rotate')
       if (key === 's') setTransformMode('scale')
@@ -154,7 +160,7 @@ export default function App() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [undo, redo, setTransformMode, deleteObject, duplicateObject, selectedId, deselect, closeDrawers])
+  }, [undo, redo, setTransformMode, deleteObject, duplicateObject, selectedId, deselect, closeDrawers, scenePreviewOpen, closeScenePreview])
 
   return (
     <div className={`app-shell ${scenePreviewOpen ? 'game-mode' : ''}`}>

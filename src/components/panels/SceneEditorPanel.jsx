@@ -20,6 +20,7 @@ import {
   IconClose,
 } from '../ui/Icons'
 import ConectContextMenu from '../ui/ConectContextMenu'
+import { Icon } from '../ui/iconMap'
 
 export default function SceneEditorPanel({ onClose }) {
   const scenes = useStore((s) => s.scenes)
@@ -38,6 +39,11 @@ export default function SceneEditorPanel({ onClose }) {
   const setFlirScriptTarget = useStore((s) => s.setFlirScriptTarget)
   const toggleConectsWindow = useStore((s) => s.toggleConectsWindow)
   const openGameExport = useStore((s) => s.openGameExport)
+  const openTerrainEditor = useStore((s) => s.openTerrainEditor)
+  const toggleTerrainSculpt = useStore((s) => s.toggleTerrainSculpt)
+  const terrainSculptActive = useStore((s) => s.terrainSculptActive)
+  const openInstancingPanel = useStore((s) => s.openInstancingPanel)
+  const openMarketplace = useStore((s) => s.openMarketplace)
   const toast = useStore((s) => s.toast)
 
   const activeScene = scenes.find((s) => s.id === activeSceneId)
@@ -73,21 +79,60 @@ export default function SceneEditorPanel({ onClose }) {
                 disabled={!activeScene}
                 title="Executar jogo (física + FlirScript + UI)"
               >
-                ▶ Executar Jogo
+                <Icon name="play" size={12} />
+                <span style={{ marginLeft: 4 }}>Play</span>
               </button>
               <button
                 onClick={openGameExport}
                 title="Exportar jogo (build standalone)"
                 disabled={!activeScene}
-              >Exportar
+              >
+                <Icon name="export" size={12} />
+                <span style={{ marginLeft: 4 }}>Exportar</span>
               </button>
             </div>
             <button
               onClick={toggleConectsWindow}
-              style={{ width: '100%' }}
+              style={{ width: '100%', marginBottom: 4 }}
               title="Abrir janela de Conects (física, visual, UI, etc.)"
-            >Conects
+            >
+              <Icon name="puzzle" size={12} />
+              <span style={{ marginLeft: 4 }}>Conects (objetos)</span>
             </button>
+
+            {/* Ferramentas de cenário */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+              <button
+                onClick={openTerrainEditor}
+                title="Editor de Terrenos (gerar, esculpir, pintar, texturizar)"
+              >
+                <Icon name="mountain" size={12} />
+                <span style={{ marginLeft: 4 }}>Terreno</span>
+              </button>
+              <button
+                onClick={toggleTerrainSculpt}
+                className={terrainSculptActive ? 'primary' : ''}
+                title="Escultura 3D direta no viewport (seleciona um TerrainObject e arrasta)"
+                style={terrainSculptActive ? { background: 'var(--accent)' } : {}}
+              >
+                <Icon name="brush" size={12} />
+                <span style={{ marginLeft: 4 }}>{terrainSculptActive ? '✓ Esculp 3D ON' : 'Esculp 3D'}</span>
+              </button>
+              <button
+                onClick={openInstancingPanel}
+                title="Hardware Instancing — florestas, pedras, partículas (GPU)"
+              >
+                <Icon name="boxes" size={12} />
+                <span style={{ marginLeft: 4 }}>Instancing</span>
+              </button>
+              <button
+                onClick={openMarketplace}
+                title="Marketplace — assets, jogos e templates"
+              >
+                <Icon name="package" size={12} />
+                <span style={{ marginLeft: 4 }}>Marketplace</span>
+              </button>
+            </div>
           </div>
 
           {/* 1. Lista de cenas */}

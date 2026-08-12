@@ -20,6 +20,13 @@ import {
   mirrorGeometry,
   arrayGeometry,
   solidifyGeometry,
+  bevelGeometry,
+  displaceGeometry as meshDisplaceGeometry,
+  taperGeometry as meshTaperGeometry,
+  twistGeometry as meshTwistGeometry,
+  bendGeometry as meshBendGeometry,
+  smoothGeometry as meshSmoothGeometry,
+  decimateGeometry,
 } from '../../utils/meshOperations'
 import { compositeTextureLayers } from '../../utils/textureCompositor'
 
@@ -36,6 +43,36 @@ export function loadTexture(dataURL) {
   tex.wrapT = THREE.RepeatWrapping
   textureCache.set(dataURL, tex)
   return tex
+}
+
+// === Implementações de modificadores locais ===
+
+// Wireframe — converte para LineSegments
+function wireframeGeometry(geometry, thickness = 0.02) {
+  const edges = new THREE.EdgesGeometry(geometry)
+  const wireGeo = new THREE.BufferGeometry()
+  const positions = edges.attributes.position.array
+  wireGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  return wireGeo
+}
+
+// Spherify — deforma em direcção a uma esfera
+function spherifyGeometry(geometry, factor = 0.5) {
+  const pos = geometry.attributes.position
+  geometry.computeBoundingSphere()
+  const radius = geometry.boundingSphere.radius
+  const center = geometry.boundingSphere.center
+  const v = new THREE.Vector3()
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i)
+    const dir = v.clone().sub(center).normalize()
+    const target = center.clone().addScaledVector(dir, radius)
+    v.lerp(target, factor)
+    pos.setXYZ(i, v.x, v.y, v.z)
+  }
+  pos.needsUpdate = true
+  geometry.computeVertexNormals()
+  return geometry
 }
 
 // Aplica a stack de modificadores a uma geometria
@@ -61,6 +98,49 @@ function applyModifiers(geometry, modifiers) {
           break
         case 'solidify':
           result = solidifyGeometry(result, mod.params.thickness || 0.1)
+          break
+        case 'bevel':
+          try { result = bevelGeometry(result, (mod.params.width || 0.05) / 2, mod.params.segments || 2) } catch {}
+          break
+        case 'displace':
+          result = meshDisplaceGeometry(result, {
+            strength: mod.params.strength || 0.5,
+            scale: mod.params.scale || 1.0,
+          })
+          break
+        case 'bend':
+          result = meshBendGeometry(result, {
+            angle: ((mod.params.angle || 45) * Math.PI) / 180,
+            axis: mod.params.axis || 'y',
+          })
+          break
+        case 'twist':
+          result = meshTwistGeometry(result, {
+            angle: ((mod.params.angle || 90) * Math.PI) / 180,
+            axis: mod.params.axis || 'y',
+          })
+          break
+        case 'taper':
+          result = meshTaperGeometry(result, {
+            factor: mod.params.amount || 0.5,
+            axis: mod.params.axis || 'y',
+          })
+          break
+        case 'wireframe':
+          result = wireframeGeometry(result, mod.params.thickness || 0.02)
+          break
+        case 'remesh':
+          // Simplificação: usa decimate (não é voxelização real)
+          result = decimateGeometry(result, { ratio: 0.5 })
+          break
+        case 'smooth':
+          result = meshSmoothGeometry(result, {
+            iterations: mod.params.iterations || 1,
+            factor: mod.params.factor || 0.5,
+          })
+          break
+        case 'spherify':
+          result = spherifyGeometry(result, mod.params.factor || 0.5)
           break
         default:
           break

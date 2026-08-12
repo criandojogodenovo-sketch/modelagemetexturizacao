@@ -13,6 +13,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../../store/useStore'
 import { listProjects, loadProject, deleteProject } from '../../utils/db'
 import { flirQuestArenaJSON } from '../../utils/game/flirQuestArena'
+import { flirQuestSagaJSON } from '../../utils/game/flirQuestSaga'
 import Ebook from './Ebook'
 import { Icon } from '../ui/iconMap'
 
@@ -96,6 +97,17 @@ export default function HomePage({ onOpenProject }) {
     }
   }
 
+  // Carregar jogo profissional "FlirQuest Saga" (RPG/FPS completo)
+  const handleLoadSaga = () => {
+    try {
+      loadProjectJSON(flirQuestSagaJSON)
+      toast('FlirQuest Saga carregado! 2 cenas, 6 inimigos, 1 BOSS. Boa sorte!', 'success', 5000)
+      onOpenProject?.()
+    } catch (err) {
+      toast('Erro ao carregar Saga: ' + err.message, 'error')
+    }
+  }
+
   if (showEbook) {
     return <Ebook onClose={() => setShowEbook(false)} />
   }
@@ -125,9 +137,13 @@ export default function HomePage({ onOpenProject }) {
                 <Icon name="folder-open" size={12} />
                 <span>Abrir</span>
               </button>
-              <button onClick={handleLoadDemo} title="Carregar jogo demo FPS 3D completo" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+              <button onClick={handleLoadDemo} title="Carregar jogo demo FPS 3D" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
                 <Icon name="gamepad-2" size={12} />
-                <span>Demo FPS 3D</span>
+                <span>Demo FPS</span>
+              </button>
+              <button onClick={handleLoadSaga} title="Carregar RPG/FPS profissional completo (2 cenas, BOSS, etc.)" style={{ background: '#7c3aed', color: 'white' }}>
+                <Icon name="sword" size={12} />
+                <span>RPG Saga</span>
               </button>
               <button className="primary" onClick={handleNew}>
                 <Icon name="plus" size={12} />

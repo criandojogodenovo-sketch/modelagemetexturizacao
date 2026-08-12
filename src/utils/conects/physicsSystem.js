@@ -150,15 +150,21 @@ export function createPhysicsSystem(options = {}) {
       conect.position[1] + offset[1],
       conect.position[2] + offset[2]
     )
+    // CRITICAL: cannon-es sets body.type = STATIC when mass <= 0 (see cannon-es Body constructor).
+    // PersonalObject and NpcObject MUST have mass > 0 or they become immovable static bodies
+    // and movePersonal()/velocity changes are silently ignored by the integrator.
+    // Use taxonomy defaults (mass=1, fixedRotation=true) when the conect doesn't specify them.
+    const isCharacter = conect.type === 'PersonalObject' || conect.type === 'NpcObject'
+    const defaultMass = isCharacter ? 1 : 0
     const body = new CANNON.Body({
-      mass: isTrigger ? 0 : (conect.mass ?? 0),
+      mass: isTrigger ? 0 : (conect.mass ?? defaultMass),
       shape,
       position: bodyPos,
       material: conect.type === 'PersonalObject' ? materials.player : materials.default,
     })
-    body.linearDamping = conect.linearDamping ?? 0.01
+    body.linearDamping = conect.linearDamping ?? (isCharacter ? 0.4 : 0.01) // characters need higher damping to stop quickly
     body.angularDamping = conect.angularDamping ?? 0.01
-    body.fixedRotation = conect.fixedRotation ?? false
+    body.fixedRotation = conect.fixedRotation ?? isCharacter // characters should not tip over
 
     // Tipos especiais
     if (conect.type === 'StaticObject') {

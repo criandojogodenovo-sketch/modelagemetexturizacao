@@ -283,6 +283,119 @@ function ModifierParams({ mod, onChange }) {
           />
         </div>
       )
+    case 'bevel':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Largura: {params.width}</label>
+            <input type="range" min="0.01" max="0.5" step="0.01" value={params.width}
+              onChange={(e) => onChange({ width: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Segmentos: {params.segments}</label>
+            <input type="range" min="1" max="8" step="1" value={params.segments}
+              onChange={(e) => onChange({ segments: Number(e.target.value) })} />
+          </div>
+        </>
+      )
+    case 'displace':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Força: {params.strength}</label>
+            <input type="range" min="0" max="2" step="0.05" value={params.strength}
+              onChange={(e) => onChange({ strength: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Escala: {params.scale}</label>
+            <input type="range" min="0.1" max="5" step="0.1" value={params.scale}
+              onChange={(e) => onChange({ scale: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Tipo textura</label>
+            <select value={params.textureType} onChange={(e) => onChange({ textureType: e.target.value })}>
+              <option value="noise">Noise (sin)</option>
+              <option value="random">Aleatório</option>
+            </select>
+          </div>
+        </>
+      )
+    case 'bend':
+    case 'twist':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Ângulo: {params.angle}°</label>
+            <input type="range" min="0" max="360" step="5" value={params.angle}
+              onChange={(e) => onChange({ angle: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Eixo</label>
+            <select value={params.axis} onChange={(e) => onChange({ axis: e.target.value })}>
+              <option value="x">X</option>
+              <option value="y">Y</option>
+              <option value="z">Z</option>
+            </select>
+          </div>
+        </>
+      )
+    case 'taper':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Quantidade: {params.amount}</label>
+            <input type="range" min="-1" max="1" step="0.05" value={params.amount}
+              onChange={(e) => onChange({ amount: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Eixo</label>
+            <select value={params.axis} onChange={(e) => onChange({ axis: e.target.value })}>
+              <option value="x">X</option>
+              <option value="y">Y</option>
+              <option value="z">Z</option>
+            </select>
+          </div>
+        </>
+      )
+    case 'wireframe':
+      return (
+        <div className="prop-row">
+          <label>Espessura: {params.thickness}</label>
+          <input type="range" min="0.005" max="0.2" step="0.005" value={params.thickness}
+            onChange={(e) => onChange({ thickness: Number(e.target.value) })} />
+        </div>
+      )
+    case 'remesh':
+      return (
+        <div className="prop-row">
+          <label>Tamanho voxel: {params.voxelSize}</label>
+          <input type="range" min="0.02" max="0.5" step="0.02" value={params.voxelSize}
+            onChange={(e) => onChange({ voxelSize: Number(e.target.value) })} />
+        </div>
+      )
+    case 'smooth':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Iterações: {params.iterations}</label>
+            <input type="range" min="1" max="5" step="1" value={params.iterations}
+              onChange={(e) => onChange({ iterations: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Fator: {params.factor}</label>
+            <input type="range" min="0" max="1" step="0.05" value={params.factor}
+              onChange={(e) => onChange({ factor: Number(e.target.value) })} />
+          </div>
+        </>
+      )
+    case 'spherify':
+      return (
+        <div className="prop-row">
+          <label>Fator: {params.factor}</label>
+          <input type="range" min="0" max="1" step="0.05" value={params.factor}
+            onChange={(e) => onChange({ factor: Number(e.target.value) })} />
+        </div>
+      )
     default:
       return null
   }

@@ -194,11 +194,16 @@ conects.push({
   type: 'PersonalObject',
   name: 'Jogador',
   position: [0, 2, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
-  health: 100,
-  maxHealth: 100,
-  speed: 5,
+  // CRITICAL: mass > 0 required or cannon-es makes the body STATIC (immovable).
+  // moveSpeed is the property name expected by GameMode (taxonomy standard).
+  // fixedRotation prevents the capsule from tipping over.
+  mass: 1,
+  moveSpeed: 5,
   jumpForce: 8,
   canJump: true,
+  fixedRotation: true,
+  health: 100,
+  maxHealth: 100,
   isPlayer: true,
   // FlirCode para actualizar HUD
   flirCode: `
@@ -235,7 +240,7 @@ conects.push({
   cameraRole: 'player',
 })
 
-// CameraTouchZone — zona de toque para rodar câmara
+// CameraTouchZone — zona de toque para rodar câmara (metade direita do ecrã)
 conects.push({
   instanceId: uid(),
   type: 'CameraTouchZone',
@@ -246,6 +251,19 @@ conects.push({
   invertY: false,
   minPitch: -1.4,
   maxPitch: 1.4,
+})
+
+// JoystickObject — joystick virtual no canto inferior esquerdo (controlo de movimento em mobile)
+conects.push({
+  instanceId: uid(),
+  type: 'JoystickObject',
+  name: 'Joystick',
+  position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+  side: 'left',
+  size: 130,
+  color: '#2f81f7',
+  deadzone: 0.15,
+  targetPersonal: playerId,
 })
 
 // WeaponObject — pistola do jogador
@@ -274,9 +292,12 @@ for (let i = 0; i < enemyPositions.length; i++) {
     sourceObjectId: 'obj_enemy',
     position: [enemyPositions[i][0], enemyPositions[i][1], enemyPositions[i][2]],
     rotation: [0, 0, 0], scale: [1, 1, 1],
+    // CRITICAL: mass > 0 required for cannon-es DYNAMIC body (else NPC can't move).
+    mass: 1,
+    moveSpeed: 3,
+    fixedRotation: true,
     health: 100,
     maxHealth: 100,
-    speed: 3,
     damage: 10,
     aiMode: 'chase',
     physicsType: 'box',
