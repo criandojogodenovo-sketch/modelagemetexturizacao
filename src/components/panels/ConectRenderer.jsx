@@ -20,6 +20,7 @@ import * as THREE from 'three'
 import { useStore } from '../../store/useStore'
 import { findConectDefinition } from '../../utils/conects/taxonomy'
 import { createWaterProMaterial } from '../../utils/waterShaderPro'
+import { createSkyProMaterial, calculateSunDirection } from '../../utils/skyShaderPro'
 import SceneObject from '../3d/SceneObject'
 
 const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, setMeshRef }, meshRef) {
@@ -658,6 +659,7 @@ function ReflectMesh({ conect, setMeshRef }) {
 // ===== SkyObject — esfera de céu com shader procedural =====
 function SkyMesh({ conect, setMeshRef }) {
   const { scene } = useThree()
+  const meshRef = useRef()
 
   // Ler propriedades com os nomes correctos da taxonomy
   const skyType = conect.skyType || 'gradient'
@@ -665,10 +667,39 @@ function SkyMesh({ conect, setMeshRef }) {
   const bottomColor = conect.bottomColor || conect.gradientBottom || '#aac4e8'
   const solidColor = conect.solidColor || conect.color || '#87ceeb'
 
+  // Material Pro para procedural (Rayleigh + Mie scattering)
+  const proMaterial = useMemo(() => {
+    if (skyType !== 'procedural') return null
+    // Calcular direção do sol a partir de elevation/azimuth
+    const sunDir = calculateSunDirection(
+      conect.sunElevation || 25,   // graus
+      172,                          // dia do ano (verão)
+      0                             // latitude equador
+    )
+    return createSkyProMaterial({
+      sunDirection: sunDir.toArray(),
+      sunIntensity: 15,
+      rayleigh: conect.rayleigh ?? 2.5,
+      mie: 0.5,
+      turbidity: conect.turbidity ?? 10,
+      starsEnabled: conect.starsEnabled || false,
+    })
+  }, [skyType, conect.sunElevation, conect.rayleigh, conect.turbidity, conect.starsEnabled])
+
+  // Animar uTime do sky shader
+  useFrame((_, delta) => {
+    if (proMaterial && proMaterial.uniforms?.uTime) {
+      proMaterial.uniforms.uTime.value += delta
+    }
+  })
+
   // Aplicar background à cena
   useEffect(() => {
     if (!scene) return
-    if (skyType === 'procedural' || skyType === 'gradient') {
+    if (skyType === 'procedural' && proMaterial) {
+      // Procedural usa esfera com shader — limpar background para não tapar
+      scene.background = null
+    } else if (skyType === 'gradient') {
       // Gradiente via canvas
       const canvas = document.createElement('canvas')
       canvas.width = 2; canvas.height = 256
@@ -683,7 +714,6 @@ function SkyMesh({ conect, setMeshRef }) {
       scene.background = tex
       return () => { tex.dispose() }
     } else if (skyType === 'hdri' && conect.hdriUrl) {
-      // HDRI via RGBELoader (lazy import)
       import('three/examples/jsm/loaders/RGBELoader.js').then(({ RGBELoader }) => {
         const loader = new RGBELoader()
         loader.load(conect.hdriUrl, (texture) => {
@@ -698,9 +728,24 @@ function SkyMesh({ conect, setMeshRef }) {
       // solid
       scene.background = new THREE.Color(solidColor)
     }
-  }, [scene, skyType, topColor, bottomColor, solidColor, conect.hdriUrl])
+  }, [scene, skyType, topColor, bottomColor, solidColor, conect.hdriUrl, proMaterial])
 
-  // Esfera grande com material de céu (BackSide) — só para solid/hdri
+  // Esfera grande com material de céu
+  if (skyType === 'procedural' && proMaterial) {
+    // Esfera com shader procedural (Rayleigh + Mie)
+    return (
+      <mesh
+        ref={(node) => {
+          meshRef.current = node
+          if (typeof setMeshRef === 'function') setMeshRef(node)
+        }}
+        scale={[100, 100, 100]}
+        material={proMaterial}
+      >
+        <sphereGeometry args={[1, 32, 16]} />
+      </mesh>
+    )
+  }
   if (skyType === 'solid' || skyType === 'hdri') {
     return (
       <mesh ref={setMeshRef} scale={[100, 100, 100]}>
@@ -713,8 +758,7 @@ function SkyMesh({ conect, setMeshRef }) {
       </mesh>
     )
   }
-  // Para gradient/procedural: não renderizar esfera (o background já é o gradiente)
-  // Mas precisamos de um mesh para o setMeshRef (para física não quebrar)
+  // gradient: background canvas, mesh invisível
   return (
     <mesh ref={setMeshRef} visible={false} scale={[0.001, 0.001, 0.001]}>
       <sphereGeometry args={[1, 8, 8]} />

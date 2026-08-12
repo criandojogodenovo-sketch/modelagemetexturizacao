@@ -13,10 +13,12 @@
  *  - Remover texturas
  */
 import { useRef } from 'react'
+import * as THREE from 'three'
 import { useStore } from '../../store/useStore'
 import { fileToDataURL } from '../../utils/helpers'
 import { IconImage, IconTrash } from '../ui/Icons'
 import CollapseSection from '../ui/CollapseSection'
+import { applyPOMPro, removePOMPro } from '../../utils/parallaxOcclusionMappingPro'
 
 const SWATCHES = [
   '#ffffff', '#cccccc', '#888888', '#444444', '#000000',
@@ -31,6 +33,7 @@ export default function MaterialEditor({ obj }) {
   const toast = useStore((s) => s.toast)
   const mapInputRef = useRef()
   const normalInputRef = useRef()
+  const heightInputRef = useRef()
 
   const m = obj.material
 
@@ -67,6 +70,20 @@ export default function MaterialEditor({ obj }) {
     const dataURL = await fileToDataURL(file)
     commitMaterial(obj.id, { normalMap: dataURL })
     toast('Textura normal aplicada', 'success')
+    e.target.value = ''
+  }
+
+  const handleHeightUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.match(/^image\/(png|jpe?g)$/i)) {
+      toast('Apenas PNG ou JPG', 'error')
+      return
+    }
+    _pushHistory()
+    const dataURL = await fileToDataURL(file)
+    commitMaterial(obj.id, { heightMap: dataURL })
+    toast('Height map carregado', 'success')
     e.target.value = ''
   }
 
@@ -322,6 +339,81 @@ export default function MaterialEditor({ obj }) {
               </button>
             </div>
           </div>
+        )}
+      </CollapseSection>
+
+      {/* POM — Parallax Occlusion Mapping Pro */}
+      <CollapseSection title="POM (Parallax Occlusion)" icon="layers" defaultOpen={false} storageKey="mat_pom">
+        <div className="small muted mb-2">
+          Raymarching no height map para relevo real. Requer textura difusa + height map.
+        </div>
+        <div className="prop-row">
+          <label>Height Map (textura de altura)</label>
+          <div className="file-input-wrap">
+            <button onClick={() => heightInputRef.current?.click()}>
+              <IconImage width={14} height={14} /> {m.heightMap ? 'Substituir' : 'Carregar PNG/JPG'}
+            </button>
+            <input
+              ref={heightInputRef}
+              type="file"
+              accept="image/png,image/jpeg"
+              onChange={handleHeightUpload}
+            />
+          </div>
+        </div>
+        {m.heightMap && (
+          <>
+            <div className="prop-row">
+              <label>Escala POM: {(m.pomScale ?? 0.04).toFixed(3)}</label>
+              <input type="range" min="0" max="0.2" step="0.005"
+                value={m.pomScale ?? 0.04}
+                onChange={(e) => {
+                  set({ pomScale: Number(e.target.value) })
+                  _pushHistory()
+                }}
+              />
+            </div>
+            <div className="prop-row">
+              <label>Passos: {m.pomSteps ?? 8}</label>
+              <input type="range" min="2" max="32" step="1"
+                value={m.pomSteps ?? 8}
+                onChange={(e) => set({ pomSteps: Number(e.target.value) })}
+              />
+            </div>
+            <div className="prop-row">
+              <label>Self-shadow: {m.pomSelfShadow !== false ? 'ON' : 'OFF'}</label>
+              <input type="checkbox"
+                checked={m.pomSelfShadow !== false}
+                onChange={(e) => set({ pomSelfShadow: e.target.checked })}
+              />
+            </div>
+            <button
+              className="primary"
+              style={{ width: '100%', marginTop: 8 }}
+              onClick={() => {
+                // Aplicar POM ao material three.js real
+                // Nota: obj precisa de ter bufferGeometry com UVs
+                const tex = new THREE.TextureLoader().load(m.heightMap)
+                applyPOMPro(obj.material?._threeMaterial || obj.material, tex, {
+                  scale: m.pomScale ?? 0.04,
+                  steps: m.pomSteps ?? 8,
+                  selfShadow: m.pomSelfShadow !== false,
+                })
+                toast('POM aplicado!', 'success')
+              }}
+            >
+              Aplicar POM
+            </button>
+            <button
+              style={{ width: '100%', marginTop: 4 }}
+              onClick={() => {
+                removePOMPro(obj.material?._threeMaterial || obj.material)
+                toast('POM removido', 'info')
+              }}
+            >
+              Remover POM
+            </button>
+          </>
         )}
       </CollapseSection>
     </div>
