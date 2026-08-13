@@ -1063,25 +1063,34 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     }
 
     // === PASSAGEM ÚNICA sobre conects ===
-    // Substitui 8-9 loops O(N) separados por 1 loop que faz tudo
+    // Pré-resolver PersonalObject para que checkpoints/navigators/items funcionem
+    // independentemente da ordem no array conects[]
+    const conects = setupScene?.conects || []
     let playerConect = null
     let playerMesh = null
-    let activeView = null
-    const viewConects = []
-
-    const conects = setupScene?.conects || []
     for (let i = 0; i < conects.length; i++) {
-      const conect = conects[i]
-
-      if (conect.type === 'PersonalObject' && !playerConect) {
-        playerConect = conect
-        playerMesh = conectMeshRefs.current.get(conect.instanceId)
+      if (conects[i].type === 'PersonalObject') {
+        playerConect = conects[i]
+        playerMesh = conectMeshRefs.current.get(conects[i].instanceId)
         if (playerMesh) {
           gameContext.setVar('_player_x', playerMesh.position.x)
           gameContext.setVar('_player_y', playerMesh.position.y)
           gameContext.setVar('_player_z', playerMesh.position.z)
           gameContext.setVar('_y_pos', playerMesh.position.y)
         }
+        break
+      }
+    }
+
+    let activeView = null
+    const viewConects = []
+
+    for (let i = 0; i < conects.length; i++) {
+      const conect = conects[i]
+
+      if (conect.type === 'PersonalObject') {
+        // Já processado acima — saltar
+        continue
       } else if (conect.type === 'ViewObject') {
         viewConects.push(conect)
       } else if (conect.type === 'CheckpointObject' && playerMesh) {
