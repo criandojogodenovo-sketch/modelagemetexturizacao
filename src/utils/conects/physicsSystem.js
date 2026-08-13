@@ -142,6 +142,25 @@ export function createPhysicsSystem(options = {}) {
     // TriggerObject = sensor, sem colisão física
     const isTrigger = conect.isTrigger || conect.type === 'TriggerObject'
 
+    // TerrainObject: criar um PLANO de chão infinito em vez de uma box
+    if (conect.type === 'TerrainObject') {
+      const planeShape = new CANNON.Plane()
+      const planeBody = new CANNON.Body({
+        mass: 0,
+        shape: planeShape,
+        position: new CANNON.Vec3(
+          conect.position?.[0] || 0,
+          conect.position?.[1] || 0,
+          conect.position?.[2] || 0
+        ),
+      })
+      // O plano aponta para +Z por defeito — rodar para apontar para +Y (chão)
+      planeBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2)
+      world.addBody(planeBody)
+      bodies.set(conect.instanceId, { body: planeBody, conect, mesh })
+      return planeBody
+    }
+
     const shape = createShape(conect, mesh)
     // Sistema 1: aplicar offset do colisor à posição do body
     const offset = getColliderOffset(conect)
@@ -170,19 +189,6 @@ export function createPhysicsSystem(options = {}) {
     if (conect.type === 'StaticObject') {
       body.type = CANNON.Body.STATIC
       body.mass = 0
-    } else if (conect.type === 'TerrainObject') {
-      // TerrainObject: criar um PLANO de chão em y=0 em vez de uma box gigante
-      // O plano é estático e infinito — impede o jogador de cair infinitamente
-      body.type = CANNON.Body.STATIC
-      body.mass = 0
-      // Remover a shape original (box) e adicionar um plano
-      body.shapes = []
-      const planeShape = new CANNON.Plane()
-      body.addShape(planeShape)
-      // O plano aponta para +Z por defeito — rodar para apontar para +Y (chão)
-      body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2)
-      // Posição em y=0 (nível do chão)
-      body.position.set(conect.position?.[0] || 0, conect.position?.[1] || 0, conect.position?.[2] || 0)
     } else if (conect.type === 'StopObject') {
       // Kinematic: movido por código, não por física
       body.type = CANNON.Body.KINEMATIC
