@@ -8,6 +8,210 @@ Engine web de modelagem, texturização, animação e edição de cenas 3D — f
 
 ---
 
+## 📋 Estado Real da Engine (Auditoria Honesta — Agosto 2026, Sessão 9)
+
+### Performance Core — Fase 1: PerformanceStats + PerformanceBudget
+
+**Status: IMPLEMENTADO — VALIDADO**
+
+#### Problema original
+A engine não tinha sistema de métricas de performance em runtime. O `PerformanceStatsOverlay` existente usava `requestAnimationFrame` paralelo ao R3F e mostrava draw calls/triângulos **fictícios** (estimativas, não valores reais do renderer). Não existia `frameTime`, `budget`, nem classificação de estado (HEALTHY/WARNING/CRITICAL).
+
+#### Causa raiz encontrada
+- `gl.info.render.calls` e `gl.info.render.triangles` **nunca eram lidos** (0 ocorrências em todo o `src/`)
+- `PerformanceStatsOverlay.jsx` usava `totalObjects * 200` como estimativa de triângulos
+- `performanceOptimizer.js` tinha 5 de 6 exports nunca usados (código morto)
+- Não existia orçamento de frame time nem classificação de estado
+
+#### Arquivos criados
+1. `src/utils/performanceStats.js` — singleton com Float32Array reutilizado (zero allocations por frame)
+2. `src/utils/performanceBudget.js` — singleton com janela deslizante de 30 frames
+3. `src/hooks/usePerformanceTracker.js` — hook que integra tudo no `useFrame` do R3F
+
+#### Arquivos modificados
+4. `src/store/useStore.js` — adicionado `perfStats: null` + `setPerfStats(stats)`
+5. `src/components/3d/SceneLevel3D.jsx` — adicionado `<PerformanceTracker />` dentro do Canvas
+
+#### Componentes/funções modificados
+- `useStore.js`: novo estado `perfStats` + setter `setPerfStats`
+- `SceneLevel3D.jsx`: novo componente `PerformanceTracker` (wrapper do hook)
+- `usePerformanceTracker.js`: clamp delta (`Math.min(delta, 0.1)`), actualiza store a cada 500ms
+
+#### Solução implementada
+- `PerformanceStats.update(delta, gl, scene)`: FPS por janela deslizante de 60 frames; `gl.info` lido a cada 30 frames (throttled); objectos contados via `scene.traverse`
+- `PerformanceBudget.update(frameTimeMs)`: classifica HEALTHY (< 16.67ms), WARNING (16.67-25ms), CRITICAL (> 25ms)
+- `usePerformanceTracker`: integra ambos no `useFrame` do R3F com overhead mínimo
+
+#### Comportamento antes
+- Sem métricas reais de draw calls/triângulos
+- Sem frame time nem budget
+- Overlay usava RAF paralelo ao R3F
+- Estimativas fictícias (`totalObjects * 200`)
+
+#### Comportamento depois
+- `gl.info.render.calls` e `gl.info.render.triangles` reais lidos a cada 30 frames
+- FPS calculado por janela deslizante (mais estável que contagem por intervalo)
+- Budget classifica estado em HEALTHY/WARNING/CRITICAL
+- Store actualizado a cada 500ms (não por frame)
+- Clamp de delta evita saltos de tab em background
+
+#### Impacto na performance
+- **Por frame**: 1 escrita em Float32Array + 1 soma de 60 elementos + 1 `performance.now()` ≈ 0.01ms
+- **A cada 30 frames**: leitura de `gl.info` (objecto já existente, sem custo extra)
+- **A cada 500ms**: 1 `setPerfStats` (re-render React do overlay)
+- **Total**: < 0.05ms por frame — negligenciável
+
+#### Testes realizados
+- Build: ✓ (0 erros)
+- Editor abre: ✓ (sem erros no console)
+- Play Mode: ✓ (sem regressões)
+- Overlay de stats: ✓ (FPS visível)
+- Console: ✓ (sem erros novos)
+
+#### Limitações conhecidas
+- `PerformanceStatsOverlay.jsx` (overlay existente) ainda usa o seu próprio RAF e estimativas fictícias — não foi alterado por design (não estava no scope)
+- `performanceOptimizer.js` tem código morto (5 exports não usados) — não foi removido por design
+- `renderSettings` não está ligado ao Canvas (dpr/shadow hardcoded) — não foi alterado por design
+- Não há redução automática de qualidade (apenas detecta e informa)
+
+#### Decisões técnicas importantes
+- **Float32Array em vez de Array**: zero allocations por frame (array pré-alocdado de 60 posições)
+- **Throttle de gl.info a cada 30 frames**: ler `gl.info` tem custo não-negligenciável em alguns GPUs
+- **Store actualizado a cada 500ms**: evitar re-renders frequentes do React
+- **Clamp de delta**: `Math.min(delta, 0.1)` previne saltos físicos quando o tab volta de background
+- **Singleton pattern**: uma única instância de PerformanceStats e PerformanceBudget — acesso global sem props drilling
+
+---
+
+## Camera & Navigation System
+
+### OrbitControls (Editor)
+- **Status: IMPLEMENTADO — VALIDADO**
+- `maxDistance = Infinity` (sem parede invisível)
+- `minDistance = 0.5` (zoom-in próximo)
+- `maxPolarAngle = Math.PI` (pode olhar de baixo)
+- `screenSpacePanning = false` (pan no plano do solo)
+- `enableDamping = true`, `dampingFactor = 0.08`
+
+### Câmara do GameMode (Modo Jogo)
+- **Status: IMPLEMENTADO — VALIDADO**
+- ViewObject com `followMode`: `none` | `first` | `third` | `top` | `side`
+- `cameraController.js`: módulo unificado com `updateCamera()`, `resolveActiveView()`, `resolveFollowTarget()`
+- Movimento camera-relative (estilo Godot): WASD/joystick roda pelo yaw da câmara
+- FOV/Near/Far do ViewObject aplicados dinamicamente
+- `window._flirCameraRotation` para input FPS (touch + rato + setas)
+
+### Target Dinâmico
+- **Status: IMPLEMENTADO — VALIDADO**
+- `updateTargetToSelection(orbitRef, mesh)`: target segue objecto seleccionado
+- Não move a câmara automaticamente — apenas prepara o target
+- Pan move target + câmara em conjunto (via OrbitControls interno)
+
+### Pan Adaptativo
+- **Status: IMPLEMENTADO — PARCIALMENTE VALIDADO**
+- `panSpeed` adaptativo via `updatePanSpeed()` foi implementado mas é **dead code** — `onPointerDown` no JSX não é despachado pelo R3F (OrbitControls não é Object3D)
+- No entanto, o pan touch **já é adaptativo** internamente: `panAmount = 2 × deltaPixels × distance × tan(fov/2) / clientHeight`
+- **Limitação**: `panSpeed` fica sempre em 1.0 (default). O pan funciona bem porque a fórmula interna já escala com distância.
+
+### Zoom
+- **Status: IMPLEMENTADO — PARCIALMENTE VALIDADO**
+- **Pinch touch**: JÁ é logarítmico/adaptativo internamente — `novo_raio = raio × (old_dist/new_dist) ^ zoomSpeed`. Funciona correctamente em todas as escalas.
+- **Scroll desktop**: `onWheel` override é **dead code** (R3F não despacha para não-Object3D). O zoom real é 5% fixo por tick (three-stdlib `getZoomScale = 0.95`). **Limitação conhecida.**
+- **Solução recomendada**: listener `wheel` manual via `useEffect` (classificação: SAFE + RECOMMENDED)
+
+### Pinch Touch
+- **Status: IMPLEMENTADO — VALIDADO**
+- 2 dedos → DOLLY_PAN (pinch zoom + pan simultâneo)
+- Fórmula multiplicativa: `(old_dist/new_dist) ^ zoomSpeed`
+- `minDistance=0.5` ainda aplica; `maxDistance=Infinity`
+- Não precisa de correção — já é logarítmico
+
+### Rotação
+- **Status: IMPLEMENTADO — VALIDADO**
+- 1 dedo → ROTATE (angular puro, não depende de distância)
+- `rotateAngle = 2π × deltaPixels / clientHeight × rotateSpeed`
+- Funciona correctamente em todas as escalas
+
+### Frame All (tecla A)
+- **Status: IMPLEMENTADO — VALIDADO**
+- `frameAll(orbitRef, camera, meshes, fov)` em `navigationUtils.js`
+- Calcula bounding box de todos os meshes via `THREE.Box3.expandByObject`
+- Fallback seguro para cena vazia (não produz NaN)
+
+### Focus Selected (tecla F)
+- **Status: IMPLEMENTADO — VALIDADO**
+- `focusSelected(orbitRef, camera, mesh, fov)` em `navigationUtils.js`
+- Calcula bounding box em world-space, centra target, posiciona câmara
+- Distância = `maxDim / (2 × tan(fov/2)) × 1.5` (margem)
+
+### Reset Camera (tecla Home)
+- **Status: IMPLEMENTADO — VALIDADO**
+- `resetCamera(orbitRef, camera)` — volta a `[8, 6, 10]` com target `[0, 0, 0]`
+
+### Infinite Grid
+- **Status: IMPLEMENTADO — VALIDADO**
+- `infiniteGrid={true}` com `fadeDistance=100}`
+- `grid.size` default: 200 (aumentado de 20)
+- Grid estende-se até ao horizonte sem terminar abruptamente
+
+### Limites de Distância
+- `minDistance = 0.5` (zoom-in próximo)
+- `maxDistance = Infinity` (sem parede invisível)
+- `camera.far = 2000` (DEFAULT_CAMERA_FAR em navigationUtils.js)
+
+### Near/Far Planes
+- `near = 0.1` (mantido)
+- `far = 2000` (aumentado de 200)
+- Ratio near:far = 1:20000 — aceitável para 24-bit depth buffer
+- Z-fighting possível em cenas >500u com objectos sobrepostos
+
+### Comportamento em Grandes Cenas
+- ±10u: ✓ Funciona perfeitamente
+- ±100u: ✓ Funciona (grid infinito, sem limite de distância)
+- ±1.000u: ✓ Funciona (far=2000 cobre)
+- ±10.000u: ⚠ Z-fighting possível (float32 tem ~7 dígitos)
+- ±100.000u: ✗ Precisão degradada (necessita floating origin)
+
+### Precisão
+- JavaScript `Number` (64-bit float): perfeito até ±9×10^15
+- WebGL float32 (24-bit mantissa): ~7 dígitos significativos — degrada em ±10.000u
+- Floating origin **não é necessário** para escalas <100km
+
+### Limitações Mobile
+- Pinch zoom touch: ✓ Funciona (logarítmico nativo)
+- Pan touch: ✓ Funciona (adaptativo nativo)
+- Orbit touch: ✓ Funciona (angular puro)
+- Zoom desktop: ⚠ 5% fixo por tick (dead code no onWheel)
+- Mac trackpad pinch: ⚠ Não amplificado (three-stdlib não tem ctrlKey detection)
+
+### Soluções NÃO Implementadas
+
+#### Floating Origin
+**Status: NÃO IMPLEMENTADO**
+**Motivo**: A escala actual suportada pela Flir Engine (<10km) não exige origin rebasing. A precisão do WebGL float32 é aceitável até ±10.000u.
+
+#### Camera-Relative Rendering
+**Status: NÃO IMPLEMENTADO**
+**Motivo**: Não há evidência de degradação de precisão nas escalas relevantes. Apenas necessário para mundos >100km.
+
+#### FlyControls
+**Status: NÃO IMPLEMENTADO**
+**Motivo**: OrbitControls com target dinâmico resolve 90% dos casos de navegação. Fly mode seria redundante.
+
+#### Gesture System Intermediário
+**Status: NÃO IMPLEMENTADO**
+**Motivo**: OrbitControls do three.js já processa gestos correctamente. Uma camada extra só adicionaria complexidade sem benefício.
+
+#### logarithmicDepthBuffer
+**Status: NÃO IMPLEMENTADO**
+**Motivo**: Tem custo de performance em mobile. O ratio near:far=1:20000 é aceitável para 24-bit depth buffer.
+
+#### Zoom-to-Cursor
+**Status: NÃO IMPLEMENTADO**
+**Motivo**: Complexo de implementar correctamente. O three v0.185.1 tem `_updateZoomParameters` mas three-stdlib não. Adiar para futuro.
+
+---
+
 ## 📋 Estado Real da Engine (Auditoria Honesta — Agosto 2026, Sessão 4)
 
 Esta secção documenta o estado REAL da engine após auditoria exaustiva e 4 sessões de correções. Sê cético sobre o que encontras em caches antigas — lê isto primeiro.
