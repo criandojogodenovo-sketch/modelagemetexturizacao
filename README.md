@@ -141,6 +141,126 @@ Cada Conect é um objeto de jogo com semântica própria. Todos têm renderer de
 
 ---
 
+## 🔧 Correções recentes (Agosto 2026 — Sessão 7)
+
+### TAREFA 1: Backend do Marketplace — FUNCIONA EM PRODUÇÃO ✓
+
+**Problema**: As serverless functions em `/api/marketplace/` falhavam com `FUNCTION_INVOCATION_FAILED 500` na Vercel.
+
+**Causa raiz**: O `package.json` raiz tem `"type": "module"`, o que faz a Vercel tratar todos os ficheiros `.js` como ESM. Mas as functions usam `require()` (CommonJS) → erro `require is not defined in ES module scope`.
+
+**Solução aplicada**:
+1. Criado `api/marketplace/package.json` com `{"type": "commonjs"}` — override local do type:module raiz
+2. `api/marketplace/db.js` agora lê `process.env.NEON_DATABASE_URL` (configurada na Vercel)
+3. Adicionado endpoint `/api/marketplace/health` para diagnóstico
+
+**Testes reais em produção** (https://modelagemetexturizacao.vercel.app):
+
+| Endpoint | Método | Status | Resultado |
+|---|---|---|---|
+| `/api/marketplace/assets` | GET | 200 | `{"items":[],"page":1,"limit":20}` ✓ |
+| `/api/marketplace/auth/register` | POST | 201 | Cria user real no Neon + token ✓ |
+| `/api/marketplace/auth/login` | POST | 200 | Autentica + devolve token ✓ |
+| `/api/marketplace/assets` (POST) | POST | 201 | Publica asset com `author_id` ✓ |
+| `/api/marketplace/health` | GET | 200 | `{"db":{"ok":true,"tables":{...}}}` ✓ |
+
+**Persistência confirmada**: após criar user + asset, recarregar `/api/marketplace/assets` mostra o asset criado. Dados persistem no Neon PostgreSQL.
+
+### TAREFA 2: Sistema de Câmara Reconstruído do Zero ✓
+
+**Problema**: O sistema de câmara tinha erros recorrentes ao longo de 6 sessões (ecrã preto, rotação errada, câmara dentro do terreno, gizmo a tapar a lente, divergência entre editor e jogo exportado).
+
+**Arquitectura nova** — `src/utils/cameraController.js` (módulo unificado):
+
+```
+cameraController.js
+├── createCameraState()     — estado singleton {yaw, pitch, smoothing, ...}
+├── getCameraState()        — obtém/cria estado global
+├── resetCameraState()      — reset ao re-entrar no jogo
+├── applyCameraInput()      — input de toque/rato
+├── applyCameraKeyInput()   — input de teclado (setas)
+├── updateCamera()          — UMA função para todos os modos
+├── resolveActiveView()     — prioridade: player > primary > primeira
+├── resolveFollowTarget()   — segue PersonalObject se cameraRole=player
+├── hasCameraTouchZone()    — detecta touch zone na cena
+└── CAMERA_CONTROLLER_SOURCE — versão serializável para jogo exportado
+```
+
+**5 modos de follow** (implementação idêntica em editor e exportado):
+
+| Modo | Comportamento |
+|---|---|
+| `none` | Câmara estática na posição do ViewObject; rotação pelo toque se houver touch zone |
+| `first` | Câmara nos olhos do jogador (y + eyeHeight); rotação YXZ pelo yaw/pitch |
+| `third` | Orbita à volta do jogador (sen/cos) se houver touch; senão lerp clássico atrás |
+| `top` | Lerp para cima do jogador (y + dist); lookAt jogador |
+| `side` | Lerp para o lado (x + dist); lookAt jogador |
+
+**Bugs resolvidos**:
+- ✅ `lookAt(0,0,0)` removido (era fallback errado em ViewObject estática sem rotation)
+- ✅ `targetMesh` null: mantém última posição válida (não fica parado aleatoriamente)
+- ✅ `top`/`side` agora funcionam no jogo exportado (antes caíam em `none`)
+- ✅ FOV dinâmico no exportado (antes só no setup inicial)
+- ✅ Rotação `YXZ` consistente desde o setup (antes era `XYZ` no setup e `YXZ` no loop → snap)
+- ✅ Smoothing de rotação (yaw/pitch lerp para targetYaw/targetPitch)
+- ✅ Movimento camera-relative no exportado (antes era `velocity.x = mx` directo)
+
+**Refactoração**:
+- `SceneLevel3D.jsx`: 115 linhas de lógica de câmara → 15 linhas que chamam `updateCamera()`
+- `GameUIOverlay.jsx`: `CameraTouchZoneControl` usa `applyCameraInput/applyCameraKeyInput`
+- `gameRuntime.js`: `CAMERA_CONTROLLER_SOURCE` embebido no HTML exportado
+- `gameExporter.js`: injecta `CAMERA_CONTROLLER_SOURCE` antes do runtime
+
+### TAREFA 3: Otimizações de Desempenho ✓
+
+**Análise de gargalos** (antes das otimizações):
+
+| Demo | Draw calls | Luzes dinâmicas | Bodies físicos | Estado mobile |
+|---|---|---|---|---|
+| Arena | ~24 | 6 (1 directional + 5 point) | 12 | 🟡 Aceitável |
+| Saga Vila | ~75 | 10 (1 + 9 point) | 28 | 🔴 Pesado |
+| Saga Floresta | ~72 | 7 (1 + 6 point) | 32 | 🔴 Pesado |
+
+**Otimizações aplicadas**:
+
+1. **Removidas 20 pointLights desnecessárias**:
+   - `ItemObject`: pointLight removido (emissiveIntensity 0.6→1.2 compensa)
+   - `GIProbeObject`, `BloomObject`, `PointMarker`, `ArrowMarker`: pointLight removido
+   - Flag `conect.emitLight` permite reativar individualmente
+   - **Poupança**: Saga Vila 10→1 luzes, Floresta 7→1, Arena 6→1
+
+2. **Shadow map 2048→1024** (configurável via `renderSettings.shadowMapSize`):
+   - **Poupança**: 16.7M→4.2M texels (-75% VRAM + lookup cost)
+
+3. **dpr configurável**: `[1,2]` → `[1, dprMax]` baseado em `renderSettings.pixelRatio`:
+   - Em mobile com `pixelRatio=1`: 4× menos fragmentos que `dpr=2`
+
+4. **Auto-instancing** — novo componente `AutoInstancing.jsx`:
+   - Detecta `StaticObject` com mesmo `sourceObjectId` (≥5 instâncias)
+   - Converte para `InstancedMesh` (1 draw call por tipo)
+   - **Saga Floresta**: 28 draw calls → 2 (-93%)
+   - **Saga Vila**: 16 draw calls → 2
+
+5. **castShadow removido** de `ItemObject` (octaedro 0.3m não precisa de sombra)
+
+6. **`clearPoseCache()`** chamado no `useFrame` (previne memory leak do sharedAnimationCache)
+
+7. **RealWater segments 128→64** no Saga (metade dos vértices)
+
+8. **Demos**: `shadowMapSize 2048→1024`, `pixelRatio 1.5→1.0`
+
+**Estimativa FPS antes/depois** (baseado em otimizações, sem medição real em browser):
+
+| Demo | Antes | Depois | Melhoria |
+|---|---|---|---|
+| Arena | ~45 FPS | ~60 FPS | +33% |
+| Saga Vila | ~25 FPS | ~50 FPS | +100% |
+| Saga Floresta | ~20 FPS | ~45 FPS | +125% |
+
+**Nota honesta**: Estas estimativas são baseadas na redução de draw calls, luzes e shadow map. A medição real em browser pode variar consoante o hardware. Para FPS exacto, abrir o demo e usar o overlay de performance (`PerformanceStatsOverlay`).
+
+---
+
 ## 🔧 Correções recentes (Agosto 2026 — Sessão 6)
 
 ### BUG CRÍTICO: Demos carregavam em modo errado (ecrã "preto") — RESOLVIDO
