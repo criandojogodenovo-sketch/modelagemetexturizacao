@@ -1,19 +1,9 @@
 {
   "version": 2,
   "functions": {
-    "api/marketplace/**/*.js": {
+    "api/marketplace/**/*.cjs": {
       "memory": 256,
       "maxDuration": 10
     }
-  },
-  "rewrites": [
-    { "source": "/api/marketplace/auth/register", "destination": "/api/marketplace/auth/register" },
-    { "source": "/api/marketplace/auth/login", "destination": "/api/marketplace/auth/login" },
-    { "source": "/api/marketplace/assets", "destination": "/api/marketplace/assets" },
-    { "source": "/api/marketplace/assets/(.*)", "destination": "/api/marketplace/assets" },
-    { "source": "/api/marketplace/games", "destination": "/api/marketplace/games" },
-    { "source": "/api/marketplace/games/(.*)", "destination": "/api/marketplace/games" },
-    { "source": "/api/marketplace/templates", "destination": "/api/marketplace/templates" },
-    { "source": "/api/marketplace/templates/(.*)", "destination": "/api/marketplace/templates" }
-  ]
+  }
 }

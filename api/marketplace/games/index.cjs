@@ -1,7 +1,7 @@
 /**
  * /api/marketplace/games — listar e publicar jogos.
  */
-const { query } = require('../db')
+const { query } = require('../db.cjs')
 
 module.exports = async (req, res) => {
   try {

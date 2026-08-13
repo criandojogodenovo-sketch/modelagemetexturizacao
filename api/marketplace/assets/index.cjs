@@ -4,7 +4,7 @@
  * GET: lista assets (com paginação e filtro por tipo)
  * POST: cria novo asset (requer autenticação)
  */
-const { query } = require('../db')
+const { query } = require('../db.cjs')
 
 module.exports = async (req, res) => {
   try {

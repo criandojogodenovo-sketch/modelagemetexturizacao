@@ -1,7 +1,7 @@
 /**
  * /api/marketplace/templates — listar e criar templates.
  */
-const { query } = require('../db')
+const { query } = require('../db.cjs')
 
 module.exports = async (req, res) => {
   try {

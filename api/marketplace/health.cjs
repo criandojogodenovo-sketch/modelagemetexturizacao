@@ -8,7 +8,7 @@
  *
  * Útil para debugar problemas de deploy/env vars.
  */
-const { query, pool } = require('../db')
+const { query, pool } = require('./db.cjs')
 
 module.exports = async (req, res) => {
   const result = {
