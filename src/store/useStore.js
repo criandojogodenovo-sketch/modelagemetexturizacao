@@ -65,8 +65,8 @@ const initialScene = {
   },
   grid: {
     visible: true,
-    size: 20,
-    divisions: 20,
+    size: 200,
+    divisions: 200,
     color: '#30363d',
   },
   lights: {

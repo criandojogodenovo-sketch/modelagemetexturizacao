@@ -19,6 +19,14 @@ import * as THREE from 'three'
 import SceneObject from './SceneObject'
 import SkeletonGizmo from './SkeletonGizmo'
 import { useStore } from '../../store/useStore'
+import {
+  DEFAULT_CAMERA_FAR,
+  updatePanSpeed,
+  focusSelected as focusSelectedUtil,
+  frameAll as frameAllUtil,
+  resetCamera as resetCameraUtil,
+  updateTargetToSelection,
+} from '../../utils/navigationUtils'
 
 // ----- Componente interno: aplica o fundo da cena -----
 function SceneBackground({ background }) {
@@ -161,20 +169,55 @@ export default function Scene3D() {
 
   useEffect(() => {
     if (selectedId && meshRefs.current.has(selectedId)) {
-      setSelectedMesh(meshRefs.current.get(selectedId))
+      const mesh = meshRefs.current.get(selectedId)
+      setSelectedMesh(mesh)
+      // Actualizar target do OrbitControls para o objeto seleccionado (sem mover a câmara)
+      updateTargetToSelection(orbitRef, mesh)
     } else {
       // O mesh pode ainda não estar montado — tentar novamente no próximo tick
       setSelectedMesh(null)
       if (selectedId) {
         const timer = setTimeout(() => {
           if (meshRefs.current.has(selectedId)) {
-            setSelectedMesh(meshRefs.current.get(selectedId))
+            const mesh = meshRefs.current.get(selectedId)
+            setSelectedMesh(mesh)
+            updateTargetToSelection(orbitRef, mesh)
           }
         }, 50)
         return () => clearTimeout(timer)
       }
     }
   }, [selectedId, objects])
+
+  // Atalhos de navegação: F=Focus Selected, A=Frame All, Home=Reset Camera
+  useEffect(() => {
+    const handler = (e) => {
+      const tag = e.target.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return
+      const key = e.key.toLowerCase()
+      if (key === 'f') {
+        e.preventDefault()
+        if (selectedMesh && orbitRef.current) {
+          const { camera } = orbitRef.current.object.parent // canvas camera
+          // Obter a câmara do three via R3F — usar orbitRef.current.object (que é a câmara)
+          focusSelectedUtil(orbitRef, orbitRef.current.object, selectedMesh, 50)
+        }
+      } else if (key === 'a') {
+        e.preventDefault()
+        if (orbitRef.current) {
+          const meshes = Array.from(meshRefs.current.values()).filter(Boolean)
+          frameAllUtil(orbitRef, orbitRef.current.object, meshes, 50)
+        }
+      } else if (key === 'home') {
+        e.preventDefault()
+        if (orbitRef.current) {
+          resetCameraUtil(orbitRef, orbitRef.current.object)
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [selectedMesh])
 
   const setMeshRef = useCallback((id, node) => {
     if (node) {
@@ -192,7 +235,7 @@ export default function Scene3D() {
     <Canvas
       shadows
       dpr={[1, 2]}
-      camera={{ position: [5, 4, 6], fov: 50, near: 0.1, far: 200 }}
+      camera={{ position: [5, 4, 6], fov: 50, near: 0.1, far: DEFAULT_CAMERA_FAR }}
       gl={{ antialias: true, preserveDrawingBuffer: true, alpha: false }}
       onPointerMissed={(e) => {
         if (e.type === 'click' || e.type === 'touchend') {
@@ -221,7 +264,7 @@ export default function Scene3D() {
         />
         <hemisphereLight intensity={0.3} groundColor="#1a1a2e" color="#ffffff" />
 
-        {/* Grelha de chão */}
+        {/* Grelha de chão — infinita para não dar sensação de "mundo acaba" */}
         {grid.visible && (
           <Grid
             position={[0, 0, 0]}
@@ -230,9 +273,9 @@ export default function Scene3D() {
             sectionColor={grid.color}
             sectionThickness={1.2}
             cellThickness={0.6}
-            fadeDistance={30}
+            fadeDistance={100}
             fadeStrength={1}
-            infiniteGrid={false}
+            infiniteGrid={true}
           />
         )}
 
@@ -265,15 +308,16 @@ export default function Scene3D() {
         {/* Raycast para sculpt */}
         <SculptRaycaster meshRefs={meshRefs} orbitRef={orbitRef} />
 
-        {/* Câmara orbital — desativada em modo sculpt durante o arraste */}
+        {/* Câmara orbital — sem limites artificiais de distância; maxPolarAngle permite olhar de baixo */}
         <OrbitControls
           ref={orbitRef}
           makeDefault
           enableDamping
           dampingFactor={0.08}
-          minDistance={1}
-          maxDistance={50}
-          maxPolarAngle={Math.PI * 0.495}
+          minDistance={0.5}
+          maxDistance={Infinity}
+          maxPolarAngle={Math.PI}
+          screenSpacePanning={false}
           mouseButtons={{
             LEFT: THREE.MOUSE.ROTATE,
             MIDDLE: THREE.MOUSE.DOLLY,
@@ -282,6 +326,21 @@ export default function Scene3D() {
           touches={{
             ONE: THREE.TOUCH.ROTATE,
             TWO: THREE.TOUCH.DOLLY_PAN,
+          }}
+          onPointerDown={() => updatePanSpeed(orbitRef)}
+          onWheel={(e) => {
+            // Zoom logarítmico: cada scroll multiplica a distância por ZOOM_FACTOR
+            if (!orbitRef.current) return
+            const controls = orbitRef.current
+            const distance = controls.getDistance()
+            const factor = e.deltaY > 0 ? 1.1 : 0.9
+            const newDistance = distance * factor
+            const dir = new THREE.Vector3()
+            dir.subVectors(controls.object.position, controls.target)
+            if (dir.lengthSq() < 0.001) dir.set(0, 0, 1)
+            dir.normalize()
+            controls.object.position.copy(controls.target).addScaledVector(dir, newDistance)
+            controls.update()
           }}
         />
       </Suspense>

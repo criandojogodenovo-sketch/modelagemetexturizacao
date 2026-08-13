@@ -18,18 +18,17 @@ import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-t
 import * as THREE from 'three'
 import SceneObject from './SceneObject'
 import ConectRenderer from '../panels/ConectRenderer'
-import AutoInstancing from './AutoInstancing'
 import TerrainSculpt3D from './TerrainSculpt3D'
 import { useStore } from '../../store/useStore'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
 import {
-  getCameraState,
-  resetCameraState,
-  updateCamera,
-  resolveActiveView,
-  resolveFollowTarget,
-  hasCameraTouchZone,
-} from '../../utils/cameraController'
+  DEFAULT_CAMERA_FAR,
+  updatePanSpeed,
+  focusSelected as focusSelectedUtil,
+  frameAll as frameAllUtil,
+  resetCamera as resetCameraUtil,
+  updateTargetToSelection,
+} from '../../utils/navigationUtils'
 import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
 import { createFlirCodeRuntime } from '../../utils/flirscript/flircode'
 import { createAnimationPlayer } from '../../utils/animationPlayer'
@@ -281,7 +280,6 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   const collisionEventsRef = useRef(new Map()) // instanceId → Set de otherIds em contacto
   const checkpointRef = useRef(null) // último checkpoint registado
   const skyRef = useRef(null) // referência ao SkyObject ativo
-  const gameContextRef = useRef(null) // gameContext guardado para useFrame aceder
 
   // Expor meshRefs globalmente para TrailObject poder seguir objetos
   useEffect(() => {
@@ -823,11 +821,15 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     }
     window._flirGameContext = gameContext
     window._flirInventory = inventoryRef.current
-    gameContextRef.current = gameContext // guardar para useFrame aceder
-    // Inicializar/resetar estado da câmara (cameraController unificado)
-    resetCameraState()
-    const camState = getCameraState()
-    camState.enabled = true
+    // Inicializar rotação da câmara (FPS/BR) — lida pelo GameMode no useFrame
+    if (!window._flirCameraRotation) {
+      window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: 1.0, enabled: true }
+    } else {
+      // Reset ao re-entrar no jogo
+      window._flirCameraRotation.yaw = 0
+      window._flirCameraRotation.pitch = 0
+      window._flirCameraRotation.enabled = true
+    }
 
     // Física
     const gravity = setupScene.physics?.gravity || [0, -9.82, 0]
@@ -1043,7 +1045,6 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   useFrame((_, delta) => {
     if (!isGameMode) return
 
-    try {
     // Física
     if (physicsRef.current) {
       physicsRef.current.update(delta)
@@ -1061,11 +1062,11 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     const playerConect = (setupScene?.conects || []).find((c) => c.type === 'PersonalObject')
     if (playerConect) {
       const playerMesh = conectMeshRefs.current.get(playerConect.instanceId)
-      if (playerMesh && gameContextRef.current) {
-        gameContextRef.current.setVar('_player_x', playerMesh.position.x)
-        gameContextRef.current.setVar('_player_y', playerMesh.position.y)
-        gameContextRef.current.setVar('_player_z', playerMesh.position.z)
-        gameContextRef.current.setVar('_y_pos', playerMesh.position.y)
+      if (playerMesh) {
+        gameContext.setVar('_player_x', playerMesh.position.x)
+        gameContext.setVar('_player_y', playerMesh.position.y)
+        gameContext.setVar('_player_z', playerMesh.position.z)
+        gameContext.setVar('_y_pos', playerMesh.position.y)
       }
     }
 
@@ -1077,8 +1078,6 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
 
     // Animation players
     for (const player of animPlayersRef.current.values()) player.update(delta)
-    // Limpar cache de poses periodicamente (evita memory leak)
-    clearPoseCache()
 
     // NPC AI
     for (const ai of npcAIsRef.current.values()) ai.update(delta)
@@ -1098,9 +1097,10 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     // Joystick/WASD → PersonalObject (camera-relative movement, like Godot's Input.get_vector + transform.basis)
     const keys = window._flirKeys || {}
     if (joystickRef.current.active || keys['w'] || keys['a'] || keys['s'] || keys['d']) {
-      // Read camera yaw from cameraController state (single source of truth).
-      const camStateForMove = getCameraState()
-      const yaw = camStateForMove.yaw
+      // Read camera yaw so movement is relative to where the player is looking (FPS standard).
+      // camera.rotation was set earlier via camera.rotation.set(pitch, yaw, 0, 'YXZ') OR will be set below.
+      // We read from window._flirCameraRotation (the source of truth updated by CameraTouchZoneControl).
+      const yaw = window._flirCameraRotation?.yaw || 0
       const cosY = Math.cos(yaw)
       const sinY = Math.sin(yaw)
       for (const conect of activeScene.conects || []) {
@@ -1129,25 +1129,121 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       }
     }
 
-    // === CÂMARA — usando cameraController unificado ===
-    // Resolve a ViewObject ativa (prioridade: player > primary > primeira)
-    const activeView = resolveActiveView(activeScene.conects)
-    // Determina o target a seguir (PersonalObject se cameraRole='player')
-    const targetId = resolveFollowTarget(activeView, activeScene.conects)
-    const targetMesh = targetId
-      ? (meshRefs.current.get(targetId) || conectMeshRefs.current.get(targetId))
-      : null
-    // Verifica se há CameraTouchZone na cena
-    const touchZoneActive = hasCameraTouchZone(activeScene.conects)
-    // Estado da câmara (singleton)
-    const camState = getCameraState()
-    camState.hasTouchZone = touchZoneActive
-    // Aplicar posição + rotação usando o cameraController
-    updateCamera(camera, activeView, targetMesh, camState, {
-      gameCamera: activeScene.gameCamera,
-      hasTouchZone: touchZoneActive,
-      delta,
-    })
+    // Câmara: ViewObject ativa
+    const viewConects = (activeScene.conects || []).filter((c) => c.type === 'ViewObject')
+    const activeView = viewConects.find((c) => c.cameraRole === 'player') || viewConects.find((c) => c.cameraRole === 'primary') || viewConects[0]
+    // Aplicar FOV/Near/Far da ViewObject (ou gameCamera) à câmara do Canvas
+    if (activeView) {
+      const targetFov = activeView.fov || activeScene.gameCamera?.fov || 60
+      const targetNear = activeView.near || activeScene.gameCamera?.near || 0.1
+      const targetFar = activeView.far || activeScene.gameCamera?.far || 200
+      if (camera.fov !== targetFov) {
+        camera.fov = targetFov
+        camera.near = targetNear
+        camera.far = targetFar
+        camera.updateProjectionMatrix()
+      }
+    } else if (activeScene.gameCamera) {
+      // Sem ViewObject — usar gameCamera
+      const gc = activeScene.gameCamera
+      const targetFov = gc.fov || 60
+      const targetNear = gc.near || 0.1
+      const targetFar = gc.far || 200
+      if (camera.fov !== targetFov) {
+        camera.fov = targetFov
+        camera.near = targetNear
+        camera.far = targetFar
+        camera.updateProjectionMatrix()
+      }
+    }
+
+    // Ler rotação da CameraTouchZone (FPS/BR-style)
+    const camRotation = window._flirCameraRotation || { yaw: 0, pitch: 0, enabled: false }
+
+    if (activeView) {
+      // Se cameraRole='player' e não tem followTarget, seguir PersonalObject
+      let targetId = activeView.followTarget
+      if (!targetId && activeView.cameraRole === 'player') {
+        const player = (activeScene.conects || []).find((c) => c.type === 'PersonalObject')
+        if (player) targetId = player.instanceId
+      }
+      const mode = activeView.followMode || 'none'
+      if (targetId && mode !== 'none') {
+        const targetMesh = meshRefs.current.get(targetId) || conectMeshRefs.current.get(targetId)
+        if (targetMesh) {
+          const dist = activeView.followDistance || 6
+          const height = activeView.followHeight || 3
+          if (mode === 'first') {
+            // First-person: câmara na posição dos olhos do jogador, rotação pelo toque
+            const eyeHeight = activeView.eyeHeight || 1.6
+            camera.position.set(
+              targetMesh.position.x,
+              targetMesh.position.y + eyeHeight,
+              targetMesh.position.z
+            )
+            // Aplicar rotação da CameraTouchZone (FPS)
+            if (camRotation.enabled) {
+              // YXZ order = yaw (Y) depois pitch (X) — padrão FPS
+              camera.rotation.set(camRotation.pitch, camRotation.yaw, 0, 'YXZ')
+            } else {
+              // Sem touch input — olhar para frente
+              const rot = activeView.rotation || [0, 0, 0]
+              camera.rotation.set(rot[0], rot[1], rot[2], 'YXZ')
+            }
+          } else if (mode === 'third') {
+            // Third-person: se há touch input, orbita à volta do jogador
+            if (camRotation.enabled) {
+              const orbitDist = dist
+              const offsetY = Math.sin(camRotation.pitch) * orbitDist
+              const offsetX = Math.sin(camRotation.yaw) * Math.cos(camRotation.pitch) * orbitDist
+              const offsetZ = Math.cos(camRotation.yaw) * Math.cos(camRotation.pitch) * orbitDist
+              camera.position.set(
+                targetMesh.position.x + offsetX,
+                targetMesh.position.y + height + offsetY,
+                targetMesh.position.z + offsetZ
+              )
+              camera.lookAt(targetMesh.position.x, targetMesh.position.y + 1, targetMesh.position.z)
+            } else {
+              // Third-person clássico
+              camera.position.lerp(new THREE.Vector3(
+                targetMesh.position.x,
+                targetMesh.position.y + height,
+                targetMesh.position.z + dist
+              ), 0.1)
+              camera.lookAt(targetMesh.position)
+            }
+          } else if (mode === 'top') {
+            camera.position.lerp(new THREE.Vector3(targetMesh.position.x, targetMesh.position.y + dist, targetMesh.position.z), 0.1)
+            camera.lookAt(targetMesh.position)
+          } else if (mode === 'side') {
+            camera.position.lerp(new THREE.Vector3(targetMesh.position.x + dist, targetMesh.position.y + height / 2, targetMesh.position.z), 0.1)
+            camera.lookAt(targetMesh.position)
+          }
+        }
+      } else {
+        // Câmara estática na posição da ViewObject
+        camera.position.set(...(activeView.position || [5, 4, 6]))
+        if (camRotation.enabled) {
+          // Mesmo em câmara estática, permite olhar à volta com touch
+          camera.rotation.set(camRotation.pitch, camRotation.yaw, 0, 'YXZ')
+        } else if (activeView.rotation) {
+          camera.rotation.set(...activeView.rotation)
+        } else {
+          camera.lookAt(0, 0, 0)
+        }
+      }
+    } else if (activeScene.gameCamera) {
+      // Sem ViewObject — usar gameCamera estática
+      const gc = activeScene.gameCamera
+      camera.position.set(...(gc.position || [5, 4, 6]))
+      if (camRotation.enabled) {
+        camera.rotation.set(camRotation.pitch, camRotation.yaw, 0, 'YXZ')
+      } else if (gc.rotation) {
+        camera.rotation.set(...gc.rotation)
+      } else {
+        camera.lookAt(0, 0, 0)
+      }
+    }
 
     // CheckpointObject — registar checkpoint quando jogador toca
     const player3 = (setupScene?.conects || []).find((c) => c.type === 'PersonalObject')
@@ -1214,8 +1310,8 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
               const dist = playerMesh.position.distanceTo(itemMesh.position)
               if (dist <= (item.pickupRadius || 2)) {
                 // Apanhar item
-                if (gameContextRef.current?.addToInventory) {
-                  gameContextRef.current.addToInventory(item.itemName || 'Item', item.quantity || 1)
+                if (gameContext.addToInventory) {
+                  gameContext.addToInventory(item.itemName || 'Item', item.quantity || 1)
                 }
                 itemMesh.visible = false
                 debugLog(`Item "${item.itemName}" apanhado!`, 'log', 'Inventory')
@@ -1245,7 +1341,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           const spawnPos = spawnMesh
             ? [spawnMesh.position.x, spawnMesh.position.y, spawnMesh.position.z]
             : spawn.position || [0, 1, 0]
-          if (gameContextRef.current) gameContextRef.current.spawnObject(spawn.objectToSpawn, spawnPos)
+          gameContext.spawnObject(spawn.objectToSpawn, spawnPos)
           debugLog(`Spawn: "${spawn.objectToSpawn}" em ${spawnPos}`, 'log', 'Spawn')
         }
       }
@@ -1265,10 +1361,6 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           groupMesh.userData._grouped = true
         }
       }
-    }
-    } catch (err) {
-      console.error('[GameMode useFrame] Erro:', err)
-      // Não relançar — deixa o R3F continuar a renderizar
     }
   })
 
@@ -1290,7 +1382,6 @@ export default function SceneLevel3D() {
   const addConectToScene = useStore((s) => s.addConectToScene)
   const selectConect = useStore((s) => s.selectConect)
   const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
-  const renderSettings = useStore((s) => s.renderSettings)
 
   const [selectedInstanceId, setSelectedInstanceId] = useState(null)
   const [selectedType, setSelectedType] = useState(null)
@@ -1304,14 +1395,50 @@ export default function SceneLevel3D() {
   const isGameMode = scenePreviewOpen
 
   useEffect(() => {
+    let mesh = null
     if (selectedInstanceId && meshRefs.current.has(selectedInstanceId)) {
-      setSelectedMesh(meshRefs.current.get(selectedInstanceId))
+      mesh = meshRefs.current.get(selectedInstanceId)
     } else if (selectedInstanceId && conectMeshRefs.current.has(selectedInstanceId)) {
-      setSelectedMesh(conectMeshRefs.current.get(selectedInstanceId))
-    } else {
-      setSelectedMesh(null)
+      mesh = conectMeshRefs.current.get(selectedInstanceId)
     }
-  }, [selectedInstanceId, activeScene])
+    setSelectedMesh(mesh)
+    // Actualizar target do OrbitControls para o objecto seleccionado (sem mover a câmara)
+    if (!isGameMode) {
+      updateTargetToSelection(orbitRef, mesh)
+    }
+  }, [selectedInstanceId, activeScene, isGameMode])
+
+  // Atalhos de navegação: F=Focus Selected, A=Frame All, Home=Reset Camera
+  useEffect(() => {
+    if (isGameMode) return // não interferir com WASD em modo jogo
+    const handler = (e) => {
+      const tag = e.target.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return
+      const key = e.key.toLowerCase()
+      if (key === 'f') {
+        e.preventDefault()
+        if (selectedMesh && orbitRef.current) {
+          focusSelectedUtil(orbitRef, orbitRef.current.object, selectedMesh, 50)
+        }
+      } else if (key === 'a') {
+        e.preventDefault()
+        if (orbitRef.current) {
+          const meshes = [
+            ...Array.from(meshRefs.current.values()),
+            ...Array.from(conectMeshRefs.current.values()),
+          ].filter(Boolean)
+          frameAllUtil(orbitRef, orbitRef.current.object, meshes, 50)
+        }
+      } else if (key === 'home') {
+        e.preventDefault()
+        if (orbitRef.current) {
+          resetCameraUtil(orbitRef, orbitRef.current.object)
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [selectedMesh, isGameMode])
 
   const setMeshRef = useCallback((id, node) => {
     if (node) meshRefs.current.set(id, node)
@@ -1372,16 +1499,12 @@ export default function SceneLevel3D() {
     )
   }
 
-  // dpr configurável via renderSettings — em mobile, pixelRatio=1 renderiza mais rápido
-  const pixelRatio = renderSettings?.pixelRatio || 1
-  const dprMax = pixelRatio >= 2 ? 2 : pixelRatio >= 1.5 ? 1.5 : 1
-
   return (
     <div className="viewport" onDragOver={(e) => !isGameMode && e.preventDefault()} onDrop={handleDrop}>
       <Canvas
         shadows
-        dpr={[1, dprMax]}
-        camera={{ position: [8, 6, 10], fov: 50, near: 0.1, far: 200 }}
+        dpr={[1, 2]}
+        camera={{ position: [8, 6, 10], fov: 50, near: 0.1, far: DEFAULT_CAMERA_FAR }}
         gl={{ antialias: true, preserveDrawingBuffer: true, alpha: false }}
         onPointerMissed={() => {
           if (!isGameMode) {
@@ -1401,18 +1524,18 @@ export default function SceneLevel3D() {
             color={lights.directional.color}
             position={lights.directional.position}
             castShadow
-            shadow-mapSize-width={renderSettings?.shadowMapSize || 1024}
-            shadow-mapSize-height={renderSettings?.shadowMapSize || 1024}
-            shadow-camera-left={-30}
-            shadow-camera-right={30}
-            shadow-camera-top={30}
-            shadow-camera-bottom={-30}
+            shadow-mapSize-width={2048}
+            shadow-mapSize-height={2048}
+            shadow-camera-left={-20}
+            shadow-camera-right={20}
+            shadow-camera-top={20}
+            shadow-camera-bottom={-20}
           />
           <hemisphereLight intensity={0.3} groundColor="#1a1a2e" color="#ffffff" />
 
           {/* Grelha — só no editor */}
           {!isGameMode && grid.visible && (
-            <Grid position={[0, 0, 0]} args={[grid.size, grid.divisions]} cellColor={grid.color} sectionColor={grid.color} sectionThickness={1.2} cellThickness={0.6} fadeDistance={30} fadeStrength={1} />
+            <Grid position={[0, 0, 0]} args={[grid.size, grid.divisions]} cellColor={grid.color} sectionColor={grid.color} sectionThickness={1.2} cellThickness={0.6} fadeDistance={100} fadeStrength={1} infiniteGrid={true} />
           )}
           {!isGameMode && <ContactShadows position={[0, 0.001, 0]} opacity={0.35} scale={40} blur={2.5} far={5} />}
 
@@ -1431,28 +1554,10 @@ export default function SceneLevel3D() {
             )
           })}
 
-          {/* Auto-instancing — converte StaticObjects repetidos (≥5) em InstancedMesh */}
-          <AutoInstancing activeScene={activeScene} objects={objects} />
-
-          {/* Conects — filtrar StaticObjects que foram auto-instanciados */}
-          {(() => {
-            // Calcular sourceObjectIds que serão instanciados
-            const counts = new Map()
-            for (const c of activeScene.conects || []) {
-              if (c.type === 'StaticObject' && c.sourceObjectId) {
-                counts.set(c.sourceObjectId, (counts.get(c.sourceObjectId) || 0) + 1)
-              }
-            }
-            const instancedIds = new Set()
-            for (const [id, n] of counts) {
-              if (n >= 5) instancedIds.add(id)
-            }
-            return (activeScene.conects || [])
-              .filter((c) => !(c.type === 'StaticObject' && instancedIds.has(c.sourceObjectId)))
-              .map((conect) => (
-                <ConectSelectorWrapper key={conect.instanceId} conect={conect} objects={objects} isSelected={!isGameMode && conect.instanceId === selectedInstanceId} onSelect={() => selectConectInstance(conect.instanceId)} setMeshRef={(node) => setConectMeshRef(conect.instanceId, node)} isGameMode={isGameMode} />
-              ))
-          })()}
+          {/* Conects */}
+          {(activeScene.conects || []).map((conect) => (
+            <ConectSelectorWrapper key={conect.instanceId} conect={conect} objects={objects} isSelected={!isGameMode && conect.instanceId === selectedInstanceId} onSelect={() => selectConectInstance(conect.instanceId)} setMeshRef={(node) => setConectMeshRef(conect.instanceId, node)} isGameMode={isGameMode} />
+          ))}
 
           {/* GameCamera gizmo — só no editor */}
           {!isGameMode && !(activeScene.conects || []).some((c) => c.type === 'ViewObject') && (
@@ -1468,11 +1573,33 @@ export default function SceneLevel3D() {
             />
           )}
 
-          {/* OrbitControls — só no editor */}
+          {/* OrbitControls — só no editor; sem limites artificiais de distância */}
           {!isGameMode && (
-            <OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.08} minDistance={1} maxDistance={100} maxPolarAngle={Math.PI * 0.495}
+            <OrbitControls
+              ref={orbitRef}
+              makeDefault
+              enableDamping
+              dampingFactor={0.08}
+              minDistance={0.5}
+              maxDistance={Infinity}
+              maxPolarAngle={Math.PI}
+              screenSpacePanning={false}
               touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
               enabled={!isTerrainSculptDragging}
+              onPointerDown={() => updatePanSpeed(orbitRef)}
+              onWheel={(e) => {
+                if (!orbitRef.current) return
+                const controls = orbitRef.current
+                const distance = controls.getDistance()
+                const factor = e.deltaY > 0 ? 1.1 : 0.9
+                const newDistance = distance * factor
+                const dir = new THREE.Vector3()
+                dir.subVectors(controls.object.position, controls.target)
+                if (dir.lengthSq() < 0.001) dir.set(0, 0, 1)
+                dir.normalize()
+                controls.object.position.copy(controls.target).addScaledVector(dir, newDistance)
+                controls.update()
+              }}
             />
           )}
 
