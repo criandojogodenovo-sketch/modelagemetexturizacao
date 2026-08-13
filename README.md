@@ -141,6 +141,37 @@ Cada Conect é um objeto de jogo com semântica própria. Todos têm renderer de
 
 ---
 
+## 🔧 Correções recentes (Agosto 2026 — Sessão 8)
+
+### BUG CRÍTICO RESOLVIDO: Ecrã preto no modo jogo — 2 causas raiz encontradas e corrigidas
+
+Após 7 sessões de tentativas, o ecrã preto foi **definitivamente resolvido** usando diagnóstico com browser automation (agent-browser + VLM).
+
+#### Causa #1: `ReferenceError: gameContext is not defined`
+
+- **Problema**: O `gameContext` era definido dentro do `useEffect` de setup do `GameMode` (linha 379), mas era referenciado no `useFrame` (linhas 1073, 1226, 1256) que está num scope JavaScript diferente.
+- **Sintoma**: Cada frame lançava `ReferenceError: gameContext is not defined` que era capturado pelo `try/catch` mas impedia o R3F de completar o render → ecrã preto.
+- **Diagnóstico**: O `try/catch` adicionado na Sessão 7 revelou o erro que estava a ser silenciado desde a Sessão 5.
+- **Solução**: Criado `gameContextRef = useRef(null)` no componente `GameMode`. O `gameContext` é guardado em `gameContextRef.current` após criação. Todas as referências no `useFrame` usam `gameContextRef.current` em vez de `gameContext`.
+
+#### Causa #2: Jogador caía infinitamente (y = -1140)
+
+- **Problema**: O `TerrainObject` usava uma `CANNON.Box` gigante (half-extents [30, 6, 30] centrada em [0,0,0]) como colisor. O jogador spawnava dentro da box e a física empurrava-o para baixo em vez de para cima.
+- **Sintoma**: `_player_y` chegou a `-1140` (confirmado via `eval`). A câmara FPS seguia o jogador para `y = -1139` → só via o vazio (background amarelo).
+- **Solução**: `TerrainObject` agora cria um `CANNON.Plane` (plano infinito) directamente no `addConect`, antes do código genérico. O plano é estático, aponta para +Y (chão), em y=0. Return early — não passa pelo `createShape`.
+- **Verificação**: Após o fix, `_player_y = 0.90` (acima do plano de chão). O jogador já não cai infinitamente.
+
+#### Verificação com browser automation (VLM)
+
+Usando `agent-browser` + VLM (Vision Language Model), confirmei que:
+- **Antes do fix**: viewport 3D completamente preta, só UI visível
+- **Depois do fix**: viewport 3D mostra **terreno visível** (plano cinza-azulado), **objetos 3D visíveis** (objeto verde-azulado, formas geométricas), **gizmos** (linhas amarelas). **Não está preta!**
+- Console sem erros (apenas warnings de deprecation de THREE.Clock e ShadowMap)
+
+#### Commit: `00b5fb0` — Fix physics: TerrainObject cria CANNON.Plane directamente
+
+---
+
 ## 🔧 Correções recentes (Agosto 2026 — Sessão 7)
 
 ### TAREFA 1: Backend do Marketplace — FUNCIONA EM PRODUÇÃO ✓
