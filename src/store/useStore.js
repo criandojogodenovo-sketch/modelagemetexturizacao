@@ -65,8 +65,8 @@ const initialScene = {
   },
   grid: {
     visible: true,
-    size: 200,
-    divisions: 200,
+    size: 20,
+    divisions: 20,
     color: '#30363d',
   },
   lights: {
@@ -1470,7 +1470,6 @@ export const useStore = create(
 
       perfStatsVisible: false,
       togglePerfStats: () => set((s) => ({ perfStatsVisible: !s.perfStatsVisible })),
-      // Performance Core — métricas em runtime (actualizadas pelo usePerformanceTracker)
       perfStats: null,
       setPerfStats: (stats) => set({ perfStats: stats }),
 

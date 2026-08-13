@@ -47,6 +47,9 @@ export class HardwareInstancingSystem {
     this._frustum = new THREE.Frustum()
     this._projScreenMatrix = new THREE.Matrix4()
     this._tempVector = new THREE.Vector3()
+    // Objectos reutilizáveis (evita allocations por frame)
+    this._dummy = new THREE.Object3D()
+    this._sphere = new THREE.Sphere()
   }
 
   /**
@@ -182,19 +185,17 @@ export class HardwareInstancingSystem {
 
     // Resetar contadores por LOD
     const countsByLOD = new Array(this.lodLevels.length).fill(0)
-    const dummy = new THREE.Object3D()
+    const dummy = this._dummy
 
     for (const instance of this.instances) {
       // Frustum culling: verificar se a instância está visível
       if (this.enableCulling) {
         this._tempVector.copy(instance.position)
-        // Bounding sphere simples (raio baseado na escala)
         const radius = (instance.scale || 1) * 2
         if (!this._frustum.containsPoint(this._tempVector) &&
             this._tempVector.distanceTo(camera.position) > radius) {
-          // Verificar se está dentro do frustum com margem
-          const sphere = new THREE.Sphere(this._tempVector, radius)
-          if (!this._frustum.intersectsSphere(sphere)) continue
+          this._sphere.set(this._tempVector, radius)
+          if (!this._frustum.intersectsSphere(this._sphere)) continue
         }
       }
 

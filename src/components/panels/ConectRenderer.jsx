@@ -183,23 +183,17 @@ export default ConectRenderer
 // ===== Placeholder para conects com física =====
 const PlaceholderMesh = forwardRef(function PlaceholderMesh({ conect }, ref) {
   // Em modo jogo com ViewObject FPS, esconder o PersonalObject para não tapar a câmara
-  // (a câmara está dentro/colada ao capsule em first-person)
   const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
-  const scenes = useStore((s) => s.scenes)
-  const activeSceneId = useStore((s) => s.activeSceneId)
-  const shouldHideInFPS = useMemo(() => {
+  // Selector estreito: só lê os ViewObjects da cena ativa, não o array scenes inteiro
+  const hasFPSView = useStore((s) => {
     if (!scenePreviewOpen || conect.type !== 'PersonalObject') return false
-    const activeScene = scenes.find((s) => s.id === activeSceneId)
+    const activeScene = s.scenes.find((sc) => sc.id === s.activeSceneId)
     if (!activeScene) return false
-    // Procurar ViewObject com followMode='first' que segue este jogador
-    const viewConects = (activeScene.conects || []).filter((c) => c.type === 'ViewObject')
-    for (const v of viewConects) {
-      if (v.followMode === 'first' && (v.followTarget === conect.instanceId || v.cameraRole === 'player')) {
-        return true
-      }
-    }
-    return false
-  }, [scenePreviewOpen, conect.type, conect.instanceId, scenes, activeSceneId])
+    return (activeScene.conects || []).some((c) =>
+      c.type === 'ViewObject' && c.followMode === 'first' &&
+      (c.followTarget === conect.instanceId || c.cameraRole === 'player')
+    )
+  })
 
   const color = conect.type === 'PersonalObject' ? '#3fb950'
                 : conect.type === 'StaticObject' ? '#6e7681'
@@ -214,7 +208,7 @@ const PlaceholderMesh = forwardRef(function PlaceholderMesh({ conect }, ref) {
       position={conect.position}
       rotation={conect.rotation}
       scale={conect.scale}
-      visible={conect.visible !== false && !shouldHideInFPS}
+      visible={conect.visible !== false && !hasFPSView}
       castShadow
       receiveShadow
       userData={{ conectInstanceId: conect.instanceId }}
@@ -326,6 +320,9 @@ function TerrainMesh({ conect, setMeshRef }) {
     return g
   }, [conect.width, conect.depth, conect.segments, conect.heightScale, conect.heightmapSeed, conect.heightmap, conect.splatmap, conect.textureLayers, conect.maxLayers])
 
+  // Disposal: libertar geometry quando o componente desmonta
+  useEffect(() => () => { geometry.dispose() }, [geometry])
+
   const hasVertexColors = !!(conect.splatmap && conect.textureLayers && conect.splatmap.length > 0)
 
   return (
@@ -380,6 +377,9 @@ function WaterMesh({ conect, setMeshRef }) {
     g.rotateX(-Math.PI / 2)
     return g
   }, [conect.size, waterQuality])
+
+  // Disposal: libertar geometry e proMaterial
+  useEffect(() => () => { geometry.dispose(); proMaterial?.dispose() }, [geometry, proMaterial])
 
   // Animar ondas no useFrame (apenas para water básico; Pro usa shader)
   useFrame((state, delta) => {
@@ -753,6 +753,9 @@ function SkyMesh({ conect, setMeshRef }) {
       starsEnabled: conect.starsEnabled || false,
     })
   }, [skyType, conect.sunPosition, conect.sunElevation, conect.rayleigh, conect.turbidity, conect.starsEnabled])
+
+  // Disposal: libertar proMaterial quando desmonta
+  useEffect(() => () => { proMaterial?.dispose() }, [proMaterial])
 
   // Animar uTime do sky shader
   useFrame((_, delta) => {

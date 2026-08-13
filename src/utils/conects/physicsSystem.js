@@ -36,6 +36,13 @@ export function createPhysicsSystem(options = {}) {
   world.defaultContactMaterial.friction = 0.3
   world.defaultContactMaterial.restitution = 0.3
 
+  // Objectos reutilizáveis para raycast (evita allocations por frame)
+  const _rayFrom = new CANNON.Vec3()
+  const _rayTo = new CANNON.Vec3()
+  const _rayResult = new CANNON.RaycastResult()
+  // Set reutilizável para triggers (evita new Set() por trigger por frame)
+  const _triggerContacts = new Set()
+
   // Materiais para diferentes tipos de interação
   const materials = {
     default: new CANNON.Material('default'),
@@ -327,12 +334,12 @@ export function createPhysicsSystem(options = {}) {
 
       // Detetar "grounded" para PersonalObject (raycast para baixo)
       if (type === 'PersonalObject') {
-        const from = new CANNON.Vec3(body.position.x, body.position.y, body.position.z)
-        const to = new CANNON.Vec3(body.position.x, body.position.y - 1.1, body.position.z)
-        const result = new CANNON.RaycastResult()
-        world.raycastClosest(from, to, { skipBackfaces: true, collisionFilterMask: -1 }, result)
-        const wasGrounded = entry.grounded
-        entry.grounded = result.hasHit
+        // Reutilizar objectos pré-alocados (evita 3 allocations por frame)
+        _rayFrom.set(body.position.x, body.position.y, body.position.z)
+        _rayTo.set(body.position.x, body.position.y - 1.1, body.position.z)
+        _rayResult.reset()
+        world.raycastClosest(_rayFrom, _rayTo, { skipBackfaces: true, collisionFilterMask: -1 }, _rayResult)
+        entry.grounded = _rayResult.hasHit
       }
     }
 
@@ -340,7 +347,7 @@ export function createPhysicsSystem(options = {}) {
     for (const triggerId of triggers) {
       const triggerEntry = bodies.get(triggerId)
       if (!triggerEntry) continue
-      const currentContacts = new Set()
+      _triggerContacts.clear()
       const triggerPos = triggerEntry.body.position
       const triggerSize = triggerEntry.conect.size || [2, 2, 2]
       // Verificar sobreposição com cada corpo
@@ -354,7 +361,7 @@ export function createPhysicsSystem(options = {}) {
         const dz = Math.abs(otherPos.z - triggerPos.z)
         const inside = dx < triggerSize[0] / 2 && dy < triggerSize[1] / 2 && dz < triggerSize[2] / 2
         if (inside) {
-          currentContacts.add(otherId)
+          _triggerContacts.add(otherId)
           if (!triggerEntry.previousContacts.has(otherId)) {
             emit('onTriggerEnter', { instanceId: triggerId, otherInstanceId: otherId })
           }
@@ -362,11 +369,13 @@ export function createPhysicsSystem(options = {}) {
       }
       // Sair de triggers
       for (const prevId of triggerEntry.previousContacts) {
-        if (!currentContacts.has(prevId)) {
+        if (!_triggerContacts.has(prevId)) {
           emit('onTriggerExit', { instanceId: triggerId, otherInstanceId: prevId })
         }
       }
-      triggerEntry.previousContacts = currentContacts
+      // Copiar para previousContacts (precisa de ser um Set novo para não partilhar referência)
+      triggerEntry.previousContacts.clear()
+      for (const id of _triggerContacts) triggerEntry.previousContacts.add(id)
     }
   }
 
