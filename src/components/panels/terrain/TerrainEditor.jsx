@@ -52,7 +52,7 @@ const FALLOFFS = [
 ]
 
 const TABS = [
-  { id: 'sculpt',   label: 'Escultura',   icon: '⛏️' },
+{ id: 'sculpt', label: 'Escultura', icon: '️' },
   { id: 'paint',    label: 'Textura',     icon: 'palette' },
   { id: 'details',  label: 'Detalhes',    icon: 'tree' },
   { id: 'settings', label: 'Definições',  icon: 'settings' },
@@ -362,7 +362,7 @@ export default function TerrainEditor({ onClose }) {
                 border: terrainSculptActive ? '1px solid var(--accent)' : '1px solid var(--border)',
                 borderRadius: 6,
               }}>
-                <h4>🎨 Escultura 3D no Viewport</h4>
+<h4> Escultura 3D no Viewport</h4>
                 <div className="small muted mb-2">
                   Ativa para esculpir diretamente no terreno 3D da cena. Seleciona um
                   TerrainObject e arrasta o rato/dedo sobre ele. O cursor 3D segue a malha.
@@ -377,7 +377,7 @@ export default function TerrainEditor({ onClose }) {
                 {terrainSculptActive && (
                   <>
                     <div className="small" style={{ color: 'var(--accent)', marginTop: 8 }}>
-                      👆 Seleciona um TerrainObject na cena e arrasta para esculpir.
+Seleciona um TerrainObject na cena e arrasta para esculpir.
                       OrbitControls fica desactivado durante o arraste.
                     </div>
                     <div className="prop-row" style={{ marginTop: 8 }}>
@@ -420,7 +420,7 @@ export default function TerrainEditor({ onClose }) {
               </div>
 
               <div className="panel-section">
-                <h4>⛏️ Pincel de Escultura (Preview 2D)</h4>
+<h4>️ Pincel de Escultura (Preview 2D)</h4>
                 <div className="terrain-brush-grid">
                   {SCULPT_BRUSHES.map((b) => (
                     <button
@@ -439,7 +439,7 @@ export default function TerrainEditor({ onClose }) {
                 </div>
                 {brush.mode === 'ramp' && (
                   <div className="small" style={{ color: 'var(--accent)', marginBottom: 8, marginTop: 4 }}>
-                    {rampPoints.length === 0 ? '👆 Clica no ponto 1 no preview' : '👆 Clica no ponto 2 no preview'}
+{rampPoints.length === 0 ? ' Clica no ponto 1 no preview' : ' Clica no ponto 2 no preview'}
                   </div>
                 )}
               </div>
@@ -506,7 +506,7 @@ export default function TerrainEditor({ onClose }) {
                 <button onClick={autoTexture} style={{ width: '100%', marginBottom: 4 }}>Aplicar Auto-Textura
                 </button>
                 <button onClick={clearTexture} style={{ width: '100%' }}>
-                  🧹 Limpar Textura
+Limpar Textura
                 </button>
               </div>
             </>
@@ -572,7 +572,7 @@ export default function TerrainEditor({ onClose }) {
                     onClick={() => setScatteredPoints([])}
                     style={{ width: '100%', marginTop: 4 }}
                   >
-                    🧹 Limpar markers (não remove objetos)
+Limpar markers (não remove objetos)
                   </button>
                 )}
               </div>
@@ -583,7 +583,7 @@ export default function TerrainEditor({ onClose }) {
           {activeTab === 'settings' && (
             <>
               <div className="panel-section">
-                <h4>📏 Dimensões</h4>
+<h4> Dimensões</h4>
                 <div className="prop-row">
                   <label>Largura: {config.width}m</label>
                   <input type="range" min="10" max="200" step="5" value={config.width}
@@ -743,7 +743,7 @@ export default function TerrainEditor({ onClose }) {
           {/* ===== Preview + Stats (sempre visível no fim) ===== */}
           {heightmap && (
             <div className="panel-section">
-              <h4>👁️ Pré-visualização</h4>
+<h4>️ Pré-visualização</h4>
               <HeightmapPreview
                 heightmap={heightmap}
                 splatmap={splatmap}
@@ -763,9 +763,9 @@ export default function TerrainEditor({ onClose }) {
                 </div>
               )}
               <div className="small muted mt-1">
-                {activeTab === 'sculpt' && brush.mode !== 'ramp' && '👆 Arrasta no preview para pintar continuamente'}
-                {brush.mode === 'ramp' && '👆 Clica 2 pontos para definir a rampa'}
-                {activeTab === 'paint' && '👆 Arrasta para pintar a textura ativa'}
+{activeTab === 'sculpt' && brush.mode !== 'ramp' && ' Arrasta no preview para pintar continuamente'}
+{brush.mode === 'ramp' && ' Clica 2 pontos para definir a rampa'}
+{activeTab === 'paint' && ' Arrasta para pintar a textura ativa'}
               </div>
             </div>
           )}

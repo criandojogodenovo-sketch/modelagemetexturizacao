@@ -20,6 +20,7 @@ import SceneObject from './SceneObject'
 import ConectRenderer from '../panels/ConectRenderer'
 import TerrainSculpt3D from './TerrainSculpt3D'
 import { useStore } from '../../store/useStore'
+import { DEFAULT_CAMERA_FAR } from '../../utils/navigationUtils'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
 import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
 import { createFlirCodeRuntime } from '../../utils/flirscript/flircode'
@@ -1313,6 +1314,7 @@ export default function SceneLevel3D() {
   const addConectToScene = useStore((s) => s.addConectToScene)
   const selectConect = useStore((s) => s.selectConect)
   const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
+  const renderSettings = useStore((s) => s.renderSettings)
 
   const [selectedInstanceId, setSelectedInstanceId] = useState(null)
   const [selectedType, setSelectedType] = useState(null)
@@ -1394,12 +1396,17 @@ export default function SceneLevel3D() {
     )
   }
 
+  // DPR e shadowMapSize do renderSettings
+  const pixelRatio = renderSettings?.pixelRatio || 1
+  const dprMax = pixelRatio >= 2 ? 2 : pixelRatio >= 1.5 ? 1.5 : 1
+  const shadowMapSize = renderSettings?.shadowMapSize || 1024
+
   return (
     <div className="viewport" onDragOver={(e) => !isGameMode && e.preventDefault()} onDrop={handleDrop}>
       <Canvas
         shadows
-        dpr={[1, 2]}
-        camera={{ position: [8, 6, 10], fov: 50, near: 0.1, far: 200 }}
+        dpr={[1, dprMax]}
+        camera={{ position: [8, 6, 10], fov: 50, near: 0.1, far: DEFAULT_CAMERA_FAR }}
         gl={{ antialias: true, preserveDrawingBuffer: true, alpha: false }}
         onPointerMissed={() => {
           if (!isGameMode) {
@@ -1420,8 +1427,8 @@ export default function SceneLevel3D() {
             color={lights.directional.color}
             position={lights.directional.position}
             castShadow
-            shadow-mapSize-width={2048}
-            shadow-mapSize-height={2048}
+            shadow-mapSize-width={shadowMapSize}
+            shadow-mapSize-height={shadowMapSize}
             shadow-camera-left={-20}
             shadow-camera-right={20}
             shadow-camera-top={20}
@@ -1431,7 +1438,7 @@ export default function SceneLevel3D() {
 
           {/* Grelha — só no editor */}
           {!isGameMode && grid.visible && (
-            <Grid position={[0, 0, 0]} args={[grid.size, grid.divisions]} cellColor={grid.color} sectionColor={grid.color} sectionThickness={1.2} cellThickness={0.6} fadeDistance={30} fadeStrength={1} />
+            <Grid position={[0, 0, 0]} args={[grid.size, grid.divisions]} cellColor={grid.color} sectionColor={grid.color} sectionThickness={1.2} cellThickness={0.6} fadeDistance={100} fadeStrength={1} infiniteGrid={true} />
           )}
           {!isGameMode && <ContactShadows position={[0, 0.001, 0]} opacity={0.35} scale={40} blur={2.5} far={5} />}
 

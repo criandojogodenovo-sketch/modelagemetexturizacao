@@ -46,13 +46,16 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
   let loop = false
   let speed = 1
   let onComplete = null
-  
+
   // AnimationBoost: blending entre clips
   let prevClip = null
   let prevTime = 0
   let blendTime = 0
   let blendDuration = 0
   let boostEnabled = false
+
+  // Cache de maxTime por clip (evita keyframes.map() por frame)
+  const _maxTimeCache = new Map()
 
   function play(clipName, options = {}) {
     if (!animations[clipName] || animations[clipName].length === 0) return false
@@ -121,8 +124,15 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
 
     currentTime += deltaTime * speed
 
-    // Calcular duração total do clip
-    const maxTime = Math.max(...keyframes.map((k) => k.time))
+    // Calcular duração total do clip (cached — evita keyframes.map() por frame)
+    let maxTime = _maxTimeCache.get(currentClip)
+    if (maxTime === undefined) {
+      maxTime = 0
+      for (let i = 0; i < keyframes.length; i++) {
+        if (keyframes[i].time > maxTime) maxTime = keyframes[i].time
+      }
+      _maxTimeCache.set(currentClip, maxTime)
+    }
 
     if (currentTime >= maxTime) {
       if (loop) {

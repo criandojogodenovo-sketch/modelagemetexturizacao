@@ -367,7 +367,7 @@ export default function MarketplacePanel({ onClose }) {
               }}>
                 {backendOnline === null && '⏳ A verificar ligação ao backend...'}
                 {backendOnline === true && '✓ Backend online — itens reais do Neon PostgreSQL'}
-                {backendOnline === false && '⚠️ Backend offline — a mostrar itens demo locais. (Verifica NEON_DATABASE_URL na Vercel)'}
+{backendOnline === false && '️ Backend offline — a mostrar itens demo locais. (Verifica NEON_DATABASE_URL na Vercel)'}
               </div>
 
               {filteredItems.length === 0 ? (

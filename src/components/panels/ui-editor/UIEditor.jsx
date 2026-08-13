@@ -18,10 +18,10 @@ import { IconPlus, IconTrash, IconClose } from '../../ui/Icons'
 
 const ELEMENT_TYPES = [
   { type: 'Button', icon: 'mouse-pointer-2', label: 'Botão' },
-  { type: 'Label', icon: '🏷️', label: 'Label' },
+{ type: 'Label', icon: '️', label: 'Label' },
   { type: 'Input', icon: 'type', label: 'Input' },
-  { type: 'Checkbox', icon: '☑️', label: 'Checkbox' },
-  { type: 'Slider', icon: '🎚️', label: 'Slider' },
+{ type: 'Checkbox', icon: '️', label: 'Checkbox' },
+{ type: 'Slider', icon: '️', label: 'Slider' },
   { type: 'Form', icon: 'clipboard', label: 'Formulário' },
   { type: 'Text', icon: 'file', label: 'Texto' },
   { type: 'Image', icon: 'image', label: 'Imagem' },

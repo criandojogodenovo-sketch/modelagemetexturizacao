@@ -162,6 +162,7 @@ export default function Scene3D() {
   const grid = useStore((s) => s.grid)
   const lights = useStore((s) => s.lights)
   const mode = useStore((s) => s.mode)
+  const renderSettings = useStore((s) => s.renderSettings)
 
   const orbitRef = useRef(null)
   const meshRefs = useRef(new Map())
@@ -231,10 +232,15 @@ export default function Scene3D() {
     }
   }, [selectedId])
 
+  // DPR e shadowMapSize do renderSettings
+  const pixelRatio = renderSettings?.pixelRatio || 1
+  const dprMax = pixelRatio >= 2 ? 2 : pixelRatio >= 1.5 ? 1.5 : 1
+  const shadowMapSize = renderSettings?.shadowMapSize || 1024
+
   return (
     <Canvas
       shadows
-      dpr={[1, 2]}
+      dpr={[1, dprMax]}
       camera={{ position: [5, 4, 6], fov: 50, near: 0.1, far: DEFAULT_CAMERA_FAR }}
       gl={{ antialias: true, preserveDrawingBuffer: true, alpha: false }}
       onPointerMissed={(e) => {
@@ -253,8 +259,8 @@ export default function Scene3D() {
           color={lights.directional.color}
           position={lights.directional.position}
           castShadow
-          shadow-mapSize-width={2048}
-          shadow-mapSize-height={2048}
+          shadow-mapSize-width={shadowMapSize}
+          shadow-mapSize-height={shadowMapSize}
           shadow-camera-left={-15}
           shadow-camera-right={15}
           shadow-camera-top={15}

@@ -26,7 +26,7 @@ const PRESETS = [
   {
     id: 'forest',
     label: 'Floresta',
-    icon: '🌳',
+icon: '',
     desc: 'Árvores cone+cilindro (3 LOD levels)',
     color: 0x2d5a2d,
     count: 200,
@@ -44,7 +44,7 @@ const PRESETS = [
   {
     id: 'grass',
     label: 'Capim',
-    icon: '🌿',
+icon: '',
     desc: 'Tufts de capim denso',
     color: 0x4d7c2d,
     count: 800,
@@ -53,7 +53,7 @@ const PRESETS = [
   {
     id: 'crystals',
     label: 'Cristais',
-    icon: '💎',
+icon: '',
     desc: 'Cristais brilhantes (octaedros)',
     color: 0x6ee7ff,
     count: 50,
