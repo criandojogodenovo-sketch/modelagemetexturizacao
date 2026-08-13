@@ -4,7 +4,7 @@
  * POST body: { email, password }
  * Returns: { token, user } ou { error }
  */
-const { query } = require('../db.cjs')
+const { query } = require('../db.js')
 const crypto = require('crypto')
 
 module.exports = async (req, res) => {
