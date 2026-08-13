@@ -281,6 +281,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   const collisionEventsRef = useRef(new Map()) // instanceId → Set de otherIds em contacto
   const checkpointRef = useRef(null) // último checkpoint registado
   const skyRef = useRef(null) // referência ao SkyObject ativo
+  const gameContextRef = useRef(null) // gameContext guardado para useFrame aceder
 
   // Expor meshRefs globalmente para TrailObject poder seguir objetos
   useEffect(() => {
@@ -369,7 +370,6 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
 
   // Setup quando o modo jogo é activado
   useEffect(() => {
-    console.log('[GameMode] useEffect setup - isGameMode:', isGameMode, 'setupScene:', !!setupScene, 'conects:', setupScene?.conects?.length)
     if (!isGameMode || !setupScene) return
     gameStartedRef.current = true
 
@@ -823,6 +823,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     }
     window._flirGameContext = gameContext
     window._flirInventory = inventoryRef.current
+    gameContextRef.current = gameContext // guardar para useFrame aceder
     // Inicializar/resetar estado da câmara (cameraController unificado)
     resetCameraState()
     const camState = getCameraState()
@@ -1043,13 +1044,6 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     if (!isGameMode) return
 
     try {
-    // Log inicial para confirmar que o useFrame está a executar
-    if (!window._flirFrameCount) window._flirFrameCount = 0
-    window._flirFrameCount++
-    if (window._flirFrameCount <= 3) {
-      console.log('[GameMode] useFrame #' + window._flirFrameCount + ' - physicsRef:', !!physicsRef.current, 'setupScene:', !!setupScene)
-    }
-
     // Física
     if (physicsRef.current) {
       physicsRef.current.update(delta)
@@ -1067,11 +1061,11 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     const playerConect = (setupScene?.conects || []).find((c) => c.type === 'PersonalObject')
     if (playerConect) {
       const playerMesh = conectMeshRefs.current.get(playerConect.instanceId)
-      if (playerMesh) {
-        gameContext.setVar('_player_x', playerMesh.position.x)
-        gameContext.setVar('_player_y', playerMesh.position.y)
-        gameContext.setVar('_player_z', playerMesh.position.z)
-        gameContext.setVar('_y_pos', playerMesh.position.y)
+      if (playerMesh && gameContextRef.current) {
+        gameContextRef.current.setVar('_player_x', playerMesh.position.x)
+        gameContextRef.current.setVar('_player_y', playerMesh.position.y)
+        gameContextRef.current.setVar('_player_z', playerMesh.position.z)
+        gameContextRef.current.setVar('_y_pos', playerMesh.position.y)
       }
     }
 
@@ -1220,8 +1214,8 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
               const dist = playerMesh.position.distanceTo(itemMesh.position)
               if (dist <= (item.pickupRadius || 2)) {
                 // Apanhar item
-                if (gameContext.addToInventory) {
-                  gameContext.addToInventory(item.itemName || 'Item', item.quantity || 1)
+                if (gameContextRef.current?.addToInventory) {
+                  gameContextRef.current.addToInventory(item.itemName || 'Item', item.quantity || 1)
                 }
                 itemMesh.visible = false
                 debugLog(`Item "${item.itemName}" apanhado!`, 'log', 'Inventory')
@@ -1251,7 +1245,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           const spawnPos = spawnMesh
             ? [spawnMesh.position.x, spawnMesh.position.y, spawnMesh.position.z]
             : spawn.position || [0, 1, 0]
-          gameContext.spawnObject(spawn.objectToSpawn, spawnPos)
+          if (gameContextRef.current) gameContextRef.current.spawnObject(spawn.objectToSpawn, spawnPos)
           debugLog(`Spawn: "${spawn.objectToSpawn}" em ${spawnPos}`, 'log', 'Spawn')
         }
       }
