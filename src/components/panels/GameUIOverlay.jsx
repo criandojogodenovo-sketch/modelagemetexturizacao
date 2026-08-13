@@ -10,6 +10,7 @@
  */
 import { useStore } from '../../store/useStore'
 import { debugLog } from '../../utils/debug/debugStore'
+import { getCameraState, applyCameraInput, applyCameraKeyInput } from '../../utils/cameraController'
 import JoystickControl from '../ui/JoystickControl'
 import { useRef, useEffect } from 'react'
 
@@ -298,36 +299,38 @@ export default function GameUIOverlay() {
  * CameraTouchZoneControl — zona de toque para rodar a câmara (pitch/yaw).
  * Estilo COD Mobile / Fortnite: arrastar o dedo nesta zona roda a câmara.
  * Invisível (transparente) mas captura eventos de toque.
- * Funciona com window._flirCameraRotation — o SceneLevel3D lê estes valores.
+ * Usa cameraController (getCameraState + applyCameraInput) — fonte única de verdade.
  */
 function CameraTouchZoneControl({ zone, sensitivity, invertY, minPitch, maxPitch }) {
   const touchIdRef = useRef(null)
   const lastPosRef = useRef(null)
 
   useEffect(() => {
-    if (!window._flirCameraRotation) {
-      window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: sensitivity, enabled: true }
-    }
-    window._flirCameraRotation.sensitivity = sensitivity
-    window._flirCameraRotation.enabled = true
+    // Configurar estado da câmara via cameraController
+    const camState = getCameraState()
+    camState.sensitivity = sensitivity
+    camState.invertY = invertY
+    camState.minPitch = minPitch
+    camState.maxPitch = maxPitch
+    camState.enabled = true
+    camState.hasTouchZone = true
 
-    // Suporte para teclado (setas) — útil em desktop sem rato a arrastar
-    const keys = window._flirKeys || {}
+    // Teclado (setas) — útil em desktop sem rato a arrastar
     const onKeyDown = (e) => {
-      if (window._flirCameraRotation) {
-        const sens = 0.04
-        if (e.key === 'ArrowLeft') window._flirCameraRotation.yaw += sens
-        if (e.key === 'ArrowRight') window._flirCameraRotation.yaw -= sens
-        if (e.key === 'ArrowUp') window._flirCameraRotation.pitch = Math.max(minPitch, window._flirCameraRotation.pitch + sens)
-        if (e.key === 'ArrowDown') window._flirCameraRotation.pitch = Math.min(maxPitch, window._flirCameraRotation.pitch - sens)
+      const key = e.key.toLowerCase()
+      if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key)) {
+        e.preventDefault()
+        applyCameraKeyInput(key, getCameraState())
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
-      if (window._flirCameraRotation) window._flirCameraRotation.enabled = false
+      const s = getCameraState()
+      s.enabled = false
+      s.hasTouchZone = false
     }
-  }, [sensitivity, minPitch, maxPitch])
+  }, [sensitivity, invertY, minPitch, maxPitch])
 
   const z = zone || { x: 50, y: 0, w: 50, h: 100 }
   const zoneStyle = {
@@ -354,14 +357,7 @@ function CameraTouchZoneControl({ zone, sensitivity, invertY, minPitch, maxPitch
         const dx = touch.clientX - lastPosRef.current.x
         const dy = touch.clientY - lastPosRef.current.y
         lastPosRef.current = { x: touch.clientX, y: touch.clientY }
-        if (window._flirCameraRotation) {
-          const sens = sensitivity * 0.005
-          window._flirCameraRotation.yaw -= dx * sens
-          const pitchDelta = invertY ? dy * sens : -dy * sens
-          window._flirCameraRotation.pitch = Math.max(
-            minPitch, Math.min(maxPitch, window._flirCameraRotation.pitch + pitchDelta)
-          )
-        }
+        applyCameraInput(dx, dy, getCameraState())
         break
       }
     }
@@ -383,14 +379,7 @@ function CameraTouchZoneControl({ zone, sensitivity, invertY, minPitch, maxPitch
       const dx = ev.clientX - lastPosRef.current.x
       const dy = ev.clientY - lastPosRef.current.y
       lastPosRef.current = { x: ev.clientX, y: ev.clientY }
-      if (window._flirCameraRotation) {
-        const sens = sensitivity * 0.005
-        window._flirCameraRotation.yaw -= dx * sens
-        const pitchDelta = invertY ? dy * sens : -dy * sens
-        window._flirCameraRotation.pitch = Math.max(
-          minPitch, Math.min(maxPitch, window._flirCameraRotation.pitch + pitchDelta)
-        )
-      }
+      applyCameraInput(dx, dy, getCameraState())
     }
     const up = () => {
       window.removeEventListener('mousemove', move)

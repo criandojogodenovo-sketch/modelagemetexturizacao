@@ -167,7 +167,7 @@ scene1Conects.push({
 scene1Conects.push({
   instanceId: uid(), type: 'RealWaterObject', name: 'Lago',
   position: [10, 0.5, 10], rotation: [0, 0, 0], scale: [1, 1, 1],
-  size: [25, 25], segments: 128,
+  size: [25, 25], segments: 64,
   color: '#1e90ff', deepColor: '#0a3d5c',
   clarity: 0.85, refraction: 0.5, reflection: 0.7,
   flowSpeed: 0.6, waveHeight: 0.25, waveFrequency: 1.2,
@@ -697,12 +697,12 @@ const project = {
     flirAdaptiveMesh: false,
     shadowOptimizations: true,
     shadowDistance: 40,
-    shadowMapSize: 2048,
+    shadowMapSize: 1024,
     vertexAO: true,
     pom: true,
     postProcessing: true,
     waterQuality: 'professional',
-    pixelRatio: 1.5,
+    pixelRatio: 1.0,
   },
 }
 

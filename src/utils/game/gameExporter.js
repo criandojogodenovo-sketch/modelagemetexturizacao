@@ -17,6 +17,7 @@
  */
 import { downloadText } from '../helpers'
 import gameRuntimeSource from './gameRuntime.js?raw'
+import { CAMERA_CONTROLLER_SOURCE } from '../cameraController'
 
 export async function optimizeProject(projectData, options = {}) {
   return JSON.parse(JSON.stringify(projectData))
@@ -124,6 +125,7 @@ export function generateGameHTML(projectData, options = {}) {
   </script>
 
   <script type="module">
+${CAMERA_CONTROLLER_SOURCE}
 ${gameRuntimeSource}
   </script>
 </body>

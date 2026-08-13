@@ -251,18 +251,22 @@ function startGame() {
   var dir = new THREE.DirectionalLight(0xffffff, 1.2); dir.position.set(5, 8, 5); dir.castShadow = true
   scene3d.add(dir)
 
-  // Câmara
-  var viewConects = (scene.conects || []).filter(function (c) { return c.type === 'ViewObject' })
-  var activeView = viewConects.find(function (c) { return c.cameraRole === 'player' })
-    || viewConects.find(function (c) { return c.cameraRole === 'primary' })
-    || viewConects[0]
+  // Câmara — usar resolveActiveView do cameraController embebido
+  var activeView = resolveActiveView(scene.conects) || scene.gameCamera
+  var hasTZ = hasCameraTouchZone(scene.conects)
+  var camState = createCameraState()
+  camState.enabled = hasTZ
+  camState.hasTouchZone = hasTZ
   var cam = activeView || scene.gameCamera || { cameraType: 'perspective', position: [5, 4, 6], fov: 60, near: 0.1, far: 200 }
   var camera = (cam.cameraType || cam.type) === 'orthographic'
     ? new THREE.OrthographicCamera(-5, 5, 5, -5, cam.near || 0.1, cam.far || 200)
     : new THREE.PerspectiveCamera(cam.fov || 60, window.innerWidth / window.innerHeight, cam.near || 0.1, cam.far || 200)
   camera.position.set.apply(camera, cam.position || [5, 4, 6])
-  if (activeView && activeView.rotation) camera.rotation.set.apply(camera, activeView.rotation)
-  else camera.lookAt(0, 0, 0)
+  if (activeView && activeView.rotation) {
+    camera.rotation.set(activeView.rotation[0], activeView.rotation[1], activeView.rotation[2], 'YXZ')
+  } else {
+    camera.lookAt(0, 0, 0)
+  }
 
   // Física
   var world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) })
@@ -517,17 +521,14 @@ function startGame() {
   window.addEventListener('keydown', function (e) { keys[e.key.toLowerCase()] = true })
   window.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false })
 
-  // Câmera FPS — suporte de input (rato + setas)
-  if (!window._flirCameraRotation) {
-    window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: 1.0, enabled: true }
-  }
+  // Câmera FPS — input via cameraController (applyCameraInput + applyCameraKeyInput)
   // Setas para rodar câmara
   window.addEventListener('keydown', function (e) {
-    var sens = 0.04
-    if (e.key === 'ArrowLeft') window._flirCameraRotation.yaw += sens
-    if (e.key === 'ArrowRight') window._flirCameraRotation.yaw -= sens
-    if (e.key === 'ArrowUp') window._flirCameraRotation.pitch = Math.max(-1.4, window._flirCameraRotation.pitch + sens)
-    if (e.key === 'ArrowDown') window._flirCameraRotation.pitch = Math.min(1.4, window._flirCameraRotation.pitch - sens)
+    var key = e.key.toLowerCase()
+    if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].indexOf(key) >= 0) {
+      e.preventDefault()
+      applyCameraKeyInput(key, camState)
+    }
   })
   // Rato — arrastar para rodar câmara (estilo FPS desktop)
   var mouseDragging = false
@@ -542,9 +543,7 @@ function startGame() {
     var dx = e.clientX - mouseLast.x
     var dy = e.clientY - mouseLast.y
     mouseLast = { x: e.clientX, y: e.clientY }
-    var sens = 0.005
-    window._flirCameraRotation.yaw -= dx * sens
-    window._flirCameraRotation.pitch = Math.max(-1.4, Math.min(1.4, window._flirCameraRotation.pitch - dy * sens))
+    applyCameraInput(dx, dy, camState)
   })
   window.addEventListener('mouseup', function () { mouseDragging = false; mouseLast = null })
 
@@ -589,7 +588,7 @@ function startGame() {
     // FlirCode onTick
     for (var rid in runtimes) { runtimes[rid].triggerEvent('tick', { deltaTime: delta }) }
 
-    // PersonalObject movement
+    // PersonalObject movement — camera-relative (estilo Godot, igual ao editor)
     var player = (scene.conects || []).find(function (c) { return c.type === 'PersonalObject' })
     if (player && bodies[player.instanceId]) {
       var speed = player.moveSpeed || 5
@@ -599,48 +598,30 @@ function startGame() {
       if (keys['s'] || keys['arrowdown']) mz = speed
       if (keys['a'] || keys['arrowleft']) mx = -speed
       if (keys['d'] || keys['arrowright']) mx = speed
-      bodies[player.instanceId].velocity.x = mx
-      bodies[player.instanceId].velocity.z = mz
+      // Rodar (mx, mz) pelo yaw da câmara — movimento camera-relative
+      var yaw = camState.yaw
+      var cosY = Math.cos(yaw)
+      var sinY = Math.sin(yaw)
+      var vx =  mx * cosY + mz * sinY
+      var vz = -mx * sinY + mz * cosY
+      bodies[player.instanceId].velocity.x = vx
+      bodies[player.instanceId].velocity.z = vz
       if ((keys[' '] || keys['space']) && player.canJump) bodies[player.instanceId].velocity.y = player.jumpForce || 8
     }
 
-    // Camera follow
-    if (activeView && activeView.cameraRole === 'player' && player && meshMap[player.instanceId]) {
-      var pm = meshMap[player.instanceId]
-      var mode = activeView.followMode || 'none'
-      var camRot = window._flirCameraRotation || { yaw: 0, pitch: 0, enabled: false }
-      if (mode === 'first') {
-        // First-person: câmara nos olhos do jogador, rotação pelo toque/setas
-        var eyeH = activeView.eyeHeight || 1.6
-        camera.position.set(pm.position.x, pm.position.y + eyeH, pm.position.z)
-        if (camRot.enabled) {
-          camera.rotation.set(camRot.pitch, camRot.yaw, 0, 'YXZ')
-        }
-      } else if (mode === 'third' && camRot.enabled) {
-        // Third-person orbit (FPS-style quando há touch input)
-        var dist3 = activeView.followDistance || 6
-        var h3 = activeView.followHeight || 3
-        var offY = Math.sin(camRot.pitch) * dist3
-        var offX = Math.sin(camRot.yaw) * Math.cos(camRot.pitch) * dist3
-        var offZ = Math.cos(camRot.yaw) * Math.cos(camRot.pitch) * dist3
-        camera.position.set(pm.position.x + offX, pm.position.y + h3 + offY, pm.position.z + offZ)
-        camera.lookAt(pm.position.x, pm.position.y + 1, pm.position.z)
-      } else if (mode === 'none' || !mode) {
-        // Default: third-person clássico
-        camera.position.lerp(new THREE.Vector3(pm.position.x, pm.position.y + (activeView.followHeight || 3), pm.position.z + (activeView.followDistance || 6)), 0.1)
-        camera.lookAt(pm.position)
-      } else {
-        // Outros modos (top/side) sem touch input
-        camera.position.lerp(new THREE.Vector3(pm.position.x, pm.position.y + (activeView.followHeight || 3), pm.position.z + (activeView.followDistance || 6)), 0.1)
-        camera.lookAt(pm.position)
-      }
-    } else if (activeView && (!activeView.cameraRole || activeView.cameraRole !== 'player')) {
-      // Câmara estática — mas permite olhar à volta com touch
-      var camRot2 = window._flirCameraRotation
-      if (camRot2 && camRot2.enabled) {
-        camera.rotation.set(camRot2.pitch, camRot2.yaw, 0, 'YXZ')
-      }
+    // Camera follow — usando cameraController unificado (CAMERA_CONTROLLER_SOURCE embebido)
+    var av = activeView
+    var pm = (activeView && activeView.cameraRole === 'player' && player && meshMap[player.instanceId]) ? meshMap[player.instanceId] : null
+    var targetMeshForCam = pm
+    // Verificar followTarget explícito
+    if (av && av.followTarget && meshMap[av.followTarget]) {
+      targetMeshForCam = meshMap[av.followTarget]
     }
+    updateCamera(camera, av, targetMeshForCam, camState, {
+      gameCamera: scene.gameCamera,
+      hasTouchZone: hasTZ,
+      delta: 1/60,
+    })
 
     renderer.render(scene3d, camera)
   }

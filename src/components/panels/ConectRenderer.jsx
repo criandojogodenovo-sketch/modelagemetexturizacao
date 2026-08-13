@@ -1050,12 +1050,12 @@ function ItemMesh({ conect, setMeshRef }) {
   const color = conect.color || '#fbbf24'
   return (
     <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
-      <mesh ref={ref} position={[0, 1, 0]} castShadow>
+      <mesh ref={ref} position={[0, 1, 0]}>
         <octahedronGeometry args={[0.3, 0]} />
         <meshStandardMaterial
           color={color}
           emissive={color}
-          emissiveIntensity={0.6}
+          emissiveIntensity={1.2}
           roughness={0.1}
           metalness={0.8}
           flatShading
@@ -1066,7 +1066,8 @@ function ItemMesh({ conect, setMeshRef }) {
         <ringGeometry args={[0.4, 0.5, 16]} />
         <meshBasicMaterial color={color} transparent opacity={0.4} side={THREE.DoubleSide} />
       </mesh>
-      <pointLight color={color} intensity={1.5} distance={3} position={[0, 1, 0]} />
+      {/* pointLight removido — emissiveIntensity elevado compensa; poupa 1 luz dinâmica por item */}
+      {conect.emitLight && <pointLight color={color} intensity={1.5} distance={3} position={[0, 1, 0]} />}
     </group>
   )
 }
@@ -1110,9 +1111,10 @@ function GIProbeMesh({ conect, setMeshRef }) {
       </mesh>
       <mesh>
         <sphereGeometry args={[0.4, 16, 16]} />
-        <meshStandardMaterial color="#ec4899" emissive="#ec4899" emissiveIntensity={0.6} transparent opacity={0.6} />
+        <meshStandardMaterial color="#ec4899" emissive="#ec4899" emissiveIntensity={1.2} transparent opacity={0.6} />
       </mesh>
-      <pointLight color="#ec4899" intensity={0.5 * (conect.intensity || 1)} distance={10} />
+      {/* pointLight removido por defeito — ativar com conect.emitLight */}
+      {conect.emitLight && <pointLight color="#ec4899" intensity={0.5 * (conect.intensity || 1)} distance={10} />}
     </group>
   )
 }
@@ -1207,7 +1209,8 @@ function BloomMesh({ conect, setMeshRef }) {
         <sphereGeometry args={[1.3, 16, 16]} />
         <meshBasicMaterial color="#fbbf24" transparent opacity={0.15 * intensity} depthWrite={false} />
       </mesh>
-      <pointLight color="#fff7d6" intensity={2 * intensity} distance={15} />
+      {/* pointLight removido — gizmo visual basta; poupa 1 luz dinâmica */}
+      {conect.emitLight && <pointLight color="#fff7d6" intensity={2 * intensity} distance={15} />}
     </group>
   )
 }
@@ -1273,10 +1276,11 @@ function ArrowMarkerMesh({ conect, setMeshRef }) {
         {/* Ponta */}
         <mesh position={[0, length + 0.15, 0]}>
           <coneGeometry args={[0.18, 0.35, 8]} />
-          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.5} />
+          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.0} />
         </mesh>
       </group>
-      <pointLight color={color} intensity={1} distance={3} />
+      {/* pointLight removido — emissive compensa */}
+      {conect.emitLight && <pointLight color={color} intensity={1} distance={3} />}
     </group>
   )
 }
@@ -1296,13 +1300,14 @@ function PointMarkerMesh({ conect, setMeshRef }) {
     <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
       <mesh ref={ref}>
         <sphereGeometry args={[size, 16, 16]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.7} />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.4} />
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[size * 1.4, size * 1.6, 24]} />
         <meshBasicMaterial color={color} transparent opacity={0.5} side={THREE.DoubleSide} />
       </mesh>
-      <pointLight color={color} intensity={0.8} distance={2} />
+      {/* pointLight removido — emissive compensa */}
+      {conect.emitLight && <pointLight color={color} intensity={0.8} distance={2} />}
     </group>
   )
 }

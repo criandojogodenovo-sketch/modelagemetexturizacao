@@ -437,7 +437,7 @@ const project = {
     flirAdaptiveMesh: false,
     shadowOptimizations: true,
     shadowDistance: 30,
-    shadowMapSize: 2048,
+    shadowMapSize: 1024,
     vertexAO: true,
     pom: false,
     postProcessing: true,
