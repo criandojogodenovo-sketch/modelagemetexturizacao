@@ -369,6 +369,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
 
   // Setup quando o modo jogo é activado
   useEffect(() => {
+    console.log('[GameMode] useEffect setup - isGameMode:', isGameMode, 'setupScene:', !!setupScene, 'conects:', setupScene?.conects?.length)
     if (!isGameMode || !setupScene) return
     gameStartedRef.current = true
 
@@ -1042,6 +1043,13 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     if (!isGameMode) return
 
     try {
+    // Log inicial para confirmar que o useFrame está a executar
+    if (!window._flirFrameCount) window._flirFrameCount = 0
+    window._flirFrameCount++
+    if (window._flirFrameCount <= 3) {
+      console.log('[GameMode] useFrame #' + window._flirFrameCount + ' - physicsRef:', !!physicsRef.current, 'setupScene:', !!setupScene)
+    }
+
     // Física
     if (physicsRef.current) {
       physicsRef.current.update(delta)
