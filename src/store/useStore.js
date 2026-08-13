@@ -1470,6 +1470,9 @@ export const useStore = create(
 
       perfStatsVisible: false,
       togglePerfStats: () => set((s) => ({ perfStatsVisible: !s.perfStatsVisible })),
+      // Performance Core — métricas em runtime (actualizadas pelo usePerformanceTracker)
+      perfStats: null,
+      setPerfStats: (stats) => set({ perfStats: stats }),
 
       postProcessingOpen: false,
       openPostProcessing: () => set({ postProcessingOpen: true }),

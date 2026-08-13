@@ -35,6 +35,13 @@ import { createAnimationPlayer } from '../../utils/animationPlayer'
 import { clearPoseCache } from '../../utils/sharedAnimationCache'
 import { createNPCAI } from '../../utils/conects/npcAI'
 import { debugLog } from '../../utils/debug/debugStore'
+import usePerformanceTracker from '../../hooks/usePerformanceTracker'
+
+// Componente wrapper que chama o hook dentro do Canvas
+function PerformanceTracker() {
+  usePerformanceTracker()
+  return null
+}
 
 function PlayerMarker({ position }) {
   return (
@@ -1517,6 +1524,8 @@ export default function SceneLevel3D() {
         <Suspense fallback={null}>
           <SceneBackgroundSolid background={background} />
           <FogApplier conects={activeScene?.conects} />
+          <PerformanceTracker />
+
 
           <ambientLight intensity={lights.ambient.intensity} color={lights.ambient.color} />
           <directionalLight
