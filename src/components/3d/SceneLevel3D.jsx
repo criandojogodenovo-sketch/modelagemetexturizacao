@@ -1041,6 +1041,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   useFrame((_, delta) => {
     if (!isGameMode) return
 
+    try {
     // Física
     if (physicsRef.current) {
       physicsRef.current.update(delta)
@@ -1262,6 +1263,10 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           groupMesh.userData._grouped = true
         }
       }
+    }
+    } catch (err) {
+      console.error('[GameMode useFrame] Erro:', err)
+      // Não relançar — deixa o R3F continuar a renderizar
     }
   })
 
