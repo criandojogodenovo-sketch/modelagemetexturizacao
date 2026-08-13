@@ -237,7 +237,7 @@ for (let i = 0; i < wallSpecs.length; i++) {
 
 // Jogador
 const playerId = uid()
-const player1Y = sampleTerrainHeight(villageTerrain, SEG, 0, 0, 80, 80, 5) + 2
+const player1Y = Math.max(2, sampleTerrainHeight(villageTerrain, SEG, 0, 0, 80, 80, 5) + 2)
 scene1Conects.push({
   instanceId: playerId, type: 'PersonalObject', name: 'Jogador',
   position: [0, player1Y, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
@@ -483,7 +483,7 @@ for (let i = 0; i < 8; i++) {
 
 // Jogador (mesma config)
 const player2Id = uid()
-const player2Y = sampleTerrainHeight(forestTerrain, SEG, 0, 0, 80, 80, 8) + 3  // +3m por terreno montanhoso
+const player2Y = Math.max(3, sampleTerrainHeight(forestTerrain, SEG, 0, 0, 80, 80, 8) + 3)
 scene2Conects.push({
   instanceId: player2Id, type: 'PersonalObject', name: 'JogadorF',
   position: [0, player2Y, 0], rotation: [0, 0, 0], scale: [1, 1, 1],

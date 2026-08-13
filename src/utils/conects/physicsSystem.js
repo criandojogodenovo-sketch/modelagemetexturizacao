@@ -170,6 +170,19 @@ export function createPhysicsSystem(options = {}) {
     if (conect.type === 'StaticObject') {
       body.type = CANNON.Body.STATIC
       body.mass = 0
+    } else if (conect.type === 'TerrainObject') {
+      // TerrainObject: criar um PLANO de chão em y=0 em vez de uma box gigante
+      // O plano é estático e infinito — impede o jogador de cair infinitamente
+      body.type = CANNON.Body.STATIC
+      body.mass = 0
+      // Remover a shape original (box) e adicionar um plano
+      body.shapes = []
+      const planeShape = new CANNON.Plane()
+      body.addShape(planeShape)
+      // O plano aponta para +Z por defeito — rodar para apontar para +Y (chão)
+      body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2)
+      // Posição em y=0 (nível do chão)
+      body.position.set(conect.position?.[0] || 0, conect.position?.[1] || 0, conect.position?.[2] || 0)
     } else if (conect.type === 'StopObject') {
       // Kinematic: movido por código, não por física
       body.type = CANNON.Body.KINEMATIC

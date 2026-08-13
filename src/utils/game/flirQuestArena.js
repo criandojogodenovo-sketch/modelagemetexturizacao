@@ -203,7 +203,8 @@ for (let i = 0; i < wallSpecs.length; i++) {
 
 // Jogador (PersonalObject) — no centro, posicionado ACIMA do terreno
 const playerId = uid()
-const playerY = sampleTerrainHeight(heightmap, SEG, 0, 0, 60, 60, 5) + 2  // +2m acima do terreno
+const terrainHeight = sampleTerrainHeight(heightmap, SEG, 0, 0, 60, 60, 5)
+const playerY = Math.max(2, terrainHeight + 2)  // garantir que está acima de y=0 (plano de chão)
 conects.push({
   instanceId: playerId,
   type: 'PersonalObject',
