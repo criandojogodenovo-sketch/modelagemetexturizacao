@@ -1,9 +1,3 @@
 {
-  "version": 2,
-  "functions": {
-    "api/marketplace/**/*.cjs": {
-      "memory": 256,
-      "maxDuration": 10
-    }
-  }
+  "version": 2
 }
