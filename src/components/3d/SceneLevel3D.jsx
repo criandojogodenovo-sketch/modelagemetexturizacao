@@ -280,6 +280,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   const collisionEventsRef = useRef(new Map()) // instanceId → Set de otherIds em contacto
   const checkpointRef = useRef(null) // último checkpoint registado
   const skyRef = useRef(null) // referência ao SkyObject ativo
+  const sceneSnapshotRef = useRef(null) // snapshot do scene antes de Play Mode
 
   // Expor meshRefs globalmente para TrailObject poder seguir objetos
   useEffect(() => {
@@ -370,6 +371,14 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   useEffect(() => {
     if (!isGameMode || !setupScene) return
     gameStartedRef.current = true
+
+    // Snapshot do scene antes de Play Mode — permite restaurar ao sair
+    // Previne que mutações do runtime (física, spawns, item pickup, group attach)
+    // contaminem o estado do editor
+    sceneSnapshotRef.current = JSON.parse(JSON.stringify({
+      objects: setupScene.objects,
+      conects: setupScene.conects,
+    }))
 
     debugLog('Jogo iniciado', 'log', 'Game')
 
@@ -1037,6 +1046,18 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       window._flirGameContext = null
+      window._flirInventory = null
+      window._flirCameraRotation = null
+      window._flirKeys = null
+      window._flirCrosshair = false
+      // Restaurar scene do snapshot (previne contaminação do editor)
+      if (sceneSnapshotRef.current && setupScene) {
+        setupScene.objects = sceneSnapshotRef.current.objects
+        setupScene.conects = sceneSnapshotRef.current.conects
+        sceneSnapshotRef.current = null
+        // Forçar re-render do store para os componentes reflectirem o estado restaurado
+        useStore.setState({ scenes: [...useStore.getState().scenes] })
+      }
       gameStartedRef.current = false
     }
   }, [isGameMode, setupScene])
@@ -1219,8 +1240,8 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     if (activeView) {
       const targetFov = activeView.fov || activeScene.gameCamera?.fov || 60
       const targetNear = activeView.near || activeScene.gameCamera?.near || 0.1
-      const targetFar = activeView.far || activeScene.gameCamera?.far || 200
-      if (camera.fov !== targetFov) {
+      const targetFar = activeView.far || activeScene.gameCamera?.far || DEFAULT_CAMERA_FAR
+      if (camera.fov !== targetFov || camera.far !== targetFar || camera.near !== targetNear) {
         camera.fov = targetFov; camera.near = targetNear; camera.far = targetFar
         camera.updateProjectionMatrix()
       }
@@ -1280,8 +1301,8 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       const gc = activeScene.gameCamera
       const targetFov = gc.fov || 60
       const targetNear = gc.near || 0.1
-      const targetFar = gc.far || 200
-      if (camera.fov !== targetFov) {
+      const targetFar = gc.far || DEFAULT_CAMERA_FAR
+      if (camera.fov !== targetFov || camera.far !== targetFar || camera.near !== targetNear) {
         camera.fov = targetFov; camera.near = targetNear; camera.far = targetFar
         camera.updateProjectionMatrix()
       }
@@ -1478,7 +1499,7 @@ export default function SceneLevel3D() {
 
           {/* OrbitControls — só no editor */}
           {!isGameMode && (
-            <OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.08} minDistance={1} maxDistance={100} maxPolarAngle={Math.PI * 0.495}
+            <OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.08} minDistance={0.5} maxDistance={Infinity} maxPolarAngle={Math.PI}
               touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
               enabled={!isTerrainSculptDragging}
             />

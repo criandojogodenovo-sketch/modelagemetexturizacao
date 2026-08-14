@@ -226,23 +226,24 @@ export function createPhysicsSystem(options = {}) {
     }
 
     // Eventos de colisão do cannon
-    body.addEventListener('collide', (e) => {
+    const collideHandler = (e) => {
       const otherBody = e.body
-      // Encontrar o instanceId do outro corpo
       const otherEntry = [...bodies.entries()].find(([, v]) => v.body === otherBody)
       if (!otherEntry) return
       const [otherId] = otherEntry
       const pairKey = `${conect.instanceId}:${otherId}`
       if (collisionPairs.has(pairKey)) return
       collisionPairs.add(pairKey)
-      // Limpar a chave após um tempo curto para permitir nova emissão
       setTimeout(() => collisionPairs.delete(pairKey), 100)
 
       emit('onCollision', {
         instanceId: conect.instanceId,
         otherInstanceId: otherId,
       })
-    })
+    }
+    body.addEventListener('collide', collideHandler)
+    // Guardar referência para cleanup no dispose
+    entry._collideHandler = collideHandler
 
     return body
   }
@@ -381,6 +382,9 @@ export function createPhysicsSystem(options = {}) {
 
   function dispose() {
     for (const [, entry] of bodies) {
+      if (entry._collideHandler) {
+        entry.body.removeEventListener('collide', entry._collideHandler)
+      }
       world.removeBody(entry.body)
     }
     bodies.clear()

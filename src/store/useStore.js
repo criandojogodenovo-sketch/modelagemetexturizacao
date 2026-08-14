@@ -1592,9 +1592,17 @@ export const useStore = create(
           set({
             objects: scene.objects || [],
             selectedId: null,
-            background: { ...initialScene.background, ...(scene.background || {}) },
-            grid: { ...initialScene.grid, ...(scene.grid || {}) },
-            lights: { ...initialScene.lights, ...(scene.lights || {}) },
+            // Preservar defaults de Modelagem quando o projecto é de Cena
+            // (evita que bg/grid/lights dos demos contaminem o editor de Modelos)
+            background: data.appMode === 'modeling'
+              ? { ...initialScene.background, ...(scene.background || {}) }
+              : initialScene.background,
+            grid: data.appMode === 'modeling'
+              ? { ...initialScene.grid, ...(scene.grid || {}) }
+              : { ...initialScene.grid, visible: true },
+            lights: data.appMode === 'modeling'
+              ? { ...initialScene.lights, ...(scene.lights || {}) }
+              : initialScene.lights,
             scenes: data.scenes || [],
             activeSceneId: data.activeSceneId || (data.scenes && data.scenes[0]?.id) || null,
             appMode: data.appMode || (data.scenes && data.scenes.length > 0 ? 'scene' : 'modeling'),
