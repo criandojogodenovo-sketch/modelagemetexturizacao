@@ -613,3 +613,31 @@ Stage Summary:
 - RaycastSystem.restore() no cleanup garante Bug #4 safe
 - Performance Core Fase 3.6 (Spatial Partitioning) NÃO iniciada
 - Push: NÃO realizado (aguardando Fase 3.8)
+
+---
+Task ID: PERF-3.6
+Agent: main
+Task: Performance Core Fase 3.6 — Spatial Partitioning/Octree + BVH dep fix
+
+Work Log:
+- FIX BUG: three-mesh-bvh v0.8.3 estava em node_modules mas NÃO no package.json. Adicionado ao package.json e package-lock.json. Validação: rm node_modules/three-mesh-bvh + npm install reinstala corretamente. Build passa após instalação limpa.
+- AUDIT: Hotspots espaciais identificados — physicsSystem.js trigger check O(triggers × bodies) por frame (hotspot E2), SceneLevel3D loop O(conects) com distanceTo (não justifica Octree)
+- PLAN: SpatialPartitionSystem singleton (Octree simples) + FlirScriptAPI.Spatial + integração physicsSystem
+- IMPLEMENT: src/utils/spatialPartitionSystem.js (Octree com células "x,y,z", insert/update/remove, querySphere/queryBox, zero allocations em queries, restore Bug #4 safe)
+- IMPLEMENT: flirScriptAPI.js adiciona Spatial namespace (querySphere, queryBox, getStats, getCellSize, getObjectCount). Versão 1.0.0-phase3.6
+- IMPLEMENT: physicsSystem.js integra SpatialPartitionSystem — addConect/removeConect registam bodies, update() atualiza posições, trigger check usa querySphere (O(triggers × candidates) em vez de O(triggers × bodies)), dispose() limpa spatial system
+- BUILD: ✓ 0 erros, 1.54s
+- DIFF CHECK: ✓ sem erros whitespace, 5 arquivos (+435/-4)
+- REGRESSÃO: Bugs #1-#7 intactos (todos os refs preservados via grep, collisionEventsRef.current.clear() preservado)
+- Nenhum setTimeout/setInterval/requestAnimationFrame introduzido
+- Nenhum eval()/new Function() introduzido
+- COMMIT: a4a48ac "Performance Core 3.6 - Spatial Partitioning + BVH dep fix"
+
+Stage Summary:
+- Dependência three-mesh-bvh corrigida (declarada explicitamente no package.json)
+- SpatialPartitionSystem (Octree) implementado com queries eficientes
+- Trigger check do physicsSystem otimizado: O(triggers × bodies) → O(triggers × candidates)
+- FlirScriptAPI.Spatial criada com 5 métodos (querySphere, queryBox, getStats, getCellSize, getObjectCount)
+- SpatialPartitionSystem.restore() no dispose garante Bug #4 safe
+- Performance Core Fase 3.7 (Streaming) NÃO iniciada
+- Push: NÃO realizado (aguardando Fase 3.8)
