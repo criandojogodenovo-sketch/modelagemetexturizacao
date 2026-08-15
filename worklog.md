@@ -429,3 +429,29 @@ Stage Summary:
 - Build: ✓ (2605 KiB)
 - Honestidade: Sky procedural precisa de ajuste de tone mapping (fica branco)
 - AreaObject (RectAreaLight) é mais pesada — evitar mais de 2-3 em simultâneo
+
+---
+Task ID: AUDIT-f3d3406
+Agent: main
+Task: Auditoria pós-fix do commit f3d3406 — validar 5 correções, procurar regressões, NÃO iniciar Performance Core Fase 3
+
+Work Log:
+- Verificado estado git: f3d3406 existe localmente, 1 commit à frente de origin/main, working tree limpa
+- Lido diff completo do commit (3 arquivos: SceneLevel3D.jsx, useStore.js, physicsSystem.js)
+- Bug #1 (Navegação Cena): Confirmado fix — OrbitControls em SceneLevel3D alinhado com Scene3D (minDistance=0.5, maxDistance=Infinity, maxPolarAngle=π). Busca por clamps/bounds adicionais não encontrou restrições residuais
+- Bug #2 (Modelos escuro): Confirmado fix em loadProjectJSON — quando appMode='scene', preserva initialScene.background/grid/lights em vez de fazer merge com dados do demo
+- Bug #3 (Câmara escura Play): Fix parcial — DEFAULT_CAMERA_FAR=2000 aplicado nos 2 fallbacks do GameMode.useFrame + condição agora verifica fov||far||near. MAS: templates FPS/RPG têm ViewObject.far=200 e gameCamera.far=200 explícitos, pelo que o fallback NÃO é usado. 200 unidades é suficiente para cena típica, mas se bug persistir, causa real é outra (tone mapping, lights, sky)
+- Bug #4 (Terreno alterado após Stop): Fix INEFFECTIVO — snapshot/restore muta `setupScene` (activeSceneRef.current) que aponta para OLD object reference. Store updates criam NEW scene object, deixando OLD sem efeito. Mutações directas em mesh.visible (ItemObject pickup) e mesh.parent (GroupObject attach) persistem porque R3F não re-aplica props não-alteradas em JSX. JSON snapshot não captura refs Three.js
+- Bug #5 (Física cleanup): Confirmado fix em dispose() — handler removido antes de world.removeBody. Nota: removeConect() NÃO remove handler, mas função nunca é chamada (leak teórico, sem impacto prático)
+- Bugs escondidos H1/H2/H3: Confirmados existentes (TerrainSculpt3D heightScale/terrainWidth hardcoded; SkyMesh cleanup não restaura scene.background para procedural/hdri/solid; SkyMesh vs SceneBackgroundSolid competem). Fora do scope actual
+- Build executado: ✓ 0 erros, 1.92s. Warnings pré-existentes: eval em litegraph.js, chunk >2000kB, 5 INEFFECTIVE_DYNAMIC_IMPORT
+- Auditoria final: commit não introduz allocations por frame, nem setTimeout/RAF/listeners adicionais para além do addEventListener('collide') que é limpo no dispose()
+
+Stage Summary:
+- 3 fixes VÁLIDOS: Bug #1, #2, #5
+- 1 fix PARCIAL: Bug #3 (corrigiu fallback mas templates têm far=200 explícito)
+- 1 fix INEFFECTIVO: Bug #4 (snapshot/restore muta objecto obsoleto, sem efeito no store)
+- 0 regressões introduzidas por f3d3406
+- Build passa com 0 erros
+- Working tree limpa, 1 commit local (f3d3406) não pushed (autenticação pendente)
+- Performance Core Fase 3 permanece PAUSADO
