@@ -581,3 +581,35 @@ Stage Summary:
 - gameContext.api exposto para FlirCode acessar via script
 - Performance Core Fase 3.5 (BVH) NÃO iniciada
 - Push: NÃO realizado (aguardando Fase 3.8)
+
+---
+Task ID: PERF-3.5
+Agent: main
+Task: Performance Core Fase 3.5 — BVH Raycast System + FlirScriptAPI.Raycast
+
+Work Log:
+- AUDIT: 6 sites de raycast identificados (Scene3D SculptRaycaster, SceneLevel3D WeaponObject.shoot, TerrainSculpt3D, gameRuntime.shoot, meshOperations.findClosestFace, vertexAO). three-mesh-bvh 0.8.3 já instalado em node_modules
+- PLAN: RaycastSystem singleton com BVH + fallback automático + FlirScriptAPI.Raycast namespace
+- IMPLEMENT: src/utils/raycastSystem.js (RaycastSystem com three-mesh-bvh, thresholds <500/5000, dirty flags, stats, restore Bug #4 safe, getters públicos)
+- IMPLEMENT: src/hooks/useRaycastSystem.js (lifecycle hook com restore no cleanup)
+- IMPLEMENT: src/components/3d/RaycastManager.jsx (wrapper component)
+- IMPLEMENT: flirScriptAPI.js adiciona Raycast namespace (isSupported, getStats, hasBVH, getRegisteredCount, cast). Versão 1.0.0-phase3.5
+- IMPLEMENT: TerrainSculpt3D integra RaycastSystem (regista terreno, markDirty após escultura, raycast via sistema)
+- IMPLEMENT: SceneLevel3D WeaponObject.shoot usa RaycastSystem.raycast (retorna objectId/distance/point/normal)
+- IMPLEMENT: Scene3D SculptRaycaster usa RaycastSystem.intersectMesh
+- IMPLEMENT: <RaycastManager enabled={isGameMode}> no Canvas
+- BUILD: ✓ 0 erros, 1.51s
+- DIFF CHECK: ✓ sem erros whitespace, 7 arquivos (+587/-9)
+- REGRESSÃO: Bugs #1-#7 intactos (todos os refs preservados via grep)
+- Nenhum setTimeout/setInterval/requestAnimationFrame introduzido
+- Nenhum eval()/new Function() introduzido
+- COMMIT: ede8998 "Performance Core 3.5 - BVH Raycast System"
+
+Stage Summary:
+- BVH Raycast System implementado com three-mesh-bvh (acelera raycasting em geometrias complexas)
+- Fallback automático para THREE.Raycaster quando BVH não aplicável
+- FlirScriptAPI.Raycast criada com 5 métodos (cast retorna dados serializáveis)
+- 3 sites integrados: TerrainSculpt3D, WeaponObject.shoot, SculptRaycaster
+- RaycastSystem.restore() no cleanup garante Bug #4 safe
+- Performance Core Fase 3.6 (Spatial Partitioning) NÃO iniciada
+- Push: NÃO realizado (aguardando Fase 3.8)
