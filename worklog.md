@@ -551,3 +551,33 @@ Stage Summary:
 - FlirScript-friendly: CullingManager singleton acessível via import
 - Performance Core Fase 3.4 (LOD) NÃO iniciada
 - Push: NÃO realizado (aguardando autorização)
+
+---
+Task ID: PERF-3.4
+Agent: main
+Task: Performance Core Fase 3.4 — LOD System + FlirScript API Foundation
+
+Work Log:
+- AUDIT: FlirScript existente (executor.js com LiteGraph, flircode.js com parser próprio, gameContext bridge em SceneLevel3D). LODManager class existe em performanceOptimizer.js mas NÃO integrada. Não há SkinnedMesh direto — animações via createAnimationPlayer (keyframe-based)
+- AUDIT: Modelos importados (FBX/GLB) armazenam obj.bufferGeometry, obj.skeleton, obj.animations
+- PLAN: LODSystem singleton + FlirScriptAPI com namespaces + LODManager component
+- IMPLEMENT: src/utils/lodSystem.js (LODSystem com THREE.LOD, thresholds <1000/1000-10000/>10000, distâncias por qualityLevel, NÃO aplica em SkinnedMesh/customGeometry, evento lodChanged, restore Bug #4 safe)
+- IMPLEMENT: src/utils/flirscript/flirScriptAPI.js (API oficial com 5 namespaces: LOD, Performance, Culling, Object, Events. Fronteira controlada — não expõe Three.js/Zustand/React. Versão 1.0.0-phase3.4)
+- IMPLEMENT: src/hooks/useLOD.js (integra useFrame, sincroniza qualityLevel via AdaptiveQuality, cleanup restore)
+- IMPLEMENT: src/components/3d/LODManager.jsx (wrapper component)
+- IMPLEMENT: SceneObject.jsx regista mesh no LODSystem via import dinâmico (evita cycle), calcula triCount, detecta isAnimated/isCustomGeometry, desregistra no cleanup
+- IMPLEMENT: SceneLevel3D.jsx adiciona <LODManager> em Play Mode + expõe FlirScriptAPI no gameContext.api
+- BUILD: ✓ 0 erros, 1.97s
+- DIFF CHECK: ✓ sem erros whitespace, 6 arquivos (+824 linhas)
+- REGRESSÃO: Bugs #1-#7 intactos (todos os refs preservados via grep)
+- Nenhum setTimeout/setInterval/requestAnimationFrame introduzido
+- COMMIT: 6a05f80 "Performance Core 3.4 - LOD and FlirScript API Foundation"
+
+Stage Summary:
+- LOD System implementado com THREE.LOD (3 níveis: full/50%/25%)
+- Thresholds seguros: não aplica LOD em SkinnedMesh/customGeometry
+- FlirScript API oficial criada com 5 namespaces e ~20 métodos
+- Event lodChanged emitido quando nível muda (payload seguro: só IDs e números)
+- gameContext.api exposto para FlirCode acessar via script
+- Performance Core Fase 3.5 (BVH) NÃO iniciada
+- Push: NÃO realizado (aguardando Fase 3.8)
