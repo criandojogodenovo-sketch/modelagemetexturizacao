@@ -280,7 +280,18 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   const collisionEventsRef = useRef(new Map()) // instanceId → Set de otherIds em contacto
   const checkpointRef = useRef(null) // último checkpoint registado
   const skyRef = useRef(null) // referência ao SkyObject ativo
-  const sceneSnapshotRef = useRef(null) // snapshot do scene antes de Play Mode
+  // Bug #4: snapshot de TODAS as scenes antes de Play (portal transitions podem
+  // modificar outras scenes via spawnObject/addObjectToScene). JSON.parse cria
+  // novas referências → R3F detecta mudança e re-aplica props ao restaurar.
+  const sceneSnapshotRef = useRef(null)
+  // Bug #4: parent original de cada mesh — GroupObject.attach() reposiciona meshes
+  // imperativamente; R3F não desfaz reparenting. Guardar para restaurar no Stop.
+  const meshParentsRef = useRef(new Map())
+  // Bug #6: IDs de setTimeout de portal pendentes — devem ser cancelados no Stop.
+  const portalTimeoutsRef = useRef(new Set())
+  // Bug #6: ID de sessão Runtime — incrementado a cada Play/Stop. Callbacks
+  // tardios comparam com o ID capturado e abortam se a sessão mudou.
+  const runtimeSessionRef = useRef(0)
 
   // Expor meshRefs globalmente para TrailObject poder seguir objetos
   useEffect(() => {
@@ -372,13 +383,36 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     if (!isGameMode || !setupScene) return
     gameStartedRef.current = true
 
-    // Snapshot do scene antes de Play Mode — permite restaurar ao sair
-    // Previne que mutações do runtime (física, spawns, item pickup, group attach)
-    // contaminem o estado do editor
-    sceneSnapshotRef.current = JSON.parse(JSON.stringify({
-      objects: setupScene.objects,
-      conects: setupScene.conects,
-    }))
+    // Bug #4: Snapshot de TODAS as scenes antes de Play Mode.
+    // Cada scene é capturada com id + objects + conects (deep clone via JSON).
+    // JSON.parse cria novas referências para todos os objetos aninhados, então
+    // ao restaurar, selectors Zustand e R3F detectam mudanças e re-aplicam props.
+    // Isto previne que mutações do runtime (física, spawns, item pickup, group
+    // attach) contaminem o estado persistente do editor.
+    // Inclui activeSceneId — portal transitions e changeScene mudam a cena ativa
+    // durante Play; deve ser restaurada ao sair.
+    sceneSnapshotRef.current = {
+      scenes: JSON.parse(JSON.stringify(
+        useStore.getState().scenes.map(sc => ({
+          id: sc.id,
+          objects: sc.objects || [],
+          conects: sc.conects || [],
+        }))
+      )),
+      originalActiveSceneId: useStore.getState().activeSceneId,
+    }
+    // Bug #4: Snapshot dos parents originais de cada mesh. GroupObject.attach()
+    // reposiciona meshes imperativamente durante Runtime; R3F não rastreia nem
+    // desfaz este reparenting. Guardamos o parent original para restaurar no Stop.
+    meshParentsRef.current = new Map()
+    for (const [, mesh] of conectMeshRefs.current) {
+      if (mesh && mesh.parent) meshParentsRef.current.set(mesh, mesh.parent)
+    }
+    for (const [, mesh] of meshRefs.current) {
+      if (mesh && mesh.parent) meshParentsRef.current.set(mesh, mesh.parent)
+    }
+    // Bug #6: Nova sessão Runtime — invalida callbacks tardios de sessões anteriores.
+    runtimeSessionRef.current += 1
 
     debugLog('Jogo iniciado', 'log', 'Game')
 
@@ -1050,13 +1084,77 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       window._flirCameraRotation = null
       window._flirKeys = null
       window._flirCrosshair = false
-      // Restaurar scene do snapshot (previne contaminação do editor)
-      if (sceneSnapshotRef.current && setupScene) {
-        setupScene.objects = sceneSnapshotRef.current.objects
-        setupScene.conects = sceneSnapshotRef.current.conects
+
+      // Bug #6: Cancelar TODOS os timeouts de portal pendentes.
+      // Mesmo que o callback tenha proteção via runtimeSessionRef, o clearTimeout
+      // evita execução desnecessária e liberta recursos.
+      for (const tId of portalTimeoutsRef.current) clearTimeout(tId)
+      portalTimeoutsRef.current.clear()
+      // Bug #6: Incrementar sessão Runtime — callbacks tardios de sessões
+      // anteriores tornam-se no-op ao comparar runtimeSessionRef.current.
+      runtimeSessionRef.current += 1
+
+      // Bug #4: Restaurar parents originais dos meshes.
+      // GroupObject.attach() reposiciona meshes imperativamente; R3F não desfaz
+      // reparenting. Fazê-lo ANTES de restaurar o store para que a próxima
+      // renderização R3F encontre os meshes nos parents esperados e re-aplique
+      // position/rotation/scale corretamente.
+      for (const [mesh, originalParent] of meshParentsRef.current) {
+        if (mesh && originalParent && mesh.parent !== originalParent) {
+          originalParent.attach(mesh)
+        }
+      }
+      meshParentsRef.current.clear()
+      // Bug #4: Limpar flag _grouped que GroupObject define no userData do group.
+      // Sem isto, GroupObject não re-anexa filhos no próximo Play (linha 1176
+      // verifica !groupMesh.userData._grouped).
+      for (const [, mesh] of conectMeshRefs.current) {
+        if (mesh && mesh.userData && mesh.userData._grouped) {
+          delete mesh.userData._grouped
+        }
+      }
+
+      // Bug #4: Restaurar mesh.visible manualmente.
+      // destroyObject (linha 422) e ItemObject pickup (linha 1153) mutam
+      // mesh.visible = false diretamente. Após restaurar o store, R3F vê
+      // visible={conect.visible !== false} = visible={true} — mesmo valor boolean
+      // que antes do Play — e NÃO re-aplica. É necessário restaurar manualmente.
+      if (sceneSnapshotRef.current) {
+        for (const snap of sceneSnapshotRef.current.scenes) {
+          for (const conect of snap.conects || []) {
+            const mesh = conectMeshRefs.current.get(conect.instanceId)
+            if (mesh) mesh.visible = (conect.visible !== false)
+          }
+          for (const obj of snap.objects || []) {
+            const mesh = meshRefs.current.get(obj.instanceId)
+            if (mesh) mesh.visible = (obj.visible !== false)
+          }
+        }
+      }
+
+      // Bug #4: Restaurar TODAS as scenes do snapshot no store.
+      // Substituir cada scene por NOVA referência com objects/conects do snapshot.
+      // JSON.parse no snapshot já criou novas referências para todos os objetos
+      // aninhados, então selectors Zustand e R3F detectam mudanças e re-aplicam
+      // props (position, rotation, scale) em todos os meshes.
+      // Isto também remove spawned objects (suas instâncias não estão no snapshot,
+      // então R3F desmonta os meshes correspondentes).
+      // Restaura também activeSceneId — portal transitions podem tê-lo mudado.
+      if (sceneSnapshotRef.current) {
+        const snapshots = sceneSnapshotRef.current.scenes
+        const currentScenes = useStore.getState().scenes
+        const restoredScenes = currentScenes.map(sc => {
+          const snap = snapshots.find(s => s.id === sc.id)
+          if (snap) {
+            return { ...sc, objects: snap.objects, conects: snap.conects }
+          }
+          return sc
+        })
+        useStore.setState({
+          scenes: restoredScenes,
+          activeSceneId: sceneSnapshotRef.current.originalActiveSceneId,
+        })
         sceneSnapshotRef.current = null
-        // Forçar re-render do store para os componentes reflectirem o estado restaurado
-        useStore.setState({ scenes: [...useStore.getState().scenes] })
       }
       gameStartedRef.current = false
     }
@@ -1136,10 +1234,18 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           if (dist <= (conect.triggerRadius || 2)) {
             debugLog(`Portal ativado! A mudar para cena ${conect.targetSceneId}`, 'log', 'Navigator')
             useStore.getState().closeScenePreview()
-            setTimeout(() => {
+            // Bug #6: Guardar timeout ID + capturar sessão Runtime atual.
+            // No callback, verificar se a sessão ainda é a mesma antes de executar —
+            // se o utilizador clicou Stop, a sessão mudou e o callback aborta.
+            const portalSession = runtimeSessionRef.current
+            const portalTimeoutId = setTimeout(() => {
+              // Proteção contra callback tardio: abortar se a sessão Runtime mudou
+              if (runtimeSessionRef.current !== portalSession) return
+              portalTimeoutsRef.current.delete(portalTimeoutId)
               useStore.getState().setActiveScene(conect.targetSceneId)
               useStore.getState().openScenePreview()
             }, (conect.transitionDuration || 0.5) * 1000)
+            portalTimeoutsRef.current.add(portalTimeoutId)
           }
         }
       } else if (conect.type === 'ItemObject' && conect.autoPickup !== false && playerMesh) {
