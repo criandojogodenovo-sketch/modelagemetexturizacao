@@ -455,3 +455,37 @@ Stage Summary:
 - Build passa com 0 erros
 - Working tree limpa, 1 commit local (f3d3406) não pushed (autenticação pendente)
 - Performance Core Fase 3 permanece PAUSADO
+
+---
+Task ID: FIX-BUG4-BUG6
+Agent: main
+Task: Correção cirúrgica Bug #4 (Editor/Runtime isolation) e Bug #6 (Portal transition leak)
+
+Work Log:
+- Bug #4 causa raiz confirmada: setupScene = activeSceneRef.current é referência capturada no início do Play; durante Play, store substitui scenes por novas referências, tornando setupScene obsoleto. Mutar setupScene.objects não afecta store. Adicionalmente, mutações directas em meshes Three.js (visible, position, parent) persistem porque R3F não re-aplica props idênticas nem desfaz reparenting imperativo.
+- Bug #4 fix implementado:
+  * Snapshot deep-clone (JSON) de TODAS as scenes + activeSceneId antes de Play
+  * Snapshot dos parents originais de cada mesh (meshParentsRef)
+  * Cleanup: restaurar parents via originalParent.attach(mesh)
+  * Cleanup: limpar flag _grouped do userData (GroupObject)
+  * Cleanup: restaurar mesh.visible manualmente do snapshot
+  * Cleanup: substituir TODAS as scenes no store via useStore.setState com novas referências → R3F re-aplica position/rotation/scale em todos os meshes
+  * Spawned objects removidos automaticamente (instâncias não estão no snapshot, R3F desmonta meshes)
+- Bug #6 causa raiz confirmada: setTimeout em NavigatorObject handler (linha 1139 original) não era cancelado no cleanup
+- Bug #6 fix implementado:
+  * portalTimeoutsRef (Set) guarda IDs de todos os timeouts de portal
+  * runtimeSessionRef incrementado a cada Play/Stop
+  * Callback verifica runtimeSessionRef.current === portalSession antes de executar — aborta se sessão mudou
+  * Cleanup faz clearTimeout de todos os pendentes + incrementa sessão (dupla proteção)
+- Auditoria pós-correção: todos os caminhos de mutação cobertos (destroyObject, setVisible, moveObject, rotateObject, física position/quaternion copy, GroupObject attach, ItemObject pickup visible, spawnObject)
+- Build: ✓ 0 erros, 1.56s. Warnings pré-existentes (eval, chunk, dynamic imports)
+- Commit: f16171b "Fix Editor Runtime isolation and portal transition cleanup"
+- Working tree: limpa
+- Push: NÃO realizado (autenticação pendente, 2 commits locais: f3d3406 + f16171b)
+
+Stage Summary:
+- Bug #4: CORRIGIDO — isolamento Editor/Runtime implementado via snapshot/restore completo
+- Bug #6: CORRIGIDO — portal timeouts cancelados + session guard contra callbacks tardios
+- 0 regressões introduzidas (apenas 1 arquivo modificado, +121/-15 linhas)
+- Performance Core Fase 3 permanece PAUSADO
+- Validação manual em browser não disponível no ambiente actual
