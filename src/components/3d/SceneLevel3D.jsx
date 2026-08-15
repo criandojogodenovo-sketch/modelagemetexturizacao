@@ -20,6 +20,7 @@ import SceneObject from './SceneObject'
 import ConectRenderer from '../panels/ConectRenderer'
 import TerrainSculpt3D from './TerrainSculpt3D'
 import AdaptiveQuality from './AdaptiveQuality'
+import DistanceCulling from './DistanceCulling'
 import { useStore } from '../../store/useStore'
 import { DEFAULT_CAMERA_FAR } from '../../utils/navigationUtils'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
@@ -1451,6 +1452,17 @@ export default function SceneLevel3D() {
   const addConectToScene = useStore((s) => s.addConectToScene)
   const selectConect = useStore((s) => s.selectConect)
   const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
+
+  // Performance Core 3.3 — Hotspot C1: objectsById Map lookup O(1) em vez de
+  // objects.find() O(N) por cada instância no render. Reconstroi só quando
+  // `objects` muda (useMemo). Reduz 5000+ comparações para 100 lookups.
+  const objectsById = useMemo(() => {
+    const map = new Map()
+    for (const obj of objects || []) {
+      if (obj?.id) map.set(obj.id, obj)
+    }
+    return map
+  }, [objects])
   const renderSettings = useStore((s) => s.renderSettings)
 
   const [selectedInstanceId, setSelectedInstanceId] = useState(null)
@@ -1572,6 +1584,15 @@ export default function SceneLevel3D() {
             originalShadowsEnabled={shadowsEnabled}
           />
 
+          {/* Performance Core 3.3 — Distance Culling para Conects gizmos */}
+          {/* Ativo em ambos os modos (Editor + Play). Respeita selectedInstanceId. */}
+          <DistanceCulling
+            conectMeshRefs={conectMeshRefs}
+            conects={activeScene.conects}
+            enabled={true}
+            selectedInstanceId={selectedInstanceId}
+          />
+
           <ambientLight intensity={lights.ambient.intensity} color={lights.ambient.color} />
           <directionalLight
             intensity={lights.directional.intensity}
@@ -1595,7 +1616,8 @@ export default function SceneLevel3D() {
 
           {/* Objetos do catálogo */}
           {activeScene.objects.map((instance) => {
-            const obj = objects.find((o) => o.id === instance.objectId)
+            // Performance Core 3.3: lookup O(1) via Map em vez de O(N) find
+            const obj = objectsById.get(instance.objectId)
             if (!obj) return null
             const sceneObj = { ...obj, id: instance.instanceId, position: instance.position, rotation: instance.rotation, scale: instance.scale }
             const isSelected = !isGameMode && instance.instanceId === selectedInstanceId
