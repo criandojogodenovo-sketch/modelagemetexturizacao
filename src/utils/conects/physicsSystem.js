@@ -24,6 +24,7 @@
 import * as CANNON from 'cannon-es'
 import * as THREE from 'three'
 import { findConectDefinition } from './taxonomy'
+import { SpatialPartitionSystem } from '../spatialPartitionSystem'
 
 const MAX_PHYSICS_OBJECTS = 50 // limite para performance em mobile
 
@@ -221,6 +222,18 @@ export function createPhysicsSystem(options = {}) {
       previousContacts: new Set(),
     })
 
+    // Performance Core 3.6 — Registar no SpatialPartitionSystem
+    // (apenas corpos não-trigger, para query de triggers os encontrarem)
+    if (!isTrigger) {
+      SpatialPartitionSystem.insert(
+        conect.instanceId,
+        body.position.x,
+        body.position.y,
+        body.position.z,
+        conect.type
+      )
+    }
+
     if (isTrigger) {
       triggers.push(conect.instanceId)
     }
@@ -253,6 +266,8 @@ export function createPhysicsSystem(options = {}) {
     if (!entry) return
     world.removeBody(entry.body)
     bodies.delete(instanceId)
+    // Performance Core 3.6 — Remover do SpatialPartitionSystem
+    SpatialPartitionSystem.remove(instanceId)
     const tIdx = triggers.indexOf(instanceId)
     if (tIdx >= 0) triggers.splice(tIdx, 1)
   }
@@ -333,6 +348,12 @@ export function createPhysicsSystem(options = {}) {
         mesh.quaternion.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w)
       }
 
+      // Performance Core 3.6 — Atualizar posição no SpatialPartitionSystem
+      // (apenas corpos não-trigger, para query de triggers os encontrarem)
+      if (!isTrigger) {
+        SpatialPartitionSystem.update(instanceId, body.position.x, body.position.y, body.position.z)
+      }
+
       // Detetar "grounded" para PersonalObject (raycast para baixo)
       if (type === 'PersonalObject') {
         // Reutilizar objectos pré-alocados (evita 3 allocations por frame)
@@ -345,16 +366,25 @@ export function createPhysicsSystem(options = {}) {
     }
 
     // Verificar triggers (sobreposição com outros corpos)
+    // Performance Core 3.6 — Otimizado com SpatialPartitionSystem
+    // Antes: O(triggers × bodies) por frame
+    // Agora: O(triggers × candidates) onde candidates = bodies na vizinhança do trigger
     for (const triggerId of triggers) {
       const triggerEntry = bodies.get(triggerId)
       if (!triggerEntry) continue
       _triggerContacts.clear()
       const triggerPos = triggerEntry.body.position
       const triggerSize = triggerEntry.conect.size || [2, 2, 2]
-      // Verificar sobreposição com cada corpo
-      for (const [otherId, otherEntry] of bodies) {
+      // Query espacial: encontrar bodies na região do trigger (max dimension)
+      const maxDim = Math.max(triggerSize[0], triggerSize[1], triggerSize[2])
+      const candidates = SpatialPartitionSystem.querySphere(
+        triggerPos.x, triggerPos.y, triggerPos.z, maxDim
+      )
+      // Verificar sobreposição com cada candidato
+      for (const otherId of candidates) {
         if (otherId === triggerId) continue
-        if (otherEntry.isTrigger) continue
+        const otherEntry = bodies.get(otherId)
+        if (!otherEntry || otherEntry.isTrigger) continue
         const otherPos = otherEntry.body.position
         // Verificação simples AABB
         const dx = Math.abs(otherPos.x - triggerPos.x)
@@ -392,6 +422,8 @@ export function createPhysicsSystem(options = {}) {
     eventListeners.onCollision.length = 0
     eventListeners.onTriggerEnter.length = 0
     eventListeners.onTriggerExit.length = 0
+    // Performance Core 3.6 — Limpar SpatialPartitionSystem (Bug #4 safe)
+    SpatialPartitionSystem.restore()
   }
 
   function getStats() {

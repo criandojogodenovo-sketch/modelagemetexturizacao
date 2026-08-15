@@ -45,6 +45,7 @@ import { AdaptiveQuality } from '../adaptiveQuality'
 import { PerformanceBudget } from '../performanceBudget'
 import { PerformanceStats } from '../performanceStats'
 import { RaycastSystem } from '../raycastSystem'
+import { SpatialPartitionSystem } from '../spatialPartitionSystem'
 import * as THREE from 'three'
 
 /**
@@ -385,6 +386,76 @@ const RaycastAPI = {
 }
 
 /**
+ * Spatial API — Spatial Partitioning (Octree) queries.
+ *
+ * Performance Core Fase 3.6.
+ *
+ * Métodos:
+ *  - querySphere(center, radius, options?): string[] — IDs dentro da esfera
+ *  - queryBox(min, max, options?): string[] — IDs dentro da caixa AABB
+ *  - getStats(): object — { objectCount, cellCount, queries, lastQueryResults }
+ *  - getCellSize(): number — tamanho da célula do octree
+ *  - getObjectCount(): number — total de objetos registados
+ *
+ * Retorna apenas arrays de strings (IDs) — NÃO expõe objetos Three.js ou
+ * referências internas da engine.
+ *
+ * @param center: [x, y, z]
+ * @param radius: number
+ * @param options: { filterType?: string }
+ * @returns string[] — IDs dentro da esfera
+ */
+const SpatialAPI = {
+  /**
+   * Query esfera — retorna IDs de objetos dentro da esfera.
+   * @param {[number, number, number]} center — centro [x, y, z]
+   * @param {number} radius — raio
+   * @param {object} options — { filterType?: string }
+   * @returns {string[]} — IDs dentro da esfera
+   */
+  querySphere(center, radius, options = {}) {
+    if (!center || typeof radius !== 'number') return []
+    return SpatialPartitionSystem.querySphere(center[0], center[1], center[2], radius, options)
+  },
+
+  /**
+   * Query caixa AABB — retorna IDs de objetos dentro da caixa.
+   * @param {[number, number, number]} min — canto mínimo [x, y, z]
+   * @param {[number, number, number]} max — canto máximo [x, y, z]
+   * @param {object} options — { filterType?: string }
+   * @returns {string[]} — IDs dentro da caixa
+   */
+  queryBox(min, max, options = {}) {
+    if (!min || !max) return []
+    return SpatialPartitionSystem.queryBox(min[0], min[1], min[2], max[0], max[1], max[2], options)
+  },
+
+  /**
+   * Retorna estatísticas do sistema de spatial partitioning.
+   * @returns {{ objectCount: number, cellCount: number, queries: number, lastQueryResults: number }}
+   */
+  getStats() {
+    return SpatialPartitionSystem.getStats()
+  },
+
+  /**
+   * Retorna o tamanho da célula do octree.
+   * @returns {number}
+   */
+  getCellSize() {
+    return SpatialPartitionSystem.getCellSize()
+  },
+
+  /**
+   * Retorna o número de objetos registados.
+   * @returns {number}
+   */
+  getObjectCount() {
+    return SpatialPartitionSystem.getObjectCount()
+  },
+}
+
+/**
  * FlirScriptAPI — objeto raiz da API oficial do FlirScript.
  *
  * Exportado como singleton. Acessível via import ou via gameContext.api.
@@ -396,12 +467,13 @@ export const FlirScriptAPI = {
   Object: ObjectAPI,
   Events: EventsAPI,
   Raycast: RaycastAPI,
+  Spatial: SpatialAPI,
 
   /**
    * Retorna a versão da API (para compatibilidade futura).
    */
   getVersion() {
-    return '1.0.0-phase3.5'
+    return '1.0.0-phase3.6'
   },
 }
 
