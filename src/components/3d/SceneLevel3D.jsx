@@ -19,6 +19,7 @@ import * as THREE from 'three'
 import SceneObject from './SceneObject'
 import ConectRenderer from '../panels/ConectRenderer'
 import TerrainSculpt3D from './TerrainSculpt3D'
+import AdaptiveQuality from './AdaptiveQuality'
 import { useStore } from '../../store/useStore'
 import { DEFAULT_CAMERA_FAR } from '../../utils/navigationUtils'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
@@ -1536,14 +1537,19 @@ export default function SceneLevel3D() {
   const pixelRatio = renderSettings?.pixelRatio || 1
   const dprMax = pixelRatio >= 2 ? 2 : pixelRatio >= 1.5 ? 1.5 : 1
   const shadowMapSize = renderSettings?.shadowMapSize || 1024
+  // Adaptive Quality: preserveDrawingBuffer só necessário para screenshots/export
+  // (Editor mode). Em Play Mode, desligar para poupar GPU (evita readback por frame).
+  // Bug #4 safe: não persiste no projeto — só afecta o Canvas em Runtime.
+  const preserveDrawingBuffer = !isGameMode
+  const shadowsEnabled = renderSettings?.shadowOptimizations !== false
 
   return (
     <div className="viewport" onDragOver={(e) => !isGameMode && e.preventDefault()} onDrop={handleDrop}>
       <Canvas
-        shadows
+        shadows={shadowsEnabled || !isGameMode}
         dpr={[1, dprMax]}
         camera={{ position: [8, 6, 10], fov: 50, near: 0.1, far: DEFAULT_CAMERA_FAR }}
-        gl={{ antialias: true, preserveDrawingBuffer: true, alpha: false }}
+        gl={{ antialias: true, preserveDrawingBuffer, alpha: false }}
         onPointerMissed={() => {
           if (!isGameMode) {
             setSelectedInstanceId(null)
@@ -1556,6 +1562,15 @@ export default function SceneLevel3D() {
           <SceneBackgroundSolid background={background} />
           <FogApplier conects={activeScene?.conects} />
           <PerformanceTracker />
+
+          {/* Performance Core 3.2 — Adaptive Quality (só em Play Mode, estado temporário) */}
+          <AdaptiveQuality
+            meshRefs={meshRefs}
+            conectMeshRefs={conectMeshRefs}
+            enabled={isGameMode}
+            originalDpr={dprMax}
+            originalShadowsEnabled={shadowsEnabled}
+          />
 
           <ambientLight intensity={lights.ambient.intensity} color={lights.ambient.color} />
           <directionalLight

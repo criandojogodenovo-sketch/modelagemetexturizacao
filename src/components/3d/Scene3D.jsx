@@ -18,6 +18,7 @@ import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-t
 import * as THREE from 'three'
 import SceneObject from './SceneObject'
 import SkeletonGizmo from './SkeletonGizmo'
+import ShadowOptimizer from './ShadowOptimizer'
 import { useStore } from '../../store/useStore'
 import {
   DEFAULT_CAMERA_FAR,
@@ -236,10 +237,13 @@ export default function Scene3D() {
   const pixelRatio = renderSettings?.pixelRatio || 1
   const dprMax = pixelRatio >= 2 ? 2 : pixelRatio >= 1.5 ? 1.5 : 1
   const shadowMapSize = renderSettings?.shadowMapSize || 1024
+  // Editor: preserveDrawingBuffer sempre true (screenshots/export precisam)
+  // shadowOptimizations respeita config do utilizador
+  const shadowsEnabled = renderSettings?.shadowOptimizations !== false
 
   return (
     <Canvas
-      shadows
+      shadows={shadowsEnabled}
       dpr={[1, dprMax]}
       camera={{ position: [5, 4, 6], fov: 50, near: 0.1, far: DEFAULT_CAMERA_FAR }}
       gl={{ antialias: true, preserveDrawingBuffer: true, alpha: false }}
@@ -251,6 +255,9 @@ export default function Scene3D() {
     >
       <Suspense fallback={null}>
         <SceneBackground background={background} />
+
+        {/* Performance Core 3.2 — ShadowOptimizer no Editor (distance culling) */}
+        <ShadowOptimizer meshRefs={meshRefs} enabled={true} />
 
         {/* Iluminação */}
         <ambientLight intensity={lights.ambient.intensity} color={lights.ambient.color} />
