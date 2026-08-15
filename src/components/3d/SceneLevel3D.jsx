@@ -1075,6 +1075,15 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       for (const [, s] of timerStatesRef.current) { if (s.interval) clearInterval(s.interval); if (s.audio) s.audio.pause() }
       timerStatesRef.current.clear()
       animPlayersRef.current.clear()
+      // Bug #7: Limpar entradas de colisões da sessão Runtime anterior.
+      // collisionEventsRef acumula instanceId → Set<otherId> via onCollision handler.
+      // Sem clear(), entradas antigas persistem entre sessões Play (memory/state leak).
+      // Nota: os setTimeout de 500ms no handler de colisão são auto-limpeza
+      // (removem apenas a otherInstanceId específica) e não rastreiam o ciclo de
+      // vida da sessão — o clear() aqui garante que o Map fica vazio para o
+      // próximo Play, mesmo se timeouts pendentes ainda dispararem (eles só
+      // fazem set.delete(otherId), que é no-op se o Set já foi removido).
+      collisionEventsRef.current.clear()
       physicsRef.current?.dispose()
       physicsRef.current = null
       window.removeEventListener('keydown', onKeyDown)
