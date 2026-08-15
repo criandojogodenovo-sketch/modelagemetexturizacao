@@ -521,3 +521,33 @@ Stage Summary:
 - FlirScript-friendly: AdaptiveQuality singleton acessível via import para futura API
 - Performance Core Fase 3.3 (Distance Culling) NÃO iniciada
 - Push: NÃO realizado (aguardando autorização)
+
+---
+Task ID: PERF-3.3
+Agent: main
+Task: Performance Core Fase 3.3 — Distance and Frustum Culling
+
+Work Log:
+- AUDIT: Verificado estado git (019ff84, clean), hardwareInstancing.js (já tem frustum culling manual + LOD), AutoInstancing.jsx (sem culling nem dirty flags), performanceOptimizer.js (LODManager existe mas não integrado), SceneLevel3D (objects.find hotspot C1), Conects gizmos (12 tipos cullable identificados)
+- AUDIT: Three.js já faz frustum culling nativo (frustumCulled=true por default) — não duplicar para meshes regulares
+- PLAN: CullingManager singleton + DistanceCulling component + AutoInstancing dirty flags + objectsById Map
+- IMPLEMENT: src/utils/cullingManager.js (CullingManager com distance culling ao quadrado, tiers por qualityLevel, CULLABLE_CONECT_TYPES, restore para Bug #4)
+- IMPLEMENT: src/hooks/useDistanceCulling.js (integra useFrame, lê AdaptiveQuality, respeita selectedInstanceId)
+- IMPLEMENT: src/components/3d/DistanceCulling.jsx (wrapper com idToType Map via useMemo)
+- IMPLEMENT: AutoInstancing.jsx dirty flags (só reescreve matriz se transform mudou) + frustum culling por instância + distance culling (escala 0 se além de maxDist) + reutiliza Frustum/Matrix4/Vector3
+- IMPLEMENT: SceneLevel3D.jsx objectsById Map (useMemo) substitui objects.find() O(N) por lookup O(1) + <DistanceCulling> integrado
+- BUILD: ✓ 0 erros, 1.52s
+- DIFF CHECK: ✓ sem erros whitespace, 5 arquivos (+479/-11)
+- REGRESSÃO: Bugs #1-#7 intactos (sceneSnapshotRef, meshParentsRef, portalTimeoutsRef, runtimeSessionRef, collisionEventsRef todos preservados via grep)
+- Nenhum setTimeout/setInterval/requestAnimationFrame introduzido
+- COMMIT: bea3661 "Performance Core 3.3 - Distance and Frustum Culling"
+
+Stage Summary:
+- Distance Culling implementado para Conects gizmos (12 tipos cullable)
+- Frustum Culling por instância no AutoInstancing (escala 0 se fora do view)
+- Dirty flags no AutoInstancing (só reescreve matrizes de instâncias que mudaram)
+- Hotspot C1 corrigido: objectsById Map O(1) substitui objects.find O(N)
+- Tiers por qualityLevel: high=80, medium=60, low=40, minimal=25
+- FlirScript-friendly: CullingManager singleton acessível via import
+- Performance Core Fase 3.4 (LOD) NÃO iniciada
+- Push: NÃO realizado (aguardando autorização)
