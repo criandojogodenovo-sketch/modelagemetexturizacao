@@ -489,3 +489,35 @@ Stage Summary:
 - 0 regressões introduzidas (apenas 1 arquivo modificado, +121/-15 linhas)
 - Performance Core Fase 3 permanece PAUSADO
 - Validação manual em browser não disponível no ambiente actual
+
+---
+Task ID: PERF-3.2
+Agent: main
+Task: Performance Core Fase 3.2 — Adaptive Quality
+
+Work Log:
+- AUDIT: Verificado estado git (3bc0966, clean), renderSettings, QUALITY_PRESETS, PerformanceBudget, PerformanceStats, usePerformanceTracker, PerformanceStatsOverlay, canvas config (preserveDrawingBuffer, shadows, dpr)
+- AUDIT: Confirmado que ShadowOptimizer NÃO existia (apenas config flag shadowOptimizations no store, sem implementação)
+- AUDIT: preserveDrawingBuffer: true necessário para screenshots/export (exporters.js usa canvas.toDataURL em Editor mode)
+- PLAN: AdaptiveQualityController singleton isolado, estado temporário, getters públicos para FlirScript
+- IMPLEMENT: src/utils/adaptiveQuality.js (AdaptiveQualityController com state machine + histerese 3s/5s, tiers 2.0/1.5/1.25/1.0, auto-shadows em mobile CRITICAL)
+- IMPLEMENT: src/hooks/useAdaptiveQuality.js (integra useFrame, aplica DPR via gl.setPixelRatio, cleanup restore)
+- IMPLEMENT: src/components/3d/ShadowOptimizer.jsx (distance-based castShadow toggle, reavalia só quando câmara move >2 unidades, restaura original no cleanup)
+- IMPLEMENT: src/components/3d/AdaptiveQuality.jsx (wrapper combina hook + ShadowOptimizer)
+- IMPLEMENT: SceneLevel3D.jsx — <AdaptiveQuality> em Play Mode, preserveDrawingBuffer condicional (Editor: true, Play: false)
+- IMPLEMENT: Scene3D.jsx — <ShadowOptimizer> no Editor, shadows respeita config
+- FIX: require() substituído por import estático (projeto é ESM)
+- BUILD: ✓ 0 erros, 1.56s
+- DIFF CHECK: ✓ sem erros whitespace, 6 arquivos (+486/-3 linhas)
+- REGRESSÃO: Bugs #1-#7 intactos (sceneSnapshotRef, meshParentsRef, portalTimeoutsRef, runtimeSessionRef, collisionEventsRef todos preservados)
+- COMMIT: 019ff84 "Performance Core 3.2 - Adaptive Quality"
+
+Stage Summary:
+- Adaptive Quality implementado com estado puramente temporário (não persiste no projeto)
+- Histerese 3s CRITICAL / 5s HEALTHY evita oscilação
+- ShadowOptimizer desliga castShadow em meshes distantes (respeita shadowDistance)
+- preserveDrawingBuffer desligado em Play Mode (poupa GPU readback)
+- Auto-shadows: em mobile CRITICAL sustentado, desliga shadows temporariamente
+- FlirScript-friendly: AdaptiveQuality singleton acessível via import para futura API
+- Performance Core Fase 3.3 (Distance Culling) NÃO iniciada
+- Push: NÃO realizado (aguardando autorização)
