@@ -284,6 +284,46 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geometry, material])
 
+  // Performance Core 3.4 — Registar mesh no LODSystem
+  // Só regista se: tem geometria, não é customGeometry, não é animado (skeleton),
+  // e tem >1000 triângulos. LODSystem decide se cria THREE.LOD ou ignora.
+  // Import lazy para evitar cycle dependency em modo Editor.
+  useEffect(() => {
+    const mesh = innerRef.current
+    if (!mesh || !geometry) return
+    // Calcular triângulos (positions.count / 3 para não indexada, index.count / 3 para indexada)
+    let triCount = 0
+    if (geometry.index) {
+      triCount = geometry.index.count / 3
+    } else if (geometry.attributes.position) {
+      triCount = geometry.attributes.position.count / 3
+    }
+    // Verificar se é animado (tem skeleton — NÃO aplicar LOD)
+    const isAnimated = !!(obj.skeleton || obj.animations)
+    const isCustomGeometry = !!obj.customGeometry
+
+    // Import dinâmico para evitar cycle e não carregar LODSystem em Editor mode
+    import('../../utils/lodSystem').then(({ LODSystem }) => {
+      // Só regista se LODSystem está ativo (Play Mode)
+      // LODSystem.restore() é chamado no cleanup do useLOD, pelo que registos
+      // só persistem durante Play Mode
+      LODSystem.register(obj.id, mesh, triCount, {
+        isAnimated,
+        isCustomGeometry,
+      })
+    }).catch(() => {
+      // Ignorar erro de import (não crítico)
+    })
+
+    return () => {
+      // Desregistar ao desmontar
+      import('../../utils/lodSystem').then(({ LODSystem }) => {
+        LODSystem.unregister(obj.id)
+      }).catch(() => {})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geometry, obj.id, obj.skeleton, obj.animations, obj.customGeometry])
+
   const handlePointerDown = (e) => {
     e.stopPropagation()
     onSelect?.(obj.id)

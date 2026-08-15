@@ -21,11 +21,13 @@ import ConectRenderer from '../panels/ConectRenderer'
 import TerrainSculpt3D from './TerrainSculpt3D'
 import AdaptiveQuality from './AdaptiveQuality'
 import DistanceCulling from './DistanceCulling'
+import LODManager from './LODManager'
 import { useStore } from '../../store/useStore'
 import { DEFAULT_CAMERA_FAR } from '../../utils/navigationUtils'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
 import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
 import { createFlirCodeRuntime } from '../../utils/flirscript/flircode'
+import { FlirScriptAPI } from '../../utils/flirscript/flirScriptAPI'
 import { createAnimationPlayer } from '../../utils/animationPlayer'
 import { clearPoseCache } from '../../utils/sharedAnimationCache'
 import { createNPCAI } from '../../utils/conects/npcAI'
@@ -863,6 +865,12 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           }
         }
       },
+
+      // Performance Core 3.4 — FlirScript API oficial
+      // Scripts acessam via gameContext.api.LOD.getLevel(id), gameContext.api.Performance.getFPS(), etc.
+      // Fronteira controlada: NÃO expõe Three.js, Zustand, React internals.
+      // Ver src/utils/flirscript/flirScriptAPI.js para documentação completa.
+      api: FlirScriptAPI,
     }
     window._flirGameContext = gameContext
     window._flirInventory = inventoryRef.current
@@ -1592,6 +1600,9 @@ export default function SceneLevel3D() {
             enabled={true}
             selectedInstanceId={selectedInstanceId}
           />
+
+          {/* Performance Core 3.4 — LOD System (só em Play Mode, estado temporário) */}
+          <LODManager enabled={isGameMode} />
 
           <ambientLight intensity={lights.ambient.intensity} color={lights.ambient.color} />
           <directionalLight
