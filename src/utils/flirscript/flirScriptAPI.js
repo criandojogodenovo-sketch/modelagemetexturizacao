@@ -44,6 +44,8 @@ import { CullingManager } from '../cullingManager'
 import { AdaptiveQuality } from '../adaptiveQuality'
 import { PerformanceBudget } from '../performanceBudget'
 import { PerformanceStats } from '../performanceStats'
+import { RaycastSystem } from '../raycastSystem'
+import * as THREE from 'three'
 
 /**
  * LOD API — gestão de Level of Detail.
@@ -310,6 +312,79 @@ const EventsAPI = {
 }
 
 /**
+ * Raycast API — BVH-accelerated raycasting.
+ *
+ * Performance Core Fase 3.5.
+ *
+ * Métodos:
+ *  - isSupported(): boolean — true se three-mesh-bvh está disponível
+ *  - getStats(): object — { registeredBVH, fallbackRaycasts, bvhRaycasts, builds, rebuilds, hits, misses }
+ *  - hasBVH(objectId): boolean — verifica se objeto tem BVH
+ *  - getRegisteredCount(): number — total de meshes registados
+ *  - cast(origin, direction, options): { hit, objectId, distance, point, normal } | null
+ *
+ * Retorna apenas dados serializáveis (arrays, números, strings) — NÃO expõe
+ * THREE.Vector3, THREE.Mesh, Raycaster, etc.
+ *
+ * @param origin: [x, y, z]
+ * @param direction: [x, y, z] (será normalizado)
+ * @param options: { far?: number, near?: number, filterIds?: string[] }
+ * @returns { hit: boolean, objectId: string|null, distance: number, point: [x,y,z], normal: [x,y,z] } | null
+ */
+const RaycastAPI = {
+  /**
+   * Verifica se BVH está disponível (three-mesh-bvh carregado).
+   * @returns {boolean}
+   */
+  isSupported() {
+    return RaycastSystem.isSupported()
+  },
+
+  /**
+   * Retorna estatísticas do sistema de raycast.
+   * @returns {{ registeredBVH: number, fallbackRaycasts: number, bvhRaycasts: number, builds: number, rebuilds: number, hits: number, misses: number }}
+   */
+  getStats() {
+    return RaycastSystem.getStats()
+  },
+
+  /**
+   * Verifica se um objeto tem BVH construído.
+   * @param {string} objectId
+   * @returns {boolean}
+   */
+  hasBVH(objectId) {
+    return RaycastSystem.hasBVH(objectId)
+  },
+
+  /**
+   * Retorna o número de meshes registados no RaycastSystem.
+   * @returns {number}
+   */
+  getRegisteredCount() {
+    return RaycastSystem.getRegisteredCount()
+  },
+
+  /**
+   * Executa um raycast contra todos os meshes registados.
+   * Retorna o hit mais próximo.
+   *
+   * @param {[number, number, number]} origin — ponto de origem [x, y, z]
+   * @param {[number, number, number]} direction — direção [x, y, z] (será normalizada)
+   * @param {object} options — { far?: number, near?: number, filterIds?: string[] }
+   * @returns {{ hit: boolean, objectId: string|null, distance: number, point: [number,number,number], normal: [number,number,number] } | null}
+   */
+  cast(origin, direction, options = {}) {
+    if (!origin || !direction) return null
+    // Converter arrays para Vector3 temporários (não expor ao script)
+    const tmpOrigin = new THREE.Vector3(origin[0], origin[1], origin[2])
+    const tmpDir = new THREE.Vector3(direction[0], direction[1], direction[2])
+    const result = RaycastSystem.raycast(tmpOrigin, tmpDir, options)
+    return result
+  },
+}
+
+/**
  * FlirScriptAPI — objeto raiz da API oficial do FlirScript.
  *
  * Exportado como singleton. Acessível via import ou via gameContext.api.
@@ -320,12 +395,13 @@ export const FlirScriptAPI = {
   Culling: CullingAPI,
   Object: ObjectAPI,
   Events: EventsAPI,
+  Raycast: RaycastAPI,
 
   /**
    * Retorna a versão da API (para compatibilidade futura).
    */
   getVersion() {
-    return '1.0.0-phase3.4'
+    return '1.0.0-phase3.5'
   },
 }
 

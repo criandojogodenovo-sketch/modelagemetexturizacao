@@ -22,12 +22,14 @@ import TerrainSculpt3D from './TerrainSculpt3D'
 import AdaptiveQuality from './AdaptiveQuality'
 import DistanceCulling from './DistanceCulling'
 import LODManager from './LODManager'
+import RaycastManager from './RaycastManager'
 import { useStore } from '../../store/useStore'
 import { DEFAULT_CAMERA_FAR } from '../../utils/navigationUtils'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
 import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
 import { createFlirCodeRuntime } from '../../utils/flirscript/flircode'
 import { FlirScriptAPI } from '../../utils/flirscript/flirScriptAPI'
+import { RaycastSystem } from '../../utils/raycastSystem'
 import { createAnimationPlayer } from '../../utils/animationPlayer'
 import { clearPoseCache } from '../../utils/sharedAnimationCache'
 import { createNPCAI } from '../../utils/conects/npcAI'
@@ -613,11 +615,16 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         if (now - w.lastShot < w.fireRate) return false
         w.lastShot = now
         w.ammo--
-        // Raycast da câmara para detetar hit
-        const raycaster = new THREE.Raycaster()
-        raycaster.setFromCamera({ x: 0, y: 0 }, camera)
-        raycaster.far = w.range
-        debugLog(`Disparo! Munições restantes: ${w.ammo}`, 'log', 'Weapon')
+        // Performance Core 3.5 — Raycast via RaycastSystem (BVH se aplicável)
+        // Origin = câmara, direction = forward da câmara
+        const origin = camera.position
+        const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
+        const result = RaycastSystem.raycast(origin, direction, { far: w.range })
+        if (result?.hit) {
+          debugLog(`Disparo! Hit ${result.objectId || 'unknown'} a ${result.distance.toFixed(1)}m`, 'log', 'Weapon')
+        } else {
+          debugLog(`Disparo! Munições restantes: ${w.ammo}`, 'log', 'Weapon')
+        }
         return true
       },
       reload: () => {
@@ -1603,6 +1610,9 @@ export default function SceneLevel3D() {
 
           {/* Performance Core 3.4 — LOD System (só em Play Mode, estado temporário) */}
           <LODManager enabled={isGameMode} />
+
+          {/* Performance Core 3.5 — Raycast System (BVH, só em Play Mode) */}
+          <RaycastManager enabled={isGameMode} />
 
           <ambientLight intensity={lights.ambient.intensity} color={lights.ambient.color} />
           <directionalLight

@@ -18,6 +18,7 @@
 import { useRef, useState, useMemo, useEffect, useCallback } from 'react'
 import { useThree, useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
+import { RaycastSystem } from '../../utils/raycastSystem'
 
 export default function TerrainSculpt3D({
   terrainMesh,
@@ -37,6 +38,25 @@ export default function TerrainSculpt3D({
   const cursorRef = useRef()
   const hmRef = useRef(heightmap)
   const lastApplyRef = useRef(0)
+
+  // Performance Core 3.5 — Registar terreno no RaycastSystem (BVH se aplicável)
+  // Terreno tem tipicamente 64×64=4096 ou 128×128=16384 vértices → BVH ativo
+  useEffect(() => {
+    if (!terrainMesh) return
+    const terrainId = 'terrain_sculpt_' + (terrainMesh.uuid || 'default')
+    RaycastSystem.register(terrainId, terrainMesh, { isStatic: false }) // terreno é dinâmico (sculpt)
+
+    return () => {
+      RaycastSystem.unregister(terrainId)
+    }
+  }, [terrainMesh])
+
+  // Marcar BVH como dirty quando geometria muda (após escultura)
+  const markTerrainDirty = useCallback(() => {
+    if (!terrainMesh) return
+    const terrainId = 'terrain_sculpt_' + (terrainMesh.uuid || 'default')
+    RaycastSystem.markDirty(terrainId)
+  }, [terrainMesh])
 
   // Actualizar hmRef quando heightmap muda externamente
   useEffect(() => { hmRef.current = heightmap }, [heightmap])
@@ -66,7 +86,9 @@ export default function TerrainSculpt3D({
     terrainMesh.geometry.computeVertexNormals()
     if (terrainMesh.geometry.boundingBox) terrainMesh.geometry.computeBoundingBox()
     if (terrainMesh.geometry.boundingSphere) terrainMesh.geometry.computeBoundingSphere()
-  }, [terrainMesh, seg])
+    // Performance Core 3.5 — Marcar BVH como dirty (será reconstruído no próximo raycast)
+    markTerrainDirty()
+  }, [terrainMesh, seg, markTerrainDirty])
 
   // Raycast no terreno
   const raycastTerrain = useCallback((clientX, clientY) => {
@@ -77,7 +99,11 @@ export default function TerrainSculpt3D({
       -((clientY - rect.top) / rect.height) * 2 + 1
     )
     raycaster.setFromCamera(mouse, camera)
-    const intersects = raycaster.intersectObject(terrainMesh, false)
+    // Performance Core 3.5 — Usar RaycastSystem (BVH se aplicável, fallback automático)
+    // RaycastSystem.intersectMesh usa o mesh directamente e decide BVH vs fallback
+    const origin = raycaster.ray.origin
+    const direction = raycaster.ray.direction
+    const intersects = RaycastSystem.intersectMesh(terrainMesh, origin, direction, { recursive: false })
     if (intersects.length === 0) return null
     return intersects[0].point
   }, [terrainMesh, camera, gl, raycaster])

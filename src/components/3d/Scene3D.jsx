@@ -19,6 +19,7 @@ import * as THREE from 'three'
 import SceneObject from './SceneObject'
 import SkeletonGizmo from './SkeletonGizmo'
 import ShadowOptimizer from './ShadowOptimizer'
+import { RaycastSystem } from '../../utils/raycastSystem'
 import { useStore } from '../../store/useStore'
 import {
   DEFAULT_CAMERA_FAR,
@@ -90,7 +91,10 @@ function SculptRaycaster({ meshRefs, orbitRef }) {
       const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
       const y = -((e.clientY - rect.top) / rect.height) * 2 + 1
       raycaster.current.setFromCamera(new THREE.Vector2(x, y), camera)
-      const intersects = raycaster.current.intersectObject(mesh)
+      // Performance Core 3.5 — Usar RaycastSystem (BVH se aplicável, fallback automático)
+      const origin = raycaster.current.ray.origin
+      const direction = raycaster.current.ray.direction
+      const intersects = RaycastSystem.intersectMesh(mesh, origin, direction)
       if (intersects.length === 0) return
       const hit = intersects[0]
       sculptStrokeAt(selectedId, [hit.point.x, hit.point.y, hit.point.z],
