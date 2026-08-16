@@ -23,6 +23,7 @@ import AdaptiveQuality from './AdaptiveQuality'
 import DistanceCulling from './DistanceCulling'
 import LODManager from './LODManager'
 import RaycastManager from './RaycastManager'
+import StreamingManagerComponent from './StreamingManagerComponent'
 import { useStore } from '../../store/useStore'
 import { DEFAULT_CAMERA_FAR } from '../../utils/navigationUtils'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
@@ -1613,6 +1614,9 @@ export default function SceneLevel3D() {
 
           {/* Performance Core 3.5 — Raycast System (BVH, só em Play Mode) */}
           <RaycastManager enabled={isGameMode} />
+
+          {/* Performance Core 3.8 — Streaming System cleanup (Play Mode) */}
+          <StreamingManagerComponent enabled={isGameMode} />
 
           <ambientLight intensity={lights.ambient.intensity} color={lights.ambient.color} />
           <directionalLight

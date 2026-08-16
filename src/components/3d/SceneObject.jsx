@@ -31,24 +31,22 @@ import {
 import { compositeTextureLayers } from '../../utils/textureCompositor'
 
 // Cache de texturas carregadas a partir de dataURLs
-// Performance Core 3.7 — Integrado com StreamingManager LRU cache
-// (limite de 50 texturas, eviction automática de texturas com refCount=0)
+// Performance Core 3.8 — Consolidado: apenas StreamingManager LRU cache
+// (limite 50 texturas, eviction automática de texturas com refCount=0)
+// Antes havia dupla cache (local Map + StreamingManager) que impedia LRU
+// de funcionar corretamente. Agora apenas StreamingManager gere texturas.
 import { StreamingManager } from '../../utils/streamingManager'
-
-const textureCache = new Map()
 
 export function loadTexture(dataURL) {
   if (!dataURL) return null
-  // Performance Core 3.7 — Usar StreamingManager.getTexture (LRU cache)
-  // Fallback: se StreamingManager falhar, usar cache local antigo
+  // StreamingManager.getTexture: cache hit retorna textura existente,
+  // cache miss chama loader (cria THREE.TextureLoader + carrega dataURL)
   const tex = StreamingManager.getTexture(dataURL, () => {
-    if (textureCache.has(dataURL)) return textureCache.get(dataURL)
     const loader = new THREE.TextureLoader()
     const t = loader.load(dataURL)
     t.colorSpace = THREE.SRGBColorSpace
     t.wrapS = THREE.RepeatWrapping
     t.wrapT = THREE.RepeatWrapping
-    textureCache.set(dataURL, t)
     return t
   })
   return tex
