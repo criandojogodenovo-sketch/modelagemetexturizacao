@@ -57,26 +57,38 @@ export function loadTexture(dataURL) {
 }
 
 // Post-Audit 4.0 — A1: loadTexture com tracking de key para releaseTexture() no cleanup.
-// Retorna a textura e registra a key no Set passado. Chamar releaseTrackedTextures()
-// no cleanup para decrementar refCount de cada textura exatamente uma vez.
-function loadTextureTracked(dataURL, trackedKeys) {
+// Retorna a textura e registra a key no Map passado. Chamar releaseTrackedTextures()
+// no cleanup para decrementar refCount de cada textura exatamente o mesmo número de vezes.
+// Post-Audit 4.2 — V1 FIX: Usa Map<string, number> em vez de Set para contar o número
+// exato de getTexture() por key. Assim, N chamadas a getTexture(key) produzem N
+// chamadas a releaseTexture(key), garantindo refCount correto.
+function loadTextureTracked(dataURL, trackedCounts) {
   if (!dataURL) return null
   const tex = loadTexture(dataURL)
-  if (tex && trackedKeys) {
-    trackedKeys.add(dataURL)
+  if (tex && trackedCounts) {
+    // Incrementar contador para esta key (Map aceita duplicados — conta gets)
+    const current = trackedCounts.get(dataURL) || 0
+    trackedCounts.set(dataURL, current + 1)
   }
   return tex
 }
 
 // Post-Audit 4.0 — A1: Release de todas as texturas tracked.
-// Chama StreamingManager.releaseTexture() para cada key, decrementando refCount.
+// Chama StreamingManager.releaseTexture() para cada key, decrementando refCount
+// o número exato de vezes que getTexture foi chamado para essa key.
+// Post-Audit 4.2 — V1 FIX: Usa Map<string, number> — release Texture(key) N vezes
+// onde N = contador de getTexture para essa key. Garante accounting correto.
 // StreamingManager garante que refCount nunca fica abaixo de zero (Math.max(0, ...)).
-function releaseTrackedTextures(trackedKeys) {
-  if (!trackedKeys) return
-  for (const key of trackedKeys) {
-    StreamingManager.releaseTexture(key)
+// Idempotente: se Map estiver vazio ou já limpo, não faz nada.
+function releaseTrackedTextures(trackedCounts) {
+  if (!trackedCounts || trackedCounts.size === 0) return
+  for (const [key, count] of trackedCounts) {
+    // Release exatamente `count` vezes — uma por cada getTexture(key)
+    for (let i = 0; i < count; i++) {
+      StreamingManager.releaseTexture(key)
+    }
   }
-  trackedKeys.clear()
+  trackedCounts.clear()
 }
 
 // === Implementações de modificadores locais ===
@@ -190,10 +202,10 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
   const innerRef = useRef()
 
   // Post-Audit 4.0 — A1: Track de texturas carregadas para releaseTexture() no cleanup.
-  // Cada loadTexture() incrementa refCount no StreamingManager; o cleanup deve
-  // decrementar exatamente uma vez por textura carregada. Usa Set para evitar
-  // double-release (mesma textura carregada para map + normalMap seria 2 refs).
-  const loadedTextureKeys = useRef(new Set())
+  // Post-Audit 4.2 — V1 FIX: Usa Map<string, number> em vez de Set. Cada getTexture(key)
+  // incrementa o contador; releaseTrackedTextures decrementa refCount esse mesmo número
+  // de vezes. Garante que N gets = N releases, mesmo se useMemo/useEffect re-executam.
+  const loadedTextureCounts = useRef(new Map())
 
   // ----- Geometria (com modificadores aplicados) -----
   const geometry = useMemo(() => {
@@ -242,7 +254,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     }
 
     if (m.map) {
-      const tex = loadTextureTracked(m.map, loadedTextureKeys.current)
+      const tex = loadTextureTracked(m.map, loadedTextureCounts.current)
       if (tex) {
         tex.repeat.set(m.repeat?.[0] ?? 1, m.repeat?.[1] ?? 1)
         tex.offset.set(m.offset?.[0] ?? 0, m.offset?.[1] ?? 0)
@@ -252,7 +264,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     }
 
     if (m.normalMap) {
-      const tex = loadTextureTracked(m.normalMap, loadedTextureKeys.current)
+      const tex = loadTextureTracked(m.normalMap, loadedTextureCounts.current)
       if (tex) {
         tex.repeat.set(m.repeat?.[0] ?? 1, m.repeat?.[1] ?? 1)
         tex.offset.set(m.offset?.[0] ?? 0, m.offset?.[1] ?? 0)
@@ -263,7 +275,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
 
     // Emissive map (se existir)
     if (m.emissiveMap) {
-      const tex = loadTextureTracked(m.emissiveMap, loadedTextureKeys.current)
+      const tex = loadTextureTracked(m.emissiveMap, loadedTextureCounts.current)
       if (tex) mat.emissiveMap = tex
     }
 
@@ -289,18 +301,29 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
   }, [obj.material?.layers, obj.material?.repeat, obj.material?.offset, material])
 
   // ----- Atualização de repeat/offset em tempo real -----
+  // Post-Audit 4.2 — V1 FIX: NÃO chama loadTextureTracked aqui. As texturas já
+  // foram carregadas no useMemo do material (que tem dependência [obj.material, obj.type]).
+  // Aplicar tiling diretamente a material.map e material.normalMap evita incrementar
+  // refCount novamente. Se m.map mudou, o useMemo re-executa e carrega a nova textura;
+  // este useEffect apenas ajusta repeat/offset da textura atual do material.
   useEffect(() => {
     if (!material) return
     const m = obj.material
-    const applyTiling = (tex) => {
-      if (!tex) return
-      tex.repeat.set(m.repeat?.[0] ?? 1, m.repeat?.[1] ?? 1)
-      tex.offset.set(m.offset?.[0] ?? 0, m.offset?.[1] ?? 0)
-      tex.needsUpdate = true
+    const repeatX = m.repeat?.[0] ?? 1
+    const repeatY = m.repeat?.[1] ?? 1
+    const offsetX = m.offset?.[0] ?? 0
+    const offsetY = m.offset?.[1] ?? 0
+    // Aplicar tiling às texturas já presentes no material (sem getTexture)
+    if (material.map) {
+      material.map.repeat.set(repeatX, repeatY)
+      material.map.offset.set(offsetX, offsetY)
+      material.map.needsUpdate = true
     }
-    // Post-Audit 4.0 — A1: Usar loadTextureTracked para registrar keys
-    if (m.map) applyTiling(loadTextureTracked(m.map, loadedTextureKeys.current))
-    if (m.normalMap) applyTiling(loadTextureTracked(m.normalMap, loadedTextureKeys.current))
+    if (material.normalMap) {
+      material.normalMap.repeat.set(repeatX, repeatY)
+      material.normalMap.offset.set(offsetX, offsetY)
+      material.normalMap.needsUpdate = true
+    }
   }, [obj.material?.repeat, obj.material?.offset, obj.material?.map, obj.material?.normalMap, material])
 
   // ----- Sincronizar transform -----
@@ -322,11 +345,14 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       if (geometry && !obj.imported) geometry.dispose?.()
       material.dispose?.()
       // Post-Audit 4.0 — A1: Release de texturas tracked no StreamingManager.
-      // Decrementa refCount de cada textura carregada por este SceneObject.
+      // Post-Audit 4.2 — V1 FIX: releaseTrackedTextures usa Map<string, number>
+      // e chama releaseTexture(key) N vezes (uma por cada getTexture). Garante
+      // refCount correto mesmo com múltiplos re-runs do useMemo.
       // StreamingManager garante refCount >= 0 (Math.max). Quando refCount
       // chega a 0, textura fica elegível para LRU eviction.
       // NÃO chama texture.dispose() diretamente — StreamingManager gere disposal.
-      releaseTrackedTextures(loadedTextureKeys.current)
+      // Idempotente: se já limpo (Map vazio), não faz nada.
+      releaseTrackedTextures(loadedTextureCounts.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geometry, material])

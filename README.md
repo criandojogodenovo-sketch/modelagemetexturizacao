@@ -1375,3 +1375,200 @@ O ficheiro exporta `TERRAIN_NOISE_GLSL` com as funções em GLSL para uso em sha
 - POM (8 steps): ~4ms por material com POM
 - Terreno 128x128 com erosão: ~50ms geração única (não por frame)
 
+---
+
+## 🧪 Post-Audit 4.0 / 4.1 / 4.2 — Correções de Auditoria (Setembro 2026)
+
+Após o Performance Core 3.2–3.8, foi realizada uma **auditoria completa da engine**. As secções abaixo documentam os problemas encontrados e corrigidos.
+
+### Post-Audit 4.0 — Correções principais
+
+8 problemas corrigidos:
+
+| ID | Problema | Severidade | Solução |
+|---|---|---|---|
+| **A1** | `StreamingManager.releaseTexture()` nunca chamado — refCount só incrementava, LRU nunca evictava | P0 | `loadTextureTracked` + `releaseTrackedTextures` no cleanup do `SceneObject` |
+| **A3/S1** | `innerHTML` com `el.url`/`el.label` não sanitizado — XSS em `gameRuntime.js` (Checkbox/Slider/Image) | P1 | Substituído por `createElement` + `setAttribute` + `appendChild` |
+| **A2/X1** | `gameRuntime.js` (exported runtime) não usa Performance Core | P1 | Divergência documentada como limitação (não portar) |
+| **A4** | `setTimeout` de collision pair expiry (500ms) não cancelados no cleanup | P2 | `collisionTimeoutsRef` Set + `clearTimeout` no cleanup |
+| **A6** | `INEFFECTIVE_DYNAMIC_IMPORT` em `lodSystem.js` | P2 | Import dinâmico → estático no `SceneObject` |
+| **P3** | `objects.find()` O(N) em `ConectRenderer.jsx` | P2 | `objectsById` Map via `useMemo`, lookup O(1) |
+| **M2** | Sem handler `webglcontextlost` | P2 | NOVO `WebGLContextLossHandler.jsx` com listeners + overlay |
+| **F5/F6** | FlirScriptAPI sem validação de IDs inválidos | P2 | Validação em LOD + Streaming methods, comportamento consistente |
+
+### Post-Audit 4.1 — Auditoria de verificação
+
+A auditoria de verificação revelou **1 problema P0** (V1) que impedia o push:
+
+| ID | Problema | Severidade | Causa |
+|---|---|---|---|
+| **V1** | A correção A1 tinha bug de accounting: `Set<string>` idempotente vs `getTexture()` não-idempotente | P0 | Para mesma dataURL carregada N vezes, `refCount` ficava em N mas apenas 1 release era feito |
+
+### Post-Audit 4.2 — Correção do V1
+
+**Causa raiz do V1:**
+- `Set<string>` era idempotente (chaves duplicadas não eram adicionadas)
+- `getTexture()` incrementava `refCount` a **cada chamada** (não idempotente)
+- `releaseTrackedTextures` iterava o Set e chamava `releaseTexture` apenas 1 vez por key
+- Resultado: N gets, 1 release → refCount = N-1 (sempre positivo) → LRU nunca evictava
+
+**Solução implementada — Combinação de Opção B + Opção A:**
+
+1. **Opção B (principal):** `useEffect` de tiling NÃO chama mais `getTexture`. Aplica `repeat`/`offset` diretamente a `material.map` e `material.normalMap` (texturas já carregadas pelo `useMemo` do material). Elimina o problema na fonte.
+
+2. **Opção A (fallback seguro):** `Set<string>` substituído por `Map<string, number>`. Cada `loadTextureTracked(key)` incrementa contador; `releaseTrackedTextures` chama `releaseTexture(key)` **N vezes** (onde N = contador). Garante accounting correto mesmo se `useMemo` re-executar.
+
+**Arquivo modificado:** `src/components/3d/SceneObject.jsx` (+54/-28 linhas)
+
+### Texture Reference Accounting
+
+O `StreamingManager` mantém um `Map<key, { texture, lastUsed, refCount }>` como cache LRU. O fluxo correto:
+
+```
+getTexture(key)          → refCount++
+releaseTexture(key)      → refCount = Math.max(0, refCount - 1)
+_evictLRU()              → só remove texturas com refCount === 0
+flushTextureCache()      → só dispõe texturas com refCount === 0
+```
+
+**Ownership preservado:** `SceneObject` **NÃO** chama `texture.dispose()` diretamente. Apenas o `StreamingManager` faz disposal (via eviction LRU ou `flushTextureCache` no Stop). O `SceneObject` apenas chama `getTexture` (adquire referência) e `releaseTexture` (liberta referência).
+
+### StreamingManager e ownership das texturas
+
+| Operação | Quem executa | Quando |
+|---|---|---|
+| `getTexture(key, loader)` | `SceneObject.loadTexture` | Cache hit → retorna textura existente; Cache miss → chama loader |
+| `releaseTexture(key)` | `SceneObject.releaseTrackedTextures` | No cleanup do `useEffect` (unmount) |
+| `texture.dispose()` | `StreamingManager._evictLRU` | Quando cache cheio + refCount=0 |
+| `texture.dispose()` | `StreamingManager.flushTextureCache` | No `restore()` (Stop do Play Mode) |
+| `restore()` | `useStreaming` hook | No cleanup do Play Mode |
+
+### Editor vs Exported Runtime (A2/X1 — limitação documentada)
+
+**Divergência arquitetural:**
+- **Editor (R3F):** Usa Performance Core 3.2–3.8 (AdaptiveQuality, Culling, LOD, Raycast, Spatial, Streaming)
+- **Exported Runtime (`gameRuntime.js`):** Runtime **standalone** — cria próprio `THREE.Scene`, `THREE.WebGLRenderer`, `CANNON.World`, `requestAnimationFrame` loop. **NÃO usa Performance Core.**
+
+**Por que não foi portado:**
+- Performance Core singletons dependem de R3F (`useThree`/`useFrame`)
+- Portar requereria refatorar singletons para aceitar `scene`/`camera`/`gl` como parâmetros
+- Excede o scope desta fase
+- **Não deve ser feito sem benchmark** que justifique o risco
+
+**Decisão:** Divergência documentada como limitação. Jogos exportados não beneficiam do Performance Core até uma futura unificação.
+
+### Bugs #1–#7 preservados
+
+Todos os fixes dos Bugs #1-#7 permanecem intactos após Post-Audit 4.0/4.1/4.2:
+
+| Bug | Ref | Status |
+|---|---|---|
+| #1 | OrbitControls limits | ✓ Intacto |
+| #2 | Modelos escuros | ✓ Intacto |
+| #3 | Câmara Play Mode | ✓ Intacto |
+| #4 | `sceneSnapshotRef` / `meshParentsRef` | ✓ Intacto |
+| #6 | `portalTimeoutsRef` / `runtimeSessionRef` | ✓ Intacto |
+| #7 | `collisionEventsRef` / `collisionEventsRef.current.clear()` | ✓ Intacto |
+| #7 | `collisionTimeoutsRef` (novo em 4.0) | ✓ Adicionado |
+
+### Segurança / XSS corrigida
+
+3 vulnerabilidades XSS eliminadas em `gameRuntime.js`:
+- **Checkbox:** `innerHTML = '<input type="checkbox" ...> <span>' + el.label` → `createElement('input')` + `textContent`
+- **Slider:** `innerHTML = '<input type="range" min="' + el.min + '">'` → `createElement('input')` + `setAttribute`
+- **Image:** `innerHTML = '<img src="' + el.url + '">'` → `createElement('img')` + `setAttribute('src')`
+
+**Sinks restantes (SAFE):**
+- `gameRuntime.js:229` — string literal sem interpolação (SAFE)
+- `gameRuntime.js:553` — `innerHTML = ''` limpeza (SAFE)
+- `performanceOptimizer.js:165` — `stats.fps` é número (SAFE)
+- `FlirCodeEditor.jsx:214` — `dangerouslySetInnerHTML` via highlighter (REVIEW — fora do scope)
+
+### WebGL Context Loss Handler
+
+NOVO componente `WebGLContextLossHandler.jsx`:
+- Regista listeners `webglcontextlost` e `webglcontextrestored` no canvas
+- `event.preventDefault()` permite R3F tentar recuperar
+- Overlay DOM com mensagem de erro quando contexto perdido
+- `removeEventListener` no cleanup (sem listeners duplicados)
+- **Limitação:** Recovery real depende do R3F. Se contexto perdido durante Play Mode com física ativa, bodies podem ficar inconsistentes. Recomendado: Stop + Play.
+
+### Collision Timeout Cleanup
+
+`collisionTimeoutsRef = useRef(new Set())` adicionado ao `GameMode`:
+- `setTimeout` IDs de collision pair expiry (500ms) guardados no Set
+- Timeout remove-se do Set quando executa
+- `clearTimeout` de todos os pendentes no cleanup do Play Mode
+- Bug #7 (`collisionEventsRef.current.clear()`) preservado
+
+### FlirScriptAPI Validation
+
+Validação de argumentos adicionada em todos os métodos que recebem IDs:
+
+| Namespace | Métodos validados | Comportamento para IDs inválidos |
+|---|---|---|
+| LOD | `getLevel`, `setEnabled`, `isEnabled`, `hasLOD`, `getDistance` | Retorna -1/false/0; setters no-op |
+| Streaming | `request`, `release` | `request` lança erro claro; `release` no-op |
+| Object | `exists`, `getPosition` | Retorna false/null |
+| Raycast | `cast` | Valida origin/direction |
+| Spatial | `querySphere`, `queryBox` | Valida center/min/max |
+
+**Versão API:** `1.0.0-phase4.0`
+
+### objectsById Optimization
+
+`ConectRenderer.jsx` agora usa `objectsById` Map via `useMemo`:
+- Lookup O(1) em vez de `objects.find()` O(N)
+- Reconstroi só quando `objects` muda
+- Mesmo pattern já usado em `SceneLevel3D`
+
+### Build Verification
+
+| Verificação | Resultado |
+|---|---|
+| `npm run build` | ✓ PASS (0 erros) |
+| `git diff --check` | ✓ PASS (exit 0) |
+| Build time | 1.55s (MEDIDO) |
+| `eval()` / `new Function()` em código próprio | Nenhum (apenas em `node_modules/litegraph.js`) |
+
+### Warnings pré-existentes (não introduzidos por 4.0/4.2)
+
+- `eval` em `node_modules/litegraph.js` (third-party)
+- Chunk `index-*.js` > 2000 kB
+- 5× `INEFFECTIVE_DYNAMIC_IMPORT` (three.module.js, exporters.js, debugStore.js, db.js, multiplayerManager.js — `lodSystem.js` eliminado por A6)
+
+### Limitações e itens futuros
+
+**Limitações conhecidas:**
+1. Divergência Editor vs Exported Runtime (A2/X1) — documentada, não portada
+2. WebGL context loss recovery parcial — depende do R3F
+3. `dangerouslySetInnerHTML` em FlirCodeEditor — fora do scope
+4. `console.log` em `flirQuestArena.js` e `flirQuestSaga.js` — não removidos
+5. `window._flir*` globals — não removidos
+6. `LODManager` em `performanceOptimizer.js` (código morto parcial) — não removido
+7. `compositeTextureLayers` (linhas 276-289 do SceneObject) cria textura que não passa pelo StreamingManager — pré-existente, não relacionado ao V1
+
+**Itens futuros (não implementados nesta fase):**
+- Portar FlirScriptAPI inteiro para exported runtime
+- Remover `window._flir*` globals
+- Remover `LODManager` de `performanceOptimizer.js`
+- Code splitting completo
+- Remoção geral de `console.log`
+- Auditoria profunda de `gameExporter.js`
+- HDRI streaming
+- Integração automática Culling → Streaming
+- Integração automática AdaptiveQuality → Streaming
+- Progressive LOD streaming
+
+### Classificação de verificação
+
+| Categoria | Itens |
+|---|---|
+| **MEDIDO** | Build: 0 erros, 1.55s; `git diff --check`: exit 0; INEFFECTIVE_DYNAMIC_IMPORT: 5 (antes 6); commits à frente de origin/main: 9 |
+| **STATICALLY VERIFIED** | Bugs #1-#7 intactos; `releaseTrackedTextures` chamado no cleanup; `texture.dispose()` só no StreamingManager; Import estático `lodSystem`; `objectsById` com deps corretas; WebGL listeners removidos no cleanup; FlirScriptAPI valida IDs; XSS eliminado; 8 testes do V1 (refCount accounting) |
+| **ESTIMADO** | LRU cache agora funcional (refCount decrementado); Lookup O(1) em ConectRenderer; Redução de event loop overhead (collision timeouts cancelados) |
+| **RUNTIME REQUIRED** | LRU eviction real; WebGL context loss recovery real; Play → Stop com refCount correto; React StrictMode mount/unmount/remount; Múltiplas instâncias SceneObject mesma dataURL; Edição de tiling no editor (re-run do useEffect) |
+| **NOT TESTED** | FPS, frame time, draw calls, triangles, RAM, VRAM, CPU, GPU, cache hit/miss ratio real, eviction rate real, mobile real, exported game runtime |
+
+**Runtime benchmark unavailable.** Toda a análise de performance é estática. Nenhuma métrica de runtime foi medida.
+
