@@ -564,9 +564,43 @@ function startGame() {
           if (el.linkType && el.linkType !== 'none' && gc.linkTo) { gc.linkTo(el.linkType, el.linkTarget); return }
           gc.triggerUIEvent(el.eventName || 'onClick', { element: el })
         }
-        if (el.type === 'Checkbox') { dom.innerHTML = '<input type="checkbox" ' + (el.checked ? 'checked' : '') + '> <span>' + (el.label || '') + '</span>'; dom.querySelector('input').onchange = function () { el.checked = this.checked; gc.triggerUIEvent('onChange', { element: el, value: this.checked }) } }
-        if (el.type === 'Slider') { dom.innerHTML = '<input type="range" min="' + (el.min || 0) + '" max="' + (el.max || 100) + '" value="' + (el.value || 50) + '"><span style="font-size:10px">' + (el.value || '') + '</span>'; dom.querySelector('input').oninput = function () { el.value = Number(this.value); gc.triggerUIEvent('onChange', { element: el, value: Number(this.value) }) } }
-        if (el.type === 'Image' && el.url) dom.innerHTML = '<img src="' + el.url + '" style="width:100%;height:100%;object-fit:contain">'
+        // Post-Audit 4.0 — A3/S1: Substituído innerHTML por createElement + appendChild
+        // para evitar XSS via el.label / el.url / el.min / el.max / el.value não sanitizados.
+        // Antes: dom.innerHTML = '<input type="checkbox" ...> <span>' + el.label + '</span>'
+        // Agora: construção segura via DOM API.
+        if (el.type === 'Checkbox') {
+          var cbInput = document.createElement('input')
+          cbInput.type = 'checkbox'
+          cbInput.checked = !!el.checked
+          var cbLabel = document.createElement('span')
+          cbLabel.textContent = el.label || ''
+          dom.appendChild(cbInput)
+          dom.appendChild(cbLabel)
+          cbInput.onchange = function () { el.checked = this.checked; gc.triggerUIEvent('onChange', { element: el, value: this.checked }) }
+        }
+        if (el.type === 'Slider') {
+          var slInput = document.createElement('input')
+          slInput.type = 'range'
+          slInput.min = String(el.min || 0)
+          slInput.max = String(el.max || 100)
+          slInput.value = String(el.value || 50)
+          var slLabel = document.createElement('span')
+          slLabel.style.fontSize = '10px'
+          slLabel.textContent = String(el.value || '')
+          dom.appendChild(slInput)
+          dom.appendChild(slLabel)
+          slInput.oninput = function () { el.value = Number(this.value); gc.triggerUIEvent('onChange', { element: el, value: Number(this.value) }) }
+        }
+        if (el.type === 'Image' && el.url) {
+          // Post-Audit 4.0 — A3/S1: setAttribute('src') em vez de innerHTML.
+          // setAttribute não interpreta HTML — el.url é tratado como string literal.
+          var img = document.createElement('img')
+          img.setAttribute('src', el.url)
+          img.style.width = '100%'
+          img.style.height = '100%'
+          img.style.objectFit = 'contain'
+          dom.appendChild(img)
+        }
         overlay.appendChild(dom)
       })
     })

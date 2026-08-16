@@ -36,6 +36,10 @@ import { compositeTextureLayers } from '../../utils/textureCompositor'
 // Antes havia dupla cache (local Map + StreamingManager) que impedia LRU
 // de funcionar corretamente. Agora apenas StreamingManager gere texturas.
 import { StreamingManager } from '../../utils/streamingManager'
+// Post-Audit 4.0 — A6: Import estático (antes era dinâmico, causava
+// INEFFECTIVE_DYNAMIC_IMPORT warning porque lodSystem.js já é importado
+// estaticamente por useLOD.js e flirScriptAPI.js)
+import { LODSystem } from '../../utils/lodSystem'
 
 export function loadTexture(dataURL) {
   if (!dataURL) return null
@@ -50,6 +54,29 @@ export function loadTexture(dataURL) {
     return t
   })
   return tex
+}
+
+// Post-Audit 4.0 — A1: loadTexture com tracking de key para releaseTexture() no cleanup.
+// Retorna a textura e registra a key no Set passado. Chamar releaseTrackedTextures()
+// no cleanup para decrementar refCount de cada textura exatamente uma vez.
+function loadTextureTracked(dataURL, trackedKeys) {
+  if (!dataURL) return null
+  const tex = loadTexture(dataURL)
+  if (tex && trackedKeys) {
+    trackedKeys.add(dataURL)
+  }
+  return tex
+}
+
+// Post-Audit 4.0 — A1: Release de todas as texturas tracked.
+// Chama StreamingManager.releaseTexture() para cada key, decrementando refCount.
+// StreamingManager garante que refCount nunca fica abaixo de zero (Math.max(0, ...)).
+function releaseTrackedTextures(trackedKeys) {
+  if (!trackedKeys) return
+  for (const key of trackedKeys) {
+    StreamingManager.releaseTexture(key)
+  }
+  trackedKeys.clear()
 }
 
 // === Implementações de modificadores locais ===
@@ -162,6 +189,12 @@ function applyModifiers(geometry, modifiers) {
 const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect }, meshRef) {
   const innerRef = useRef()
 
+  // Post-Audit 4.0 — A1: Track de texturas carregadas para releaseTexture() no cleanup.
+  // Cada loadTexture() incrementa refCount no StreamingManager; o cleanup deve
+  // decrementar exatamente uma vez por textura carregada. Usa Set para evitar
+  // double-release (mesma textura carregada para map + normalMap seria 2 refs).
+  const loadedTextureKeys = useRef(new Set())
+
   // ----- Geometria (com modificadores aplicados) -----
   const geometry = useMemo(() => {
     let base
@@ -209,7 +242,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     }
 
     if (m.map) {
-      const tex = loadTexture(m.map)
+      const tex = loadTextureTracked(m.map, loadedTextureKeys.current)
       if (tex) {
         tex.repeat.set(m.repeat?.[0] ?? 1, m.repeat?.[1] ?? 1)
         tex.offset.set(m.offset?.[0] ?? 0, m.offset?.[1] ?? 0)
@@ -219,7 +252,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     }
 
     if (m.normalMap) {
-      const tex = loadTexture(m.normalMap)
+      const tex = loadTextureTracked(m.normalMap, loadedTextureKeys.current)
       if (tex) {
         tex.repeat.set(m.repeat?.[0] ?? 1, m.repeat?.[1] ?? 1)
         tex.offset.set(m.offset?.[0] ?? 0, m.offset?.[1] ?? 0)
@@ -230,7 +263,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
 
     // Emissive map (se existir)
     if (m.emissiveMap) {
-      const tex = loadTexture(m.emissiveMap)
+      const tex = loadTextureTracked(m.emissiveMap, loadedTextureKeys.current)
       if (tex) mat.emissiveMap = tex
     }
 
@@ -265,8 +298,9 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       tex.offset.set(m.offset?.[0] ?? 0, m.offset?.[1] ?? 0)
       tex.needsUpdate = true
     }
-    if (m.map) applyTiling(loadTexture(m.map))
-    if (m.normalMap) applyTiling(loadTexture(m.normalMap))
+    // Post-Audit 4.0 — A1: Usar loadTextureTracked para registrar keys
+    if (m.map) applyTiling(loadTextureTracked(m.map, loadedTextureKeys.current))
+    if (m.normalMap) applyTiling(loadTextureTracked(m.normalMap, loadedTextureKeys.current))
   }, [obj.material?.repeat, obj.material?.offset, obj.material?.map, obj.material?.normalMap, material])
 
   // ----- Sincronizar transform -----
@@ -287,6 +321,12 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     return () => {
       if (geometry && !obj.imported) geometry.dispose?.()
       material.dispose?.()
+      // Post-Audit 4.0 — A1: Release de texturas tracked no StreamingManager.
+      // Decrementa refCount de cada textura carregada por este SceneObject.
+      // StreamingManager garante refCount >= 0 (Math.max). Quando refCount
+      // chega a 0, textura fica elegível para LRU eviction.
+      // NÃO chama texture.dispose() diretamente — StreamingManager gere disposal.
+      releaseTrackedTextures(loadedTextureKeys.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geometry, material])
@@ -294,7 +334,7 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
   // Performance Core 3.4 — Registar mesh no LODSystem
   // Só regista se: tem geometria, não é customGeometry, não é animado (skeleton),
   // e tem >1000 triângulos. LODSystem decide se cria THREE.LOD ou ignora.
-  // Import lazy para evitar cycle dependency em modo Editor.
+  // Post-Audit 4.0 — A6: Import estático (antes era dinâmico)
   useEffect(() => {
     const mesh = innerRef.current
     if (!mesh || !geometry) return
@@ -309,24 +349,17 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     const isAnimated = !!(obj.skeleton || obj.animations)
     const isCustomGeometry = !!obj.customGeometry
 
-    // Import dinâmico para evitar cycle e não carregar LODSystem em Editor mode
-    import('../../utils/lodSystem').then(({ LODSystem }) => {
-      // Só regista se LODSystem está ativo (Play Mode)
-      // LODSystem.restore() é chamado no cleanup do useLOD, pelo que registos
-      // só persistem durante Play Mode
-      LODSystem.register(obj.id, mesh, triCount, {
-        isAnimated,
-        isCustomGeometry,
-      })
-    }).catch(() => {
-      // Ignorar erro de import (não crítico)
+    // Só regista se LODSystem está ativo (Play Mode)
+    // LODSystem.restore() é chamado no cleanup do useLOD, pelo que registos
+    // só persistem durante Play Mode
+    LODSystem.register(obj.id, mesh, triCount, {
+      isAnimated,
+      isCustomGeometry,
     })
 
     return () => {
       // Desregistar ao desmontar
-      import('../../utils/lodSystem').then(({ LODSystem }) => {
-        LODSystem.unregister(obj.id)
-      }).catch(() => {})
+      LODSystem.unregister(obj.id)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geometry, obj.id, obj.skeleton, obj.animations, obj.customGeometry])

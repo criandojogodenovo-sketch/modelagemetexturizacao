@@ -64,46 +64,57 @@ import * as THREE from 'three'
 const LODAPI = {
   /**
    * Retorna o nível LOD atual de um objeto.
+   * Post-Audit 4.0 — F5/F6: Valida instanceId; retorna -1 se inválido/inexistente.
    * @param {string} instanceId — ID da instância
-   * @returns {number} — 0 (full), 1 (medium), 2 (low), ou -1 (sem LOD)
+   * @returns {number} — 0 (full), 1 (medium), 2 (low), ou -1 (sem LOD/inválido)
    */
   getLevel(instanceId) {
+    if (!instanceId || typeof instanceId !== 'string') return -1
     return LODSystem.getLevel(instanceId)
   },
 
   /**
    * Ativa ou desativa LOD para um objeto específico.
+   * Post-Audit 4.0 — F5/F6: Valida instanceId e enabled; no-op se inválido.
    * @param {string} instanceId
    * @param {boolean} enabled
    */
   setEnabled(instanceId, enabled) {
+    if (!instanceId || typeof instanceId !== 'string') return
+    if (typeof enabled !== 'boolean') return
     LODSystem.setEnabled(instanceId, enabled)
   },
 
   /**
    * Verifica se LOD está ativo para um objeto.
+   * Post-Audit 4.0 — F5/F6: Valida instanceId; retorna false se inválido.
    * @param {string} instanceId
    * @returns {boolean}
    */
   isEnabled(instanceId) {
+    if (!instanceId || typeof instanceId !== 'string') return false
     return LODSystem.isEnabled(instanceId)
   },
 
   /**
    * Verifica se um objeto tem LOD (foi registado e justifica LOD).
+   * Post-Audit 4.0 — F5/F6: Valida instanceId; retorna false se inválido.
    * @param {string} instanceId
    * @returns {boolean}
    */
   hasLOD(instanceId) {
+    if (!instanceId || typeof instanceId !== 'string') return false
     return LODSystem.hasLOD(instanceId)
   },
 
   /**
    * Retorna a distância do nível LOD atual.
+   * Post-Audit 4.0 — F5/F6: Valida instanceId; retorna 0 se inválido.
    * @param {string} instanceId
    * @returns {number} — distância em unidades
    */
   getDistance(instanceId) {
+    if (!instanceId || typeof instanceId !== 'string') return 0
     return LODSystem.getDistance(instanceId)
   },
 
@@ -511,19 +522,30 @@ const StreamingAPI = {
 
   /**
    * Solicita o carregamento de um asset.
+   * Post-Audit 4.0 — F5/F6: Valida assetId e options; retorna Promise rejeitada
+   * com erro claro em vez de lançar sincronamente.
    * @param {string} assetId
    * @param {object} options — { priority?: string, loader?: function }
-   * @returns {Promise} — resolve quando asset estiver loaded
+   * @returns {Promise} — resolve quando asset estiver loaded, reject com erro claro
    */
   async request(assetId, options = {}) {
+    // F5/F6: Validar argumentos antes de chamar StreamingManager
+    if (!assetId || typeof assetId !== 'string') {
+      throw new Error('Streaming.request: assetId deve ser uma string não vazia')
+    }
+    if (options && typeof options !== 'object') {
+      throw new Error('Streaming.request: options deve ser um objeto')
+    }
     return StreamingManager.requestAsset(assetId, options)
   },
 
   /**
    * Libera uma referência a um asset.
+   * Post-Audit 4.0 — F5/F6: Valida assetId; no-op silencioso se inválido.
    * @param {string} assetId
    */
   release(assetId) {
+    if (!assetId || typeof assetId !== 'string') return
     StreamingManager.releaseAsset(assetId)
   },
 }
@@ -547,7 +569,7 @@ export const FlirScriptAPI = {
    * Retorna a versão da API (para compatibilidade futura).
    */
   getVersion() {
-    return '1.0.0-phase3.7'
+    return '1.0.0-phase4.0'
   },
 }
 

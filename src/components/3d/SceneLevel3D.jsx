@@ -24,6 +24,7 @@ import DistanceCulling from './DistanceCulling'
 import LODManager from './LODManager'
 import RaycastManager from './RaycastManager'
 import StreamingManagerComponent from './StreamingManagerComponent'
+import WebGLContextLossHandler from './WebGLContextLossHandler'
 import { useStore } from '../../store/useStore'
 import { DEFAULT_CAMERA_FAR } from '../../utils/navigationUtils'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
@@ -285,6 +286,11 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   const inventoryRef = useRef({})
   const weaponStateRef = useRef({ equipped: false, ammo: 0, maxAmmo: 0, damage: 0, fireRate: 0.3, range: 50, reloadTime: 2, lastShot: 0 })
   const collisionEventsRef = useRef(new Map()) // instanceId → Set de otherIds em contacto
+  // Post-Audit 4.0 — A4: Track de setTimeout IDs de collision pair expiry (500ms).
+  // Antes: setTimeout não era cancelado no cleanup → timers pendentes disparavam
+  // após Stop (no-op porque collisionEventsRef era limpo, mas consumia event loop).
+  // Agora: IDs guardados, removidos quando executam, clearTimeout no cleanup.
+  const collisionTimeoutsRef = useRef(new Set())
   const checkpointRef = useRef(null) // último checkpoint registado
   const skyRef = useRef(null) // referência ao SkyObject ativo
   // Bug #4: snapshot de TODAS as scenes antes de Play (portal transitions podem
@@ -920,10 +926,14 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       }
       collisionEventsRef.current.get(instanceId).add(otherInstanceId)
       // Limitar tempo de vida do contacto (expira em 0.5s se não renovado)
-      setTimeout(() => {
+      // Post-Audit 4.0 — A4: Guardar timeout ID para clearTimeout no cleanup
+      const timeoutId = setTimeout(() => {
         const set = collisionEventsRef.current.get(instanceId)
         if (set) set.delete(otherInstanceId)
+        // Remover ID do Set quando o timer executa
+        collisionTimeoutsRef.current.delete(timeoutId)
       }, 500)
+      collisionTimeoutsRef.current.add(timeoutId)
 
       const rt = runtimesRef.current.get(instanceId)
       if (rt) rt.triggerEvent('onCollision', { other: otherInstanceId })
@@ -1096,11 +1106,11 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       // Bug #7: Limpar entradas de colisões da sessão Runtime anterior.
       // collisionEventsRef acumula instanceId → Set<otherId> via onCollision handler.
       // Sem clear(), entradas antigas persistem entre sessões Play (memory/state leak).
-      // Nota: os setTimeout de 500ms no handler de colisão são auto-limpeza
-      // (removem apenas a otherInstanceId específica) e não rastreiam o ciclo de
-      // vida da sessão — o clear() aqui garante que o Map fica vazio para o
-      // próximo Play, mesmo se timeouts pendentes ainda dispararem (eles só
-      // fazem set.delete(otherId), que é no-op se o Set já foi removido).
+      // Post-Audit 4.0 — A4: Cancelar TODOS os setTimeout de collision pair expiry
+      // pendentes. Antes: timers disparavam após Stop (no-op mas consumia event loop).
+      // Agora: clearTimeout de cada ID + clear do Set.
+      for (const tId of collisionTimeoutsRef.current) clearTimeout(tId)
+      collisionTimeoutsRef.current.clear()
       collisionEventsRef.current.clear()
       physicsRef.current?.dispose()
       physicsRef.current = null
@@ -1617,6 +1627,9 @@ export default function SceneLevel3D() {
 
           {/* Performance Core 3.8 — Streaming System cleanup (Play Mode) */}
           <StreamingManagerComponent enabled={isGameMode} />
+
+          {/* Post-Audit 4.0 — M2: WebGL Context Loss Handler (mobile) */}
+          <WebGLContextLossHandler />
 
           <ambientLight intensity={lights.ambient.intensity} color={lights.ambient.color} />
           <directionalLight

@@ -27,6 +27,16 @@ import SceneObject from '../3d/SceneObject'
 const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, setMeshRef }, meshRef) {
   const def = findConectDefinition(conect.type)
 
+  // Post-Audit 4.0 — P3: objectsById Map para lookup O(1) em vez de objects.find() O(N).
+  // Reconstroi só quando `objects` muda (useMemo). Mesmo pattern do SceneLevel3D.
+  const objectsById = useMemo(() => {
+    const map = new Map()
+    for (const obj of objects || []) {
+      if (obj?.id) map.set(obj.id, obj)
+    }
+    return map
+  }, [objects])
+
   // Se não tem visual, não renderiza mesh — mas pode adicionar luzes, etc.
   if (conect.type === 'LuminousObject') {
     return <LuminousMesh conect={conect} setMeshRef={setMeshRef} />
@@ -146,7 +156,8 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
 
   // VisualObject: usa modelo do catálogo
   if (conect.type === 'VisualObject') {
-    const obj = objects.find((o) => o.id === conect.sourceObjectId)
+    // Post-Audit 4.0 — P3: lookup O(1) via Map em vez de O(N) find
+    const obj = objectsById.get(conect.sourceObjectId)
     if (!obj) return null
     const sceneObj = {
       ...obj,
@@ -931,7 +942,8 @@ function ReferenceMesh({ conect, setMeshRef }) {
 
   // Renderizar objetos do catálogo da cena referenciada
   const refObjects = (targetScene.objects || []).map((instance) => {
-    const obj = objects.find((o) => o.id === instance.objectId)
+    // Post-Audit 4.0 — P3: lookup O(1) via Map em vez de O(N) find
+    const obj = objectsById.get(instance.objectId)
     if (!obj) return null
     const sceneObj = {
       ...obj,
