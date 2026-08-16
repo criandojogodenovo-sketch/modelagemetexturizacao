@@ -641,3 +641,34 @@ Stage Summary:
 - SpatialPartitionSystem.restore() no dispose garante Bug #4 safe
 - Performance Core Fase 3.7 (Streaming) NÃO iniciada
 - Push: NÃO realizado (aguardando Fase 3.8)
+
+---
+Task ID: PERF-3.7
+Agent: main
+Task: Performance Core Fase 3.7 — Streaming System
+
+Work Log:
+- AUDIT: textureCache global sem LRU em SceneObject.jsx:34; HDRI loading assíncrono sem fallback estruturado em ConectRenderer.jsx:789; GLB/FBX loading síncrono em exporters.js; FBX worker em fbxImportWorkerClient.js (já otimizado)
+- PLAN: StreamingManager singleton (state machine + priority + reference counting + LRU cache) + FlirScriptAPI.Streaming + integração textureCache
+- IMPLEMENT: src/utils/streamingManager.js (StreamingManager com state machine idle/queued/loading/loaded/error, priority queue critical>high>normal>low>background, reference counting, concurrency control max=3, LRU texture cache limite=50, eviction automática, flushTextureCache, restore Bug #4 safe)
+- IMPLEMENT: SceneObject.jsx loadTexture() integrado com StreamingManager.getTexture (LRU cache + fallback local)
+- IMPLEMENT: flirScriptAPI.js adiciona Streaming namespace (getStats, isLoaded, getState, getPriority, request, release). Versão 1.0.0-phase3.7
+- BUILD: ✓ 0 erros, 2.01s
+- DIFF CHECK: ✓ sem erros whitespace, 3 arquivos (+568/-8)
+- REGRESSÃO: Bugs #1-#7 intactos (todos os refs preservados via grep)
+- Nenhum setTimeout/setInterval/requestAnimationFrame introduzido
+- Nenhum eval()/new Function() introduzido
+- COMMIT: eeaa81a "Performance Core 3.7 - Streaming System"
+
+PERFORMANCE CLASSIFICATION:
+- Impacto: ESTIMADO (não medido em runtime)
+- Runtime benchmark: NÃO MEDIDO
+- Métricas a medir posteriormente: cache hit/miss ratio, eviction rate, load time, memory usage (JS heap)
+
+Stage Summary:
+- StreamingManager implementado com state machine + priority + reference counting + LRU cache
+- textureCache integrado com LRU (limite 50, eviction automática)
+- FlirScriptAPI.Streaming criada com 6 métodos (getStats, isLoaded, getState, getPriority, request, release)
+- StreamingManager.restore() rejeita promises pendentes + limpa cache (Bug #4 safe)
+- Performance Core Fase 3.8 (Integration + Benchmark) NÃO iniciada
+- Push: NÃO realizado (aguardando Fase 3.8 + auditoria completa)
