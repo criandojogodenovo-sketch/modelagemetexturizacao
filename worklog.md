@@ -672,3 +672,40 @@ Stage Summary:
 - StreamingManager.restore() rejeita promises pendentes + limpa cache (Bug #4 safe)
 - Performance Core Fase 3.8 (Integration + Benchmark) NÃO iniciada
 - Push: NÃO realizado (aguardando Fase 3.8 + auditoria completa)
+
+---
+Task ID: PERF-3.8
+Agent: main
+Task: Performance Core Fase 3.8 — Integration + Iterative Improvement Loop (ÚLTIMA FASE)
+
+Work Log:
+- AUDIT: Mapeado dependências entre 6 sistemas Performance Core. Identificados 2 problemas justificados:
+  1. StreamingManager.restore() NUNCA chamado em cleanup (Bug #4 risk)
+  2. Texture cache duplicada (SceneObject local Map + StreamingManager LRU)
+- AUDIT: Todos os outros sistemas (AdaptiveQuality, Culling, LOD, Raycast, Spatial) já tinham restore no cleanup
+- AUDIT: FlirScriptAPI com 8 namespaces consistentes, todos retornando dados serializáveis
+- AUDIT: Bugs #1-#7 refs intactos após 3.2-3.7
+- IMPLEMENT: src/hooks/useStreaming.js (hook com restore no cleanup, Bug #4 safe)
+- IMPLEMENT: src/components/3d/StreamingManagerComponent.jsx (wrapper component)
+- IMPLEMENT: SceneLevel3D.jsx adiciona <StreamingManagerComponent enabled={isGameMode}>
+- IMPLEMENT: SceneObject.jsx consolida texture cache — removido textureCache local, usa apenas StreamingManager.getTexture (LRU)
+- GAUNTLET LOOP: avaliado se existem mais melhorias justificadas. HDRI streaming e integrações cross-system NÃO justificadas sem benchmark real. LOOP ENCERRADO.
+- BUILD: ✓ 0 erros, 1.49s
+- DIFF CHECK: ✓ sem erros whitespace, 4 arquivos (+70/-8)
+- REGRESSÃO: Bugs #1-#7 intactos (todos os refs preservados via grep)
+- Nenhum setTimeout/setInterval/requestAnimationFrame introduzido
+- Nenhum eval()/new Function() introduzido
+- COMMIT: c3232e4 "Performance Core 3.8 - Integration + Audit"
+
+PERFORMANCE CLASSIFICATION:
+- MEDIDO: build 0 erros, git diff --check limpo
+- ESTIMADO: consolidação de cache permite LRU funcionar corretamente (antes dupla cache impedia eviction)
+- NÃO MEDIDO: FPS, frame time, RAM, VRAM, GPU, CPU, draw calls, triangles, load time
+
+Stage Summary:
+- StreamingManager cleanup implementado (Bug #4 safe)
+- Texture cache duplicação corrigida (apenas StreamingManager LRU)
+- Todos os 6 sistemas Performance Core com restore no cleanup
+- FlirScriptAPI com 8 namespaces consistentes
+- Performance Core 3.2-3.8 CONCLUÍDO
+- Push: NÃO realizado (aguardando AUDITORIA COMPLETA DA ENGINE)
