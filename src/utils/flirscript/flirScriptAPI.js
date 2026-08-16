@@ -46,6 +46,7 @@ import { PerformanceBudget } from '../performanceBudget'
 import { PerformanceStats } from '../performanceStats'
 import { RaycastSystem } from '../raycastSystem'
 import { SpatialPartitionSystem } from '../spatialPartitionSystem'
+import { StreamingManager } from '../streamingManager'
 import * as THREE from 'three'
 
 /**
@@ -456,6 +457,78 @@ const SpatialAPI = {
 }
 
 /**
+ * Streaming API — Asset Streaming System.
+ *
+ * Performance Core Fase 3.7.
+ *
+ * Métodos:
+ *  - getStats(): object — { loadedAssets, queuedAssets, loadingAssets, cacheHits, cacheMisses, evictions, failedLoads }
+ *  - isLoaded(assetId): boolean
+ *  - getState(assetId): string — 'idle'|'queued'|'loading'|'loaded'|'unloading'|'unloaded'|'error'
+ *  - getPriority(assetId): string — 'critical'|'high'|'normal'|'low'|'background'|'unknown'
+ *  - request(assetId, options?): Promise — solicita carregamento
+ *  - release(assetId): void — libera referência
+ *
+ * Retorna apenas dados serializáveis — NÃO expõe THREE.Texture, geometries, etc.
+ *
+ * Memory usage: NÃO MEDIDO (sem API real de medição de memória JS heap)
+ */
+const StreamingAPI = {
+  /**
+   * Retorna estatísticas do sistema de streaming.
+   * @returns {{ loadedAssets: number, queuedAssets: number, loadingAssets: number, cacheHits: number, cacheMisses: number, evictions: number, failedLoads: number }}
+   */
+  getStats() {
+    return StreamingManager.getStats()
+  },
+
+  /**
+   * Verifica se um asset está loaded.
+   * @param {string} assetId
+   * @returns {boolean}
+   */
+  isLoaded(assetId) {
+    return StreamingManager.isLoaded(assetId)
+  },
+
+  /**
+   * Retorna o estado atual de um asset.
+   * @param {string} assetId
+   * @returns {string} — 'idle'|'queued'|'loading'|'loaded'|'unloading'|'unloaded'|'error'
+   */
+  getState(assetId) {
+    return StreamingManager.getState(assetId)
+  },
+
+  /**
+   * Retorna a prioridade atual de um asset.
+   * @param {string} assetId
+   * @returns {string} — 'critical'|'high'|'normal'|'low'|'background'|'unknown'
+   */
+  getPriority(assetId) {
+    return StreamingManager.getPriority(assetId)
+  },
+
+  /**
+   * Solicita o carregamento de um asset.
+   * @param {string} assetId
+   * @param {object} options — { priority?: string, loader?: function }
+   * @returns {Promise} — resolve quando asset estiver loaded
+   */
+  async request(assetId, options = {}) {
+    return StreamingManager.requestAsset(assetId, options)
+  },
+
+  /**
+   * Libera uma referência a um asset.
+   * @param {string} assetId
+   */
+  release(assetId) {
+    StreamingManager.releaseAsset(assetId)
+  },
+}
+
+/**
  * FlirScriptAPI — objeto raiz da API oficial do FlirScript.
  *
  * Exportado como singleton. Acessível via import ou via gameContext.api.
@@ -468,12 +541,13 @@ export const FlirScriptAPI = {
   Events: EventsAPI,
   Raycast: RaycastAPI,
   Spatial: SpatialAPI,
+  Streaming: StreamingAPI,
 
   /**
    * Retorna a versão da API (para compatibilidade futura).
    */
   getVersion() {
-    return '1.0.0-phase3.6'
+    return '1.0.0-phase3.7'
   },
 }
 

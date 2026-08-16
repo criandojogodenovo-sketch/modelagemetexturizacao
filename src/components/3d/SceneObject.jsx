@@ -31,17 +31,26 @@ import {
 import { compositeTextureLayers } from '../../utils/textureCompositor'
 
 // Cache de texturas carregadas a partir de dataURLs
+// Performance Core 3.7 — Integrado com StreamingManager LRU cache
+// (limite de 50 texturas, eviction automática de texturas com refCount=0)
+import { StreamingManager } from '../../utils/streamingManager'
+
 const textureCache = new Map()
 
 export function loadTexture(dataURL) {
   if (!dataURL) return null
-  if (textureCache.has(dataURL)) return textureCache.get(dataURL)
-  const loader = new THREE.TextureLoader()
-  const tex = loader.load(dataURL)
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.wrapS = THREE.RepeatWrapping
-  tex.wrapT = THREE.RepeatWrapping
-  textureCache.set(dataURL, tex)
+  // Performance Core 3.7 — Usar StreamingManager.getTexture (LRU cache)
+  // Fallback: se StreamingManager falhar, usar cache local antigo
+  const tex = StreamingManager.getTexture(dataURL, () => {
+    if (textureCache.has(dataURL)) return textureCache.get(dataURL)
+    const loader = new THREE.TextureLoader()
+    const t = loader.load(dataURL)
+    t.colorSpace = THREE.SRGBColorSpace
+    t.wrapS = THREE.RepeatWrapping
+    t.wrapT = THREE.RepeatWrapping
+    textureCache.set(dataURL, t)
+    return t
+  })
   return tex
 }
 
