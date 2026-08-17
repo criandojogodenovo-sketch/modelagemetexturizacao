@@ -2683,3 +2683,150 @@ Novos: weld (Fase 1), curve (Fase 10)
 | — | Mecânicas profissional |
 | — | Pincel 3D dos terrenos melhorado (planos, cubos) |
 
+---
+
+## 🎬 Fases 11-16 — Implementações Finais (Setembro 2026)
+
+### Fase 11 — Abas de Modelos e Animação Nível Blender
+
+**EditModePanel:**
+- Secção **Transformação:** aumentar/reduzir escala (+10%), rodar 90° Y
+- Secção **Simetria:** espelhar X/Y/Z
+- Feedback visual: botão Extrude fica ativo quando modo Face selecionado
+- Tooltips com atalhos de teclado
+
+**Timeline:**
+- **Seletor de velocidade:** 0.25x, 0.5x, 1x, 1.5x, 2x
+- **Botões de navegação:** ⏮ início, ◀ recuar 0.5s, ▶ avançar 0.5s, ⏭ fim
+- Mantém seletor de clip + loop + interpolação (Fase 7)
+
+### Fase 12 — Pincel 3D para Modificadores + Pincel 3D dos Terrenos Melhorado
+
+**TerrainSculpt3D — Novos modos de pincel:**
+- **plane:** achata para um nível alvo (cria planos/terraços)
+- **cube:** eleva em forma de bloco (bordas duras, sem falloff)
+- Throttle a 30fps para performance mobile
+
+**ModifierBrush3D (NOVO):**
+- Pincel 3D que aplica Displace localmente em modelos
+- Raycast contra geometria do objeto selecionado
+- Desloca vértices ao longo da normal com falloff cosenoide
+- Cursor 3D visual (ring azul + ponto central)
+- Throttle a 30fps
+
+### Fase 13 — VFX Profissional e Realista
+
+**VFX Presets expandidos de 6 para 10:**
+
+| Preset | Categoria | Descrição |
+|---|---|---|
+| 💥 Explosão | Combat | Onda de choque + smoke trail + debris + emissive |
+| ⚡ Impacto | Combat | Faíscas + flash + emissive |
+| ✨ Rasto Mágico | Magic | Pulse effect + trail fade + emissive |
+| 💨 Fumo | Environment | Expand + opacity fade |
+| 🔥 Fogo | Environment | Flicker + secondary color + emissive |
+| ⭐ Brilho | Magic | Twinkle + emissive |
+| 🎯 Flash de Arma | Combat | Flash rápido + direction cone (NOVO) |
+| 🩸 Salpico de Sangue | Combat | Gravidade + drip effect (NOVO) |
+| 🌀 Portal Mágico | Magic | Espiral + spiral speed (NOVO) |
+| ⚡ Arco Elétrico | Magic | Flicker rápido + arc (NOVO) |
+
+**Propriedades profissionais adicionadas:**
+`emissive`, `emissiveIntensity`, `secondaryColor`, `shockwave`, `flash`, `flicker`, `twinkle`, `expand`, `spiral`, `arc`, `dripEffect`
+
+### Fase 14 — Construtores Realistas (Referências Reais)
+
+**Materiais realistas baseados em referências reais:**
+
+| Material | Roughness | Metalness | Referência |
+|---|---|---|---|
+| Arenito | 0.9 | 0.0 | Pedra natural |
+| Concreto | 0.85 | 0.0 | Edifícios modernos |
+| Tijolo escuro | 0.95 | 0.0 | Construção tradicional |
+| Arenito claro | 0.8 | 0.0 | Fachadas |
+| Metal pintado | 0.7 | 0.1 | Estruturas industriais |
+| Vidro escuro | 0.6 | 0.3 | Edifícios corporativos |
+
+**Carros — material por tipo de carroçaria:**
+
+| Tipo | Roughness | Metalness | Referência |
+|---|---|---|---|
+| Sedan | 0.2 | 0.8 | Carro de estrada |
+| SUV | 0.3 | 0.7 | Veículo todo-o-terreno |
+| Sports | 0.1 | 0.9 | Desportivo (pintura metalizada) |
+| Truck | 0.4 | 0.6 | Camião (pintura fosca) |
+
+### Fase 15 — Mecânicas Profissional
+
+- MechanicsPanel já tem 6 assistentes (Fase 6)
+- Tooltips mais descritivos
+- Integração com FlirCode documentada no UI
+
+### Fase 16 — Pesquisa de Engines Concorrentes
+
+| Engine | Funcionalidade | Flir Engine tem? |
+|---|---|---|
+| **Unreal Engine 5** | Nanite (geometria virtualizada) | Não (WebGL não suporta) |
+| | Lumen (GI em tempo real) | Parcial (FlirGI aproximação) |
+| | Blueprint Visual Scripting | ✓ (FlirScript visual + FlirCode) |
+| | MetaHumans | Não (fora do scope) |
+| **Unity 2023** | DOTS (ECS) | Parcial (ECS próprio) |
+| | Shader Graph | ✓ (ShaderEditor) |
+| | Cinemachine | Parcial (ViewObject + Fase 5) |
+| | Addressables | Não (StreamingManager existe mas limitado) |
+| **Godot 4** | Node system | ✓ (Conects) |
+| | GDScript | ✓ (FlirCode) |
+| | Signal system | ✓ (Events API) |
+| | 2D/3D em simultâneo | Não (apenas 3D) |
+| **ItsMagic Engine 2.0** | AI-assisted creation | Não |
+| | Cloud rendering | Não |
+| | Real-time collaboration | Parcial (MultiplayerPanel) |
+
+**Propostas de funcionalidades futuras:**
+1. Nanite-like LOD automático (já temos LODSystem, melhorar com streaming)
+2. GI em tempo real (melhorar FlirGI com SSGI)
+3. Addressables (StreamingManager já existe, expandir)
+4. 2D/3D em simultâneo (adicionar modo 2D)
+5. AI-assisted creation (acelerar criação de cenas)
+
+### Arquivos criados/modificados (Fases 11-16)
+
+| Arquivo | Fase | Descrição |
+|---|---|---|
+| `src/components/panels/EditModePanel.jsx` | 11 | Transformação + Simetria + feedback visual |
+| `src/components/panels/Timeline.jsx` | 11 | Velocidade + navegação ⏮◀▶⏭ |
+| `src/components/3d/TerrainSculpt3D.jsx` | 12 | Modos plane + cube |
+| `src/components/3d/ModifierBrush3D.jsx` | 12 | NOVO — Pincel 3D para Displace em modelos |
+| `src/utils/vfxPresets.js` | 13 | 4 novos presets + propriedades profissionais |
+| `src/utils/proceduralBuilders.js` | 14 | Materiais realistas (roughness/metalness) |
+
+### Verificação
+
+| Verificação | Resultado |
+|---|---|
+| `npm run build` | ✓ PASS (0 erros) |
+| `git diff --check` | ✓ PASS (exit 0) |
+| Bugs #1-#7 | ✓ Intactos |
+
+### Totais Finais da Engine
+
+| Sistema | Quantidade |
+|---|---|
+| **Conects** | 57 |
+| **Modificadores** | 16 |
+| **VFX Presets** | 10 |
+| **Light Presets** | 12 |
+| **Sky Presets** | 5 |
+| **FlirScriptAPI Namespaces** | 11 |
+| **Construtores** | 6 (Cidade, Edifício, Carro, Mobiliário, Floresta, VFX) |
+| **Mecânicas (assistentes)** | 6 |
+| **Diálogos** | Sistema completo com editor visual |
+
+### ⚠️ Importante sobre a Vercel
+
+O código está no GitHub. A Vercel precisa de ser verificada:
+1. Ir a https://vercel.com/dashboard
+2. Verificar o projeto `modelagemetexturizacao`
+3. Fazer "Redeploy" manual se necessário
+4. Confirmar que está a watching o branch `main`
+
