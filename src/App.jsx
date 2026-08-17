@@ -43,6 +43,7 @@ import InstancingPanel from './components/panels/InstancingPanel'
 import SettingsPanel from './components/panels/SettingsPanel'
 import BuildersPanel from './components/panels/BuildersPanel'
 import MechanicsPanel from './components/panels/MechanicsPanel'
+import DialoguePanel from './components/panels/DialoguePanel'
 import PerformanceStatsOverlay from './components/ui/PerformanceStatsOverlay'
 import MainMenu from './components/ui/MainMenu'
 import VerticalRail from './components/ui/VerticalRail'
@@ -97,6 +98,8 @@ export default function App() {
   const closeBuildersPanel = useStore((s) => s.closeBuildersPanel)
   const mechanicsPanelOpen = useStore((s) => s.mechanicsPanelOpen)
   const closeMechanicsPanel = useStore((s) => s.closeMechanicsPanel)
+  const dialoguePanelOpen = useStore((s) => s.dialoguePanelOpen)
+  const closeDialoguePanel = useStore((s) => s.closeDialoguePanel)
   const homeVisible = useStore((s) => s.homeVisible)
   const hideHome = useStore((s) => s.hideHome)
 
@@ -216,6 +219,7 @@ export default function App() {
       {settingsPanelOpen && <SettingsPanel onClose={closeSettingsPanel} />}
       {buildersPanelOpen && <BuildersPanel onClose={closeBuildersPanel} />}
       {mechanicsPanelOpen && <MechanicsPanel onClose={closeMechanicsPanel} />}
+      {dialoguePanelOpen && <DialoguePanel onClose={closeDialoguePanel} />}
       {perfStatsVisible && <PerformanceStatsOverlay />}
       {animControllerTarget && (
         <div className="modal-backdrop" onClick={closeAnimController}>

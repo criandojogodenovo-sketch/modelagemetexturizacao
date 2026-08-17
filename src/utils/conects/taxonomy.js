@@ -1370,6 +1370,28 @@ export const CONECT_TAXONOMY = [
       prop('depthGradient', 'Gradiente de profundidade', 'boolean', true),
     ],
   },
+  // Fase 8 — Sistema de Diálogos
+  {
+    type: 'DialogueObject',
+    label: 'Dialogue Object (Diálogo NPC)',
+    category: 'gameplay',
+    icon: 'message-circle',
+    description: 'Sistema de diálogo com árvore de nós e escolhas. Usar startDialogue() no FlirCode.',
+    hasPhysics: false,
+    hasVisual: true,
+    flirScriptable: true,
+    defaults: {
+      npcName: 'NPC',
+      triggerRadius: 3,
+      autoStart: false,
+      dialogueTree: null, // JSON da árvore de diálogo (null = criar no editor)
+    },
+    properties: [
+      prop('npcName', 'Nome do NPC', 'text', 'NPC'),
+      prop('triggerRadius', 'Raio de ativação', 'number', 3, { min: 1, max: 20, step: 0.5 }),
+      prop('autoStart', 'Iniciar automaticamente ao aproximar', 'boolean', false),
+    ],
+  },
 ]
 
 // Helpers

@@ -1520,6 +1520,11 @@ export const useStore = create(
       openMechanicsPanel: () => set({ mechanicsPanelOpen: true }),
       closeMechanicsPanel: () => set({ mechanicsPanelOpen: false }),
 
+      // Fase 8 — Gerador de Diálogos
+      dialoguePanelOpen: false,
+      openDialoguePanel: () => set({ dialoguePanelOpen: true }),
+      closeDialoguePanel: () => set({ dialoguePanelOpen: false }),
+
       // Terrain Sculpt 3D — escultura direta no viewport 3D
       terrainSculptActive: false,
       toggleTerrainSculpt: () => set((s) => ({ terrainSculptActive: !s.terrainSculptActive })),

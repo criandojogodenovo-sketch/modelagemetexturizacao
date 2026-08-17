@@ -2292,3 +2292,112 @@ Adiciona biblioteca de componentes pré-estilizados (presets) ao UI Editor, insp
 
 4. **Auto-alinhamento não implementado** — os presets são criados na posição default do elemento. Não há snap à grid ou alinhamento automático entre elementos. Implementação futura: adicionar guidelines de alinhamento no canvas do UI Editor.
 
+---
+
+## 💬 Fase 8 — Gerador de Diálogos (Setembro 2026)
+
+Sistema completo de diálogos com árvore de nós e escolhas, editor visual, gizmo no viewport e integração com FlirCode.
+
+### Sistema de Diálogos
+
+**Arquivo:** `src/utils/dialogueSystem.js`
+
+Sistema singleton que gere árvores de diálogo com nós de texto e escolhas:
+
+```
+Nó Start → "Olá, viajante!"
+  ├── Escolha 1 → Nó Shop
+  ├── Escolha 2 → Nó Info
+  └── Escolha 3 → Fim (endDialogue)
+```
+
+#### API do dialogueSystem
+
+| Método | Descrição |
+|---|---|
+| `createDialogueTree(npcName)` | Cria árvore vazia com nó inicial |
+| `addDialogueNode(treeId, node)` | Adiciona nó à árvore |
+| `addDialogueChoice(treeId, nodeId, choice)` | Adiciona escolha a um nó |
+| `startDialogue(treeId, gameContext)` | Inicia diálogo, retorna nó inicial |
+| `chooseOption(choiceId)` | Processa escolha, retorna próximo nó |
+| `getCurrentNode()` | Retorna nó atual do diálogo ativo |
+| `endDialogue()` | Termina diálogo ativo |
+| `isDialogueActive()` | Verifica se diálogo está ativo |
+| `getAllDialogueTrees()` | Lista todas as árvores |
+| `getDialogueTree(treeId)` | Procura árvore por ID |
+| `onDialogueEvent(event, callback)` | Listener para eventos (onDialogueStart/Choice/End) |
+
+### Editor Visual de Diálogos
+
+**Arquivo:** `src/components/panels/DialoguePanel.jsx`
+
+- Criar múltiplas árvores de diálogo (uma por NPC)
+- Editor de nós: texto editável, adicionar/remover nós
+- Editor de escolhas: texto + nó de destino + action
+- **Testar diálogo** in-editor: botão "Testar" que simula o diálogo completo
+- Visualização da árvore como lista de nós com indicador de nó inicial (🟢)
+
+**Acesso:** VerticalRail → "Diálogos" → criar/selecionar árvore → editar nós e escolhas → Testar
+
+### DialogueObject (Conect)
+
+Novo Conect adicionado à taxonomy:
+
+| Propriedade | Tipo | Default | Descrição |
+|---|---|---|---|
+| `npcName` | text | 'NPC' | Nome do NPC |
+| `triggerRadius` | number | 3 | Raio de ativação |
+| `autoStart` | boolean | false | Iniciar ao aproximar |
+
+**Gizmo no viewport:** Esfera azul flutuante (indica NPC de diálogo) + ring no chão + sphere wireframe (raio de trigger).
+
+### FlirCode Integration
+
+```flircode
+$$ Iniciar diálogo
+startDialogue("dlg_001", gameContext)
+
+$$ Processar escolha do jogador
+fun onDialogueChoice(choiceId, action)
+  begincode
+    if action == "openShop" then
+      gameContext.setGameState("shopping")
+    endif
+  endcode
+end
+
+$$ Terminar diálogo
+endDialogue()
+```
+
+### Arquivos criados/modificados
+
+| Arquivo | +Linhas | Tipo |
+|---|---|---|
+| `src/utils/dialogueSystem.js` | 215 | NOVO — Sistema completo de diálogos |
+| `src/components/panels/DialoguePanel.jsx` | 210 | NOVO — Editor visual + teste |
+| `src/utils/conects/taxonomy.js` | +22 | MODIFICADO — DialogueObject conect |
+| `src/components/panels/ConectRenderer.jsx` | +31 | MODIFICADO — DialogueMesh gizmo |
+| `src/App.jsx` | +4 | MODIFICADO — import + state + render |
+| `src/store/useStore.js` | +5 | MODIFICADO — dialoguePanelOpen + setters |
+| `src/components/ui/VerticalRail.jsx` | +5 | MODIFICADO — botão "Diálogos" + handler |
+| **Total** | +492 | |
+
+### Verificação
+
+| Verificação | Resultado |
+|---|---|
+| `npm run build` | ✓ PASS (0 erros, 1.44s) |
+| `git diff --check` | ✓ PASS (exit 0) |
+| Bugs #1-#7 | ✓ Intactos |
+| Fases 1-7 | ✓ Não alteradas |
+
+### Classificação
+
+| Categoria | Itens |
+|---|---|
+| **MEDIDO** | Build: 0 erros, 1.44s |
+| **STATICALLY VERIFIED** | `dialogueSystem` tem createTree/addNode/addChoice/startDialogue/chooseOption/endDialogue; DialoguePanel tem editor de nós + escolhas + teste; DialogueObject tem gizmo no ConectRenderer; FlirCode integration via startDialogue/onDialogueChoice/endDialogue; VerticalRail tem botão "Diálogos"; Bugs #1-#7 intactos |
+| **ESTIMADO** | Sistema de diálogos abre portas para RPGs/conversas com NPCs; Teste in-editor reduz iteração |
+| **NOT TESTED** | Diálogo real em browser; Trigger por proximidade real; FlirCode onDialogueChoice real |
+

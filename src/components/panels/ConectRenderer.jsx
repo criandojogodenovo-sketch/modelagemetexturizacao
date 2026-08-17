@@ -143,6 +143,9 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
   // RealWater — água super-realista
   if (conect.type === 'RealWaterObject') return <RealWaterMesh conect={conect} setMeshRef={setMeshRef} />
 
+  // Fase 8 — DialogueObject: gizmo de NPC diálogo
+  if (conect.type === 'DialogueObject') return <DialogueMesh conect={conect} setMeshRef={setMeshRef} />
+
   // ReferenceObject: renderiza conteúdo de outra cena
   if (conect.type === 'ReferenceObject') {
     return <ReferenceMesh conect={conect} setMeshRef={setMeshRef} />
@@ -1393,5 +1396,33 @@ function RealWaterMesh({ conect, setMeshRef }) {
       scale={conect.scale}
       receiveShadow
     />
+  )
+}
+
+// ===== Fase 8 — DialogueObject (gizmo de NPC diálogo) =====
+function DialogueMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  useFrame((_, dt) => {
+    if (ref.current) ref.current.rotation.y += dt * 0.3
+  })
+  const npcName = conect.npcName || 'NPC'
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      {/* Indicador flutuante (balão de diálogo) */}
+      <mesh ref={ref} position={[0, 2.5, 0]}>
+        <sphereGeometry args={[0.3, 16, 16]} />
+        <meshStandardMaterial color="#2f81f7" emissive="#2f81f7" emissiveIntensity={0.6} transparent opacity={0.8} />
+      </mesh>
+      {/* Ponto de interação no chão */}
+      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.8, 1, 32]} />
+        <meshBasicMaterial color="#2f81f7" transparent opacity={0.4} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Raio de trigger (wireframe sphere) */}
+      <mesh>
+        <sphereGeometry args={[conect.triggerRadius || 3, 16, 8]} />
+        <meshBasicMaterial color="#2f81f7" wireframe transparent opacity={0.15} />
+      </mesh>
+    </group>
   )
 }

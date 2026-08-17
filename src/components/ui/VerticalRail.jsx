@@ -35,6 +35,7 @@ const RAIL_TOOLS = [
   { id: 'conects', icon: 'puzzle', label: 'Conects', action: 'toggleConectsWindow' },
   { id: 'builders', icon: 'package', label: 'Construtores', action: 'openBuilders' },
   { id: 'mechanics', icon: 'target', label: 'Mecânicas', action: 'openMechanics' },
+  { id: 'dialogue', icon: 'message-circle', label: 'Diálogos', action: 'openDialogue' },
   { id: 'shader', icon: 'palette', label: 'Shader', action: 'openShaderEditor' },
   { id: 'animation', icon: 'film', label: 'Animação', action: 'openAnimStudio' },
   { id: 'terrain', icon: 'mountain', label: 'Terreno', action: 'openTerrainEditor' },
@@ -87,6 +88,10 @@ export default function VerticalRail() {
       case 'openMechanics':
         // Fase 6 — Abrir painel de Mecânicas
         useStore.getState().openMechanicsPanel()
+        break
+      case 'openDialogue':
+        // Fase 8 — Abrir painel de Diálogos
+        useStore.getState().openDialoguePanel()
         break
     }
   }
