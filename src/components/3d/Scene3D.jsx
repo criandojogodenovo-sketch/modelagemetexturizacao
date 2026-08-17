@@ -9,6 +9,7 @@
  *  - Renderização de todos os objetos da cena
  *  - TransformControls (gizmo) — só em modo 'object'
  *  - Modo Sculpt: raycast + sculptStrokeAt ao clicar/arrastar
+ *  - Modo Paint: raycast + paintStrokeOnMesh ao clicar/arrastar (3D texture paint real)
  *  - Modo Edit: seleção de vértices/arestas/faces (visual overlay)
  *  - Click no vazio = deselect
  */
@@ -18,6 +19,7 @@ import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-t
 import * as THREE from 'three'
 import SceneObject from './SceneObject'
 import { useStore } from '../../store/useStore'
+import { paintStrokeOnMesh } from '../../utils/texturePaint'
 
 // ----- Componente interno: aplica o fundo da cena -----
 function SceneBackground({ background }) {
@@ -98,6 +100,84 @@ function SculptRaycaster({ meshRefs, orbitRef }) {
       if (orbitRef.current) orbitRef.current.enabled = true
     }
   }, [mode, selectedId, sculptStrokeAt, sculptSettings, gl, camera, meshRefs, orbitRef])
+
+  return null
+}
+
+// ----- Componente interno: raycast para Texture Paint (3D real) -----
+// Implementa os 9 passos do pipeline Blender-style:
+//   1. Raycast da câmara → mesh selecionado
+//   2. intersectObject devolve hit.face (triângulo) e hit.uv (interpolado baricêntrico)
+//   3. paintStrokeOnMesh aplica o pincel no canal ativo na UV exata
+//   4. CanvasTexture.needsUpdate = true (atualização GPU incremental, sem recriar)
+function TexturePaintRaycaster({ meshRefs, orbitRef }) {
+  const { gl, camera, pointer } = useThree()
+  const mode = useStore((s) => s.mode)
+  const selectedId = useStore((s) => s.selectedId)
+  const paintSettings = useStore((s) => s.paintSettings)
+  const isDraggingRef = useRef(false)
+  const raycaster = useRef(new THREE.Raycaster())
+
+  useEffect(() => {
+    if (mode !== 'paint' || !selectedId) return
+    const canvas = gl.domElement
+
+    const onPointerDown = (e) => {
+      // Só ativar com botão principal (esquerdo ou touch)
+      if (e.button !== undefined && e.button !== 0) return
+      isDraggingRef.current = true
+      if (orbitRef.current) orbitRef.current.enabled = false
+      doStroke(e)
+    }
+    const onPointerMove = (e) => {
+      if (!isDraggingRef.current) return
+      doStroke(e)
+    }
+    const onPointerUp = () => {
+      isDraggingRef.current = false
+      if (orbitRef.current) orbitRef.current.enabled = true
+    }
+    const doStroke = (e) => {
+      const mesh = meshRefs.current.get(selectedId)
+      if (!mesh) return
+      const rect = canvas.getBoundingClientRect()
+      const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+      const y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+      raycaster.current.setFromCamera(new THREE.Vector2(x, y), camera)
+      // Intersectar o mesh selecionado
+      const intersects = raycaster.current.intersectObject(mesh, false)
+      if (intersects.length === 0) return
+      const hit = intersects[0]
+      // hit.uv é interpolado por three.js via baricêntricas automaticamente
+      // (passo 5: coordenadas baricêntricas para UV exata)
+      if (!hit.uv) {
+        // Sem UV no hit — mesh pode não ter UV attribute. Sinalizar e sair.
+        console.warn('[TexturePaint] Mesh sem UVs — não é possível pintar.')
+        return
+      }
+      // Construir brush no formato esperado por paintStrokeOnMesh
+      const brush = {
+        type: paintSettings.brushType || 'draw',
+        color: paintSettings.color || '#ff5555',
+        size: paintSettings.size || 30,
+        strength: paintSettings.strength ?? 0.5,
+        channel: paintSettings.channel || 'color',
+        normalMode: paintSettings.normalMode || 'raise',
+        cloneSource: paintSettings.cloneSource || null,
+      }
+      paintStrokeOnMesh(selectedId, { u: hit.uv.x, v: hit.uv.y }, brush)
+    }
+
+    canvas.addEventListener('pointerdown', onPointerDown)
+    canvas.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    return () => {
+      canvas.removeEventListener('pointerdown', onPointerDown)
+      canvas.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      if (orbitRef.current) orbitRef.current.enabled = true
+    }
+  }, [mode, selectedId, paintSettings, gl, camera, meshRefs, orbitRef])
 
   return null
 }
@@ -260,6 +340,9 @@ export default function Scene3D() {
 
         {/* Raycast para sculpt */}
         <SculptRaycaster meshRefs={meshRefs} orbitRef={orbitRef} />
+
+        {/* Raycast para Texture Paint (3D real) */}
+        <TexturePaintRaycaster meshRefs={meshRefs} orbitRef={orbitRef} />
 
         {/* Câmara orbital — desativada em modo sculpt durante o arraste */}
         <OrbitControls

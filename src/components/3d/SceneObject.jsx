@@ -4,13 +4,17 @@
  * Responsabilidades:
  *  - Construir geometria (primitiva, importada, ou customGeometry de edit mode)
  *  - Aplicar modificadores não destrutivos (subdivision, mirror, array, solidify)
- *  - Construir material PBR com cor, roughness, metalness, emissive, opacity,
- *    map, normalMap, múltiplas camadas de textura
+ *  - Construir material PBR completo (MeshPhysicalMaterial) com:
+ *      cor, roughness, metalness, emissive, opacity
+ *      map, normalMap, roughnessMap, metalnessMap, emissiveMap
+ *      anisotropy, ior, transmission, clearcoat, sheen, specularIntensity
  *  - Aplicar repeat/offset (tiling UV)
  *  - Suportar seleção visual
  *  - Receber pointer events para seleção
  *  - Forward ref do mesh para o parent usar com TransformControls
  *  - Suportar skeleton (ossos) para animação
+ *  - INTEGRAÇÃO TEXTURE PAINT: usa PaintTextureManager para pintura real-time
+ *      nos 4 canais (color/roughness/metallic/normal) sem recriar textura
  */
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
@@ -22,8 +26,9 @@ import {
   solidifyGeometry,
 } from '../../utils/meshOperations'
 import { compositeTextureLayers } from '../../utils/textureCompositor'
+import { getPaintTexture } from '../../utils/texturePaint'
 
-// Cache de texturas carregadas a partir de dataURLs
+// Cache de texturas carregadas a partir de dataURLs (texturas importadas, não paint)
 const textureCache = new Map()
 
 export function loadTexture(dataURL) {
@@ -72,6 +77,14 @@ function applyModifiers(geometry, modifiers) {
   return result
 }
 
+// Aplica tiling UV a uma textura (helper)
+function applyTilingToTexture(tex, m) {
+  if (!tex) return
+  tex.repeat.set(m.repeat?.[0] ?? 1, m.repeat?.[1] ?? 1)
+  tex.offset.set(m.offset?.[0] ?? 0, m.offset?.[1] ?? 0)
+  tex.needsUpdate = true
+}
+
 const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect }, meshRef) {
   const innerRef = useRef()
 
@@ -89,9 +102,34 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       }
       if (obj.customGeometry.uvs) {
         base.setAttribute('uv', new THREE.Float32BufferAttribute(obj.customGeometry.uvs, 2))
+      } else {
+        // Sem UVs — gerar UVs planar para permitir pintura
+        const uvs = new Float32Array(base.attributes.position.count * 2)
+        base.computeBoundingBox()
+        const bb = base.boundingBox
+        const size = new THREE.Vector3(); bb.getSize(size)
+        const pos = base.attributes.position
+        for (let i = 0; i < pos.count; i++) {
+          uvs[i * 2]     = (pos.getX(i) - bb.min.x) / Math.max(0.0001, size.x)
+          uvs[i * 2 + 1] = (pos.getY(i) - bb.min.y) / Math.max(0.0001, size.y)
+        }
+        base.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
       }
     } else if (obj.imported && obj.bufferGeometry) {
       base = obj.bufferGeometry
+      // Garantir que imported geometries têm UVs
+      if (!base.getAttribute('uv')) {
+        const uvs = new Float32Array(base.attributes.position.count * 2)
+        base.computeBoundingBox()
+        const bb = base.boundingBox
+        const size = new THREE.Vector3(); bb.getSize(size)
+        const pos = base.attributes.position
+        for (let i = 0; i < pos.count; i++) {
+          uvs[i * 2]     = (pos.getX(i) - bb.min.x) / Math.max(0.0001, size.x)
+          uvs[i * 2 + 1] = (pos.getY(i) - bb.min.y) / Math.max(0.0001, size.y)
+        }
+        base.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+      }
     } else {
       const def = PRIMITIVES[obj.type]
       base = def ? def.build(THREE, obj.args) : new THREE.BoxGeometry(1, 1, 1)
@@ -101,18 +139,35 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     return final
   }, [obj.type, obj.args, obj.imported, obj.bufferGeometry, obj.customGeometry, obj.modifiers])
 
-  // ----- Material -----
+  // ----- Material (MeshPhysicalMaterial — PBR completo) -----
   const material = useMemo(() => {
     const m = obj.material || {}
-    const mat = new THREE.MeshStandardMaterial({
+    const isTransparent = m.transparent || (m.opacity ?? 1) < 1 || (m.transmission ?? 0) > 0
+    const mat = new THREE.MeshPhysicalMaterial({
       color: new THREE.Color(m.color || '#cccccc'),
       roughness: m.roughness ?? 0.7,
       metalness: m.metalness ?? 0.0,
-      transparent: m.transparent || (m.opacity ?? 1) < 1,
+      transparent: isTransparent,
       opacity: m.opacity ?? 1,
       wireframe: m.wireframe || false,
       flatShading: m.flatShading || false,
       side: obj.type === 'plane' ? THREE.DoubleSide : THREE.FrontSide,
+      // PBR físico:
+      anisotropy: m.anisotropy ?? 0.0,
+      anisotropyRotation: m.anisotropyRotation ?? 0.0,
+      ior: m.ior ?? 1.5,
+      transmission: m.transmission ?? 0.0,
+      thickness: m.thickness ?? 0.0,
+      attenuationColor: new THREE.Color(m.attenuationColor || '#ffffff'),
+      attenuationDistance: m.attenuationDistance ?? 0.5,
+      clearcoat: m.clearcoat ?? 0.0,
+      clearcoatRoughness: m.clearcoatRoughness ?? 0.0,
+      sheen: m.sheen ?? 0.0,
+      sheenColor: new THREE.Color(m.sheenColor || '#ffffff'),
+      sheenRoughness: m.sheenRoughness ?? 0.5,
+      specularIntensity: m.specularIntensity ?? 1.0,
+      specularColor: new THREE.Color(m.specularColor || '#ffffff'),
+      envMapIntensity: m.envMapIntensity ?? 1.0,
     })
 
     // Emissive
@@ -121,12 +176,14 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       mat.emissiveIntensity = m.emissiveIntensity ?? 1
     }
 
+    // ===== Texturas importadas (dataURL) — aplicadas com prioridade =====
+    // Se o utilizador fez upload de um mapa, usa esse. Caso contrário,
+    // a textura do PaintTextureManager (paint) é aplicada no effect abaixo.
+
     if (m.map) {
       const tex = loadTexture(m.map)
       if (tex) {
-        tex.repeat.set(m.repeat?.[0] ?? 1, m.repeat?.[1] ?? 1)
-        tex.offset.set(m.offset?.[0] ?? 0, m.offset?.[1] ?? 0)
-        tex.needsUpdate = true
+        applyTilingToTexture(tex, m)
         mat.map = tex
       }
     }
@@ -134,14 +191,30 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     if (m.normalMap) {
       const tex = loadTexture(m.normalMap)
       if (tex) {
-        tex.repeat.set(m.repeat?.[0] ?? 1, m.repeat?.[1] ?? 1)
-        tex.offset.set(m.offset?.[0] ?? 0, m.offset?.[1] ?? 0)
-        tex.needsUpdate = true
+        applyTilingToTexture(tex, m)
+        tex.colorSpace = THREE.NoColorSpace
         mat.normalMap = tex
       }
     }
 
-    // Emissive map (se existir)
+    if (m.roughnessMap) {
+      const tex = loadTexture(m.roughnessMap)
+      if (tex) {
+        applyTilingToTexture(tex, m)
+        tex.colorSpace = THREE.NoColorSpace
+        mat.roughnessMap = tex
+      }
+    }
+
+    if (m.metalnessMap) {
+      const tex = loadTexture(m.metalnessMap)
+      if (tex) {
+        applyTilingToTexture(tex, m)
+        tex.colorSpace = THREE.NoColorSpace
+        mat.metalnessMap = tex
+      }
+    }
+
     if (m.emissiveMap) {
       const tex = loadTexture(m.emissiveMap)
       if (tex) mat.emissiveMap = tex
@@ -150,6 +223,51 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     mat.needsUpdate = true
     return mat
   }, [obj.material, obj.type])
+
+  // ----- INTEGRAÇÃO TEXTURE PAINT (real-time, sem recriar textura) -----
+  // Quando o material é criado (ou o objeto é selecionado para pintura),
+  // obter as CanvasTextures vivas do PaintTextureManager e atribuí-las
+  // aos slots do material. Isto permite que a pintura apareça instantaneamente
+  // no mesh via texture.needsUpdate = true (passo 8 do pipeline).
+  useEffect(() => {
+    if (!material || !obj.id) return
+    // Atribuir CanvasTexture do PaintTextureManager a cada canal que não
+    // tenha textura importada (a importada tem prioridade).
+    const m = obj.material || {}
+
+    if (!m.map) {
+      const pt = getPaintTexture(obj.id, 'color')
+      if (pt && pt.texture) {
+        applyTilingToTexture(pt.texture, m)
+        material.map = pt.texture
+        material.needsUpdate = true
+      }
+    }
+    if (!m.normalMap) {
+      const pt = getPaintTexture(obj.id, 'normal')
+      if (pt && pt.texture) {
+        applyTilingToTexture(pt.texture, m)
+        material.normalMap = pt.texture
+        material.needsUpdate = true
+      }
+    }
+    if (!m.roughnessMap) {
+      const pt = getPaintTexture(obj.id, 'roughness')
+      if (pt && pt.texture) {
+        applyTilingToTexture(pt.texture, m)
+        material.roughnessMap = pt.texture
+        material.needsUpdate = true
+      }
+    }
+    if (!m.metalnessMap) {
+      const pt = getPaintTexture(obj.id, 'metallic')
+      if (pt && pt.texture) {
+        applyTilingToTexture(pt.texture, m)
+        material.metalnessMap = pt.texture
+        material.needsUpdate = true
+      }
+    }
+  }, [obj.id, obj.material, material])
 
   // ----- Compositing de camadas de textura (assíncrono) -----
   // Quando há múltiplas camadas, compõe-as num único mapa e aplica ao material.
@@ -172,15 +290,20 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
   useEffect(() => {
     if (!material) return
     const m = obj.material
-    const applyTiling = (tex) => {
-      if (!tex) return
-      tex.repeat.set(m.repeat?.[0] ?? 1, m.repeat?.[1] ?? 1)
-      tex.offset.set(m.offset?.[0] ?? 0, m.offset?.[1] ?? 0)
-      tex.needsUpdate = true
-    }
-    if (m.map) applyTiling(loadTexture(m.map))
-    if (m.normalMap) applyTiling(loadTexture(m.normalMap))
-  }, [obj.material?.repeat, obj.material?.offset, obj.material?.map, obj.material?.normalMap, material])
+    if (m.map) applyTilingToTexture(loadTexture(m.map), m)
+    if (m.normalMap) applyTilingToTexture(loadTexture(m.normalMap), m)
+    if (m.roughnessMap) applyTilingToTexture(loadTexture(m.roughnessMap), m)
+    if (m.metalnessMap) applyTilingToTexture(loadTexture(m.metalnessMap), m)
+    // Aplicar também às CanvasTextures do PaintTextureManager
+    const ptColor = getPaintTexture(obj.id, 'color', { dataURL: m.map })
+    applyTilingToTexture(ptColor?.texture, m)
+    const ptNormal = getPaintTexture(obj.id, 'normal', { dataURL: m.normalMap })
+    applyTilingToTexture(ptNormal?.texture, m)
+    const ptRough = getPaintTexture(obj.id, 'roughness', { dataURL: m.roughnessMap })
+    applyTilingToTexture(ptRough?.texture, m)
+    const ptMetal = getPaintTexture(obj.id, 'metallic', { dataURL: m.metalnessMap })
+    applyTilingToTexture(ptMetal?.texture, m)
+  }, [obj.material?.repeat, obj.material?.offset, obj.material?.map, obj.material?.normalMap, obj.material?.roughnessMap, obj.material?.metalnessMap, obj.id, material])
 
   // ----- Sincronizar transform -----
   // Aplicamos diretamente como props do mesh para garantir que estão sempre

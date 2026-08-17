@@ -1,30 +1,241 @@
 /**
- * texturePaint.js — Sistema de pintura direta em modelos 3D.
+ * texturePaint.js — Sistema de pintura direta em modelos 3D (PBR-aware).
  *
- * Funcionalidades:
+ * === PIPELINE TÉCNICO (Blender-style, 9 passos) ===
+ *  1. Modelo tem vértices/triângulos/UVs (BufferGeometry attributes position/normal/uv)
+ *  2. Textura 2D associada via UVs (THREE.CanvasTexture com wrapS/wrapT=Repeat)
+ *  3. Raycast da câmara → superfície do modelo (TexturePaintRaycaster em Scene3D.jsx)
+ *  4. Triângulo atingido identificado (raycaster.intersectObject → hit.face)
+ *  5. UV exata do ponto via baricêntricas (hit.uv já interpolado por three.js)
+ *  6. Conversão UV→pixel real (u * canvasSize, v * canvasSize invertido)
+ *  7. Aplicar pincel com falloff radial na região de pixels (paintStrokeAtUV)
+ *  8. Atualizar GPU: CanvasTexture.needsUpdate = true (incremental, sem recriar textura)
+ *  9. Múltiplos mapas: Base Color / Roughness / Metallic / Normal (PaintTextureManager)
+ *
+ * Canais suportados:
+ *  - color (Base Color/albedo) → mat.map
+ *  - roughness → mat.roughnessMap
+ *  - metallic → mat.metalnessMap
+ *  - normal → mat.normalMap
+ *
+ * Funcionalidades 2D mantidas para edição manual:
  *  - 6 pincéis: Draw, Soften, Smudge, Clone, Fill, Mask
- *  - Pintura em tempo real via raycasting no canvas 3D
- *  - Cores, tamanho e força ajustáveis
- *  - Textura pintada guardada como dataURL no objeto (customPaintTexture)
- *
- * Como funciona:
- *  - Cria um canvas 2D (1024x1024) como textura de pintura
- *  - Raycasting do rato/dedo para o mesh → UV do ponto de contacto
- *  - Desenha no canvas 2D na posição UV correspondente
- *  - O canvas é usado como textura do mesh (override do material)
+ *  - Texturas procedurais: Noise, Voronoi, Wave, Marble, Wood
+ *  - ColorRamp
  */
+import * as THREE from 'three'
+
+// ============================================================================
+// PHASE B: PaintTextureManager — mantém canvas + CanvasTexture para cada canal
+// de pintura de cada objeto. Permite updates incrementais com needsUpdate=true.
+// ============================================================================
+
+const PAINT_CANVAS_SIZE = 1024
 
 /**
- * Cria um canvas de pintura vazio (1024x1024).
+ * Mapa por (objectId+channel) → { canvas, ctx, texture, dirty }.
+ * Mantém uma CanvasTexture viva por canal, permitindo pintura real-time
+ * sem recriar a textura (apenas needsUpdate=true).
+ */
+const paintTextures = new Map()
+
+const CHANNEL_DEFAULTS = {
+  color:     { fill: '#ffffff', colorSpace: THREE.SRGBColorSpace, swizzle: 'rgb'  },
+  roughness: { fill: '#808080', colorSpace: THREE.NoColorSpace,    swizzle: 'g'   }, // verde = roughness
+  metallic:  { fill: '#000000', colorSpace: THREE.NoColorSpace,    swizzle: 'b'   }, // azul = metallic
+  normal:    { fill: '#8080ff', colorSpace: THREE.NoColorSpace,    swizzle: 'rgb' }, // azul up = +Z
+}
+
+/**
+ * Devolve (criando se necessário) o canvas+ctx+CanvasTexture para um canal
+ * de pintura de um objeto. O CanvasTexture é reusado entre strokes — só se
+ * chama needsUpdate=true no fim de cada stroke.
+ *
+ * @param {string} objectId
+ * @param {'color'|'roughness'|'metallic'|'normal'} channel
+ * @param {object} [initial] — { dataURL } para inicializar o canvas com conteúdo existente
+ * @returns {{ canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, texture: THREE.CanvasTexture }}
+ */
+export function getPaintTexture(objectId, channel, initial) {
+  const key = `${objectId}:${channel}`
+  if (paintTextures.has(key)) {
+    const entry = paintTextures.get(key)
+    // Se fornecido initial.dataURL diferente da atual, recarregar
+    if (initial?.dataURL && initial.dataURL !== entry.dataURL) {
+      loadImageIntoCanvas(initial.dataURL, entry.canvas).then(() => {
+        entry.texture.needsUpdate = true
+      })
+      entry.dataURL = initial.dataURL
+    }
+    return entry
+  }
+
+  const defaults = CHANNEL_DEFAULTS[channel]
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = PAINT_CANVAS_SIZE
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  ctx.fillStyle = defaults.fill
+  ctx.fillRect(0, 0, PAINT_CANVAS_SIZE, PAINT_CANVAS_SIZE)
+
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = defaults.colorSpace
+  texture.wrapS = THREE.RepeatWrapping
+  texture.wrapT = THREE.RepeatWrapping
+  texture.minFilter = THREE.LinearMipmapLinearFilter
+  texture.magFilter = THREE.LinearFilter
+  texture.generateMipmaps = true
+  texture.needsUpdate = true
+
+  const entry = { canvas, ctx, texture, dataURL: initial?.dataURL || null, channel }
+  paintTextures.set(key, entry)
+
+  // Se há conteúdo inicial, carregar assincronamente
+  if (initial?.dataURL) {
+    loadImageIntoCanvas(initial.dataURL, canvas).then(() => {
+      texture.needsUpdate = true
+    })
+  }
+
+  return entry
+}
+
+/**
+ * Marca a textura de um canal como needing GPU update.
+ */
+export function markPaintTextureDirty(objectId, channel) {
+  const key = `${objectId}:${channel}`
+  const entry = paintTextures.get(key)
+  if (entry) entry.texture.needsUpdate = true
+}
+
+/**
+ * Devolve um snapshot dataURL do canvas de pintura (para persistir no store).
+ */
+export function exportPaintTexture(objectId, channel) {
+  const key = `${objectId}:${channel}`
+  const entry = paintTextures.get(key)
+  if (!entry) return null
+  return entry.canvas.toDataURL('image/png')
+}
+
+/**
+ * Limpa todos os canvases de pintura de um objeto (não apaga do store,
+ * apenas liberta memória GPU). Usado quando o objeto é removido da cena.
+ */
+export function disposePaintTextures(objectId) {
+  for (const [key, entry] of paintTextures.entries()) {
+    if (key.startsWith(`${objectId}:`)) {
+      entry.texture.dispose()
+      paintTextures.delete(key)
+    }
+  }
+}
+
+/**
+ * Apaga todos os canvases de um objeto (limpa conteúdo, mantém textura viva).
+ */
+export function clearPaintTextures(objectId) {
+  for (const channel of ['color', 'roughness', 'metallic', 'normal']) {
+    const key = `${objectId}:${channel}`
+    const entry = paintTextures.get(key)
+    if (!entry) continue
+    const defaults = CHANNEL_DEFAULTS[channel]
+    entry.ctx.fillStyle = defaults.fill
+    entry.ctx.fillRect(0, 0, entry.canvas.width, entry.canvas.height)
+    entry.texture.needsUpdate = true
+  }
+}
+
+// ============================================================================
+// PHASE B: paintStrokeOnMesh — função chamada pelo TexturePaintRaycaster.
+// Aplica um stroke na posição UV dada, no canal ativo, com o brush configurado.
+// ============================================================================
+
+/**
+ * Aplica um stroke de pintura na UV dada, no canal ativo.
+ *
+ * @param {string} objectId
+ * @param {{u:number, v:number}} uv — coordenada UV (0..1) do ponto atingido no mesh
+ * @param {object} brush — { type, color, size, strength, cloneSource, channel }
+ *   - channel: 'color' | 'roughness' | 'metallic' | 'normal'
+ *   - color: hex (#rrggbb) — usado de forma diferente consoante o canal:
+ *       color: usa como cor RGB direta
+ *       roughness: converte cor→luminância→valor de roughness (g channel)
+ *       metallic: converte cor→luminância→valor de metallic (b channel)
+ *       normal: interpreta o pincel como "raise"/"lower" do normal map
+ */
+export function paintStrokeOnMesh(objectId, uv, brush) {
+  const channel = brush.channel || 'color'
+  const entry = getPaintTexture(objectId, channel)
+  if (!entry) return
+
+  // Aplicar brush com cor adaptada ao canal
+  const adaptedBrush = adaptBrushToChannel(brush, channel)
+  paintAtUV(entry.ctx, uv.u, uv.v, adaptedBrush)
+
+  // MARCAR COMO DIRTY — atualiza GPU sem recriar textura (passo 8)
+  entry.texture.needsUpdate = true
+}
+
+/**
+ * Adapta o brush ao canal — converte cor para o formato correto do canal.
+ */
+function adaptBrushToChannel(brush, channel) {
+  const adapted = { ...brush }
+  switch (channel) {
+    case 'roughness': {
+      // Converter cor→luminância→tons de cinzento (canal G é roughness no three.js)
+      const lum = hexToLuminance(brush.color || '#808080')
+      // Mapear luminância 0..1 → 0..255 cinzento
+      const g = Math.round(lum * 255)
+      adapted.color = `#${g.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}`
+      break
+    }
+    case 'metallic': {
+      // Canal B é metallic no three.js; converte cor→luminância→cinzento
+      const lum = hexToLuminance(brush.color || '#000000')
+      const g = Math.round(lum * 255)
+      adapted.color = `#${g.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}`
+      break
+    }
+    case 'normal': {
+      // Pincel de normal: combinar com a cor do pincel para criar um "bump"
+      // O valor de força do brush controla a intensidade do bump.
+      // Cor resultante: usar cor base azul (#8080ff) + deslocamento da cor do brush
+      adapted.color = brush.color || '#8080ff'
+      adapted.normalMode = brush.normalMode || 'raise' // raise | lower | smooth
+      break
+    }
+    case 'color':
+    default:
+      adapted.color = brush.color || '#ff0000'
+      break
+  }
+  return adapted
+}
+
+function hexToLuminance(hex) {
+  if (!hex || hex[0] !== '#') return 0.5
+  const r = parseInt(hex.slice(1, 3), 16) / 255
+  const g = parseInt(hex.slice(3, 5), 16) / 255
+  const b = parseInt(hex.slice(5, 7), 16) / 255
+  return 0.299 * r + 0.587 * g + 0.114 * b
+}
+
+// ============================================================================
+// FUNÇÕES 2D ORIGINAIS (mantidas para edição manual no preview 2D)
+// ============================================================================
+
+/**
+ * Cria um canvas de pintura vazio (1024x1024) com cor de fundo.
  * @returns {HTMLCanvasElement}
  */
-export function createPaintCanvas(size = 1024) {
+export function createPaintCanvas(size = PAINT_CANVAS_SIZE, fill = '#ffffff') {
   const canvas = document.createElement('canvas')
   canvas.width = size
   canvas.height = size
-  const ctx = canvas.getContext('2d')
-  // Fundo branco
-  ctx.fillStyle = '#ffffff'
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  ctx.fillStyle = fill
   ctx.fillRect(0, 0, size, size)
   return canvas
 }
@@ -39,12 +250,18 @@ export function canvasToDataURL(canvas) {
 /**
  * Carrega um dataURL num canvas.
  */
-export function dataURLToCanvas(dataURL, size = 1024) {
+export function dataURLToCanvas(dataURL, size = PAINT_CANVAS_SIZE) {
   return new Promise((resolve) => {
     const canvas = document.createElement('canvas')
     canvas.width = size
     canvas.height = size
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    if (!dataURL) {
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, size, size)
+      resolve(canvas)
+      return
+    }
     const img = new Image()
     img.onload = () => {
       ctx.drawImage(img, 0, 0, size, size)
@@ -55,18 +272,32 @@ export function dataURLToCanvas(dataURL, size = 1024) {
   })
 }
 
+async function loadImageIntoCanvas(dataURL, canvas) {
+  return new Promise((resolve) => {
+    const ctx = canvas.getContext('2d')
+    const img = new Image()
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      resolve()
+    }
+    img.onerror = () => resolve()
+    img.src = dataURL
+  })
+}
+
 /**
  * Aplica um pincel numa posição UV do canvas de pintura.
  *
  * @param {CanvasRenderingContext2D} ctx
  * @param {number} u — coordenada UV X (0..1)
  * @param {number} v — coordenada UV Y (0..1)
- * @param {object} brush — { type, color, size, strength, cloneSource }
+ * @param {object} brush — { type, color, size, strength, cloneSource, channel, normalMode }
  */
 export function paintAtUV(ctx, u, v, brush) {
   const canvasSize = ctx.canvas.width
   const x = u * canvasSize
-  const y = (1 - v) * canvasSize // UV Y é invertido
+  const y = (1 - v) * canvasSize // UV Y é invertido (origem bottom-left → top-left)
   const radius = brush.size || 30
   const strength = brush.strength ?? 0.5
 
@@ -82,6 +313,16 @@ export function paintAtUV(ctx, u, v, brush) {
       ctx.beginPath()
       ctx.arc(x, y, radius, 0, Math.PI * 2)
       ctx.fill()
+      // Modo normal: bump no canal blue (levantar detalhe)
+      if (brush.normalMode === 'raise') {
+        ctx.save()
+        ctx.globalCompositeOperation = 'lighten'
+        ctx.fillStyle = `rgba(128, 128, 255, ${strength * 0.3})`
+        ctx.beginPath()
+        ctx.arc(x, y, radius, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+      }
       break
     }
 
@@ -233,7 +474,9 @@ function boxBlur(data, w, h, radius) {
   return result
 }
 
-// ===== Texturização Procedural =====
+// ============================================================================
+// TEXTURIZAÇÃO PROCEDURAL (mantida do original)
+// ============================================================================
 
 /**
  * Gera uma textura procedural num canvas.
@@ -286,7 +529,6 @@ export function generateProceduralTexture(type, params = {}) {
 
   ctx.putImageData(imgData, 0, 0)
 
-  // Aplicar ColorRamp se fornecido
   if (params.colorRamp && params.colorRamp.length >= 2) {
     applyColorRamp(canvas, params.colorRamp)
   }
@@ -296,21 +538,16 @@ export function generateProceduralTexture(type, params = {}) {
 
 /**
  * Aplica um ColorRamp (gradiente de cores) a um canvas.
- * @param {HTMLCanvasElement} canvas
- * @param {Array<{pos: number, color: string}>} ramp — [{pos:0,color:'#000'},{pos:1,color:'#fff'}]
  */
 export function applyColorRamp(canvas, ramp) {
   const ctx = canvas.getContext('2d')
   const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height)
   const data = imgData.data
 
-  // Pré-calcular cores do ramp
   const rampColors = ramp.map(s => ({ pos: s.pos, rgb: hexToRgbArray(s.color) }))
 
   for (let i = 0; i < data.length; i += 4) {
-    // Valor de luminância como t
     const t = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255
-    // Encontrar segmento do ramp
     let c = rampColors[0].rgb
     for (let j = 0; j < rampColors.length - 1; j++) {
       if (t >= rampColors[j].pos && t <= rampColors[j + 1].pos) {

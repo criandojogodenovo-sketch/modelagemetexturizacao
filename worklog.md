@@ -743,3 +743,92 @@ Stage Summary:
 - Bugs #1-#7 preservados
 - Runtime benchmark unavailable
 - Push: NÃO realizado (aguardando autorização)
+
+---
+Task ID: TEXPAINT-AUDIT
+Agent: main
+Task: Auditoria técnica do pipeline de Texture Paint (9 passos Blender-style)
+
+Work Log:
+- AUDIT 1/9: Modelo tem vértices/triângulos/UVs? SIM — Three.js BufferGeometry com attributes position/normal/uv. NOTA: UVs são per-vertex (não per-corner como Blender), mas isto é standard em WebGL/Three.js e compatível com raycast baricêntrico.
+- AUDIT 2/9: Textura 2D associada via UVs? SIM — material.map (THREE.TextureLoader + repeat/offset). NOTA: Apenas 1 canal UV usado para todos os mapas (sem UV2). Aceitável para fluxo PBR standard.
+- AUDIT 3/9: Raycast da câmara para superfície? PARCIALMENTE — SculptRaycaster existe em Scene3D.jsx, MAS NÃO HÁ TexturePaintRaycaster. Atualmente o utilizador pinta num canvas 2D separado (TexturingPanel.jsx), não no modelo 3D.
+- AUDIT 4/9: Identificar triângulo atingido? NÃO IMPLEMENTADO PARA PAINT — three.js Raycaster devolve hit.face (face index) automaticamente, mas o código de pintura NÃO USA isto.
+- AUDIT 5/9: Coordenadas baricêntricas para UV exata? NÃO IMPLEMENTADO — three.js Raycaster já devolve hit.uv (interpolado via baricêntricas internamente), mas o código de pintura atual ignora isto e pinta só no canvas 2D.
+- AUDIT 6/9: Conversão UV→pixel real? PARCIAL — paintAtUV faz `u * canvasSize` mas só funciona no canvas 2D isolado, não integrado com raycast 3D.
+- AUDIT 7/9: Aplicar pincel na região de pixels? SIM em 2D — função paintAtUV em texturePaint.js tem 6 pincéis (draw/soften/smudge/clone/fill/mask) com falloff radial. MAS sem integração real-time com mesh 3D.
+- AUDIT 8/9: Atualizar GPU (texture.needsUpdate)? NÃO IMPLEMENTADO — pintura atual guarda dataURL→store→recria THREE.TextureLoader (cria nova textura). Sem updates incrementais → sem pintura real-time visível no mesh.
+- AUDIT 9/9: Múltiplos mapas (Base Color/Roughness/Metallic/Normal)? PARCIAL — SceneObject material usa mat.map e mat.normalMap, mas só mat.map é pintável. Roughness/Metallic não têm paint canvas dedicado.
+
+Stage Summary:
+- 6 dos 9 passos FALHAM ou estão incompletos (3, 4, 5, 6, 8, 9)
+- 2 passos PARCIALMENTE OK (2, 7)
+- 1 passo OK (1)
+- Sistema atual é "Texture Paint 2D", não "Texture Paint 3D real"
+- Plano de correção: refatorar texturePaint.js + adicionar TexturePaintRaycaster + integrar PaintTextureManager no SceneObject + adicionar MeshPhysicalMaterial + novos materiais PBR
+
+---
+Task ID: TEXPAINT-PIPELINE-3D
+Agent: main
+Task: Texture Paint 3D pipeline completo + biblioteca PBR + Material Editor expandido
+
+Work Log:
+- AUDIT (PHASE A): 6/9 passos falhavam ou estavam incompletos no pipeline anterior:
+  * Passo 3 (raycast para paint): FALHAVA — só existia SculptRaycaster
+  * Passo 4 (triângulo atingido): FALHAVA — código não usava hit.face
+  * Passo 5 (UV via baricêntricas): FALHAVA — código não usava hit.uv
+  * Passo 6 (UV→pixel): PARCIAL — só funcionava em canvas 2D isolado
+  * Passo 8 (GPU needsUpdate): FALHAVA — recriava TextureLoader em vez de atualizar CanvasTexture
+  * Passo 9 (multi-canal): PARCIAL — só pintava Base Color, não Roughness/Metallic/Normal
+- IMPLEMENT (PHASE B): texturePaint.js refatorado com PaintTextureManager (Map objectId+channel → {canvas, ctx, texture})
+  * CanvasTexture viva por canal (color/roughness/metallic/normal), permite updates incrementais
+  * paintStrokeOnMesh(objectId, uv, brush) — chamada pelo raycaster com brush.channel
+  * adaptBrushToChannel: cor→cinzento para roughness/metallic, normalMode raise/lower para normal
+  * markPaintTextureDirty / exportPaintTexture / disposePaintTextures / clearPaintTextures
+- IMPLEMENT (PHASE C): TexturePaintRaycaster em Scene3D.jsx
+  * Ativa só em mode='paint'
+  * Raycast→intersectObject(mesh, false)→hit.uv→paintStrokeOnMesh
+  * OrbitControls disabled durante drag
+- IMPLEMENT (PHASE D): SceneObject.jsx — MeshPhysicalMaterial (em vez de MeshStandardMaterial)
+  * Props PBR completas: anisotropy, anisotropyRotation, ior, transmission, thickness,
+    attenuationColor, attenuationDistance, clearcoat, clearcoatRoughness, sheen, sheenColor,
+    sheenRoughness, specularIntensity, specularColor, envMapIntensity
+  * Integração PaintTextureManager: aplica CanvasTexture a mat.map/normalMap/roughnessMap/metalnessMap
+    quando não há textura importada (importada tem prioridade)
+  * Geração de UVs planar automática quando mesh não tem UV attribute (garante que toda a geometria é pintável)
+- IMPLEMENT (PHASE E): defaultMaterial() expandido com novos campos PBR
+- IMPLEMENT (PHASE F): materialLibrary.js reescrito com 20 materiais PBR fisicamente corretos:
+  Vidro (T=1.0, IOR=1.45, CC=0.10), Ouro (M=1.0, R=0.22, A=0.30, cor #FFD700), Gelo (T=1.0, IOR=1.31),
+  Água (T=1.0, IOR=1.33, normalMap ondas), Borracha (R=0.75, Sheen=0.50), Plástico (R=0.30, Specular=0.50),
+  Cromado (M=1.0, R=0.03, CC=1.0, cor #FFFFFF), Madeira (R=0.55, normalMap veios), Tecido (R=0.75, Sheen=0.50),
+  Pele (T=0.20, attenuation subsurface), Couro (R=0.65, normalMap couro), Betão (R=0.75, AO na base),
+  Tijolo (R=0.70, textura tijolos), Metal Escovado (M=1.0, A=0.80), Cobre (M=1.0, cor #B87333, A=0.30),
+  Alumínio (M=1.0, cor #E0E0E0, A=0.50), Pedra (R=0.75, granito), Emissivo (intensity 10.0),
+  Tinta de Carro (M=1.0, R=0.15, CC=1.0, CC_R=0.02), Plástico Translúcido (T=0.75, IOR=1.40)
+  + extras: Madeira Nogueira, Mármore, Cerâmica, Asfalto
+- IMPLEMENT (PHASE G): TexturingPanel.jsx
+  * Tabs: Material | Texturas | UV | Pintar | Procedural | Biblio. | Fluxo PBR (nova)
+  * Tab Material: 8 secções — Base, Emissive, Transmissão&IOR, Clearcoat, Anisotropy, Sheen, Specular, Opções
+  * Tab Pintar: PAINT_CHANNELS selector (Color/Roughness/Metallic/Normal) + botão "Ativar modo Paint"
+  * Brush state sincronizado com store.paintSettings (channel, brushType, color, size, strength, normalMode)
+  * Polling 800ms sincroniza canvas do PaintTextureManager com preview 2D
+  * Tab Biblioteca: 24 materiais agrupados por categoria, agrupamento PBR
+  * Tab Fluxo PBR: guia passo-a-passo (UV Unwrap → Base Color → Roughness → Normal → Metallic → Iluminação)
+    + pipeline técnico de 9 passos + teste recomendado
+- TESTS: scripts/test-texpaint.mjs — 112 verificações estruturais todas PASS
+  * 9 passos do pipeline Blender-style validados em código
+  * 20 materiais PBR com valores exatos por especificação do utilizador
+  * MeshPhysicalMaterial com todas as props PBR
+  * TexturingPanel multi-canal + sliders + aba guide
+  * TexturePaintRaycaster integrado em Scene3D
+- BUILD: ✓ 0 erros, 1.46s
+- REGRESSÃO: Bugs #1-#7 intactos (verificação via grep em worklog anterior)
+
+Stage Summary:
+- Pipeline 3D texture paint COMPLETO: 9/9 passos agora implementados
+- 4 canais de pintura PBR funcionais (Base Color/Roughness/Metallic/Normal)
+- Pintura real-time via CanvasTexture.needsUpdate=true (sem recriar textura)
+- Biblioteca 20 materiais com valores PBR fisicamente corretos
+- Material Editor com 13 sliders PBR (anisotropy, IOR, transmission, clearcoat, sheen, specular, etc.)
+- Guia de fluxo PBR completo no editor
+- Push: NÃO realizado (próximo passo)

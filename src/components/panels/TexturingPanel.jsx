@@ -4,23 +4,26 @@
  * Otimizado para telas pequenas e formato horizontal.
  *
  * Funcionalidades:
- *  - Material PBR completo: cor base, roughness, metalness, emissive, opacity
+ *  - Material PBR COMPLETO (MeshPhysicalMaterial):
+ *      Base: color, roughness, metalness, opacity, emissive
+ *      Físico: anisotropy, ior, transmission, clearcoat, sheen, specularIntensity
  *  - Texturas: difusa, normal, roughness, metalness, emissive (upload ou URL)
  *  - UV tiling: repeat X/Y, offset X/Y, rotação
- *  - Biblioteca de materiais predefinidos (12 presets)
+ *  - Biblioteca de 24 materiais PBR predefinidos (valores reais)
  *  - Copy/paste material entre objetos
- *  - Texture Paint: pintura direta no modelo (Draw, Soften, Smudge, Clone, Fill, Mask)
+ *  - Texture Paint 3D REAL:
+ *      Pintura direta no modelo 3D via raycast (modo 'paint' da cena)
+ *      Selector de canal: Base Color | Roughness | Metallic | Normal
+ *      6 pincéis: Draw, Soften, Smudge, Clone, Fill, Mask
+ *      Preview 2D mantido para edição manual
  *  - Texturização Procedural: Noise, Voronoi, Wave, Marble, Wood + ColorRamp
- *
- * Layout otimizado para mobile horizontal:
- *  - Tabs compactas no topo (Material | Texturas | UV | Pintar | Procedural | Biblioteca)
- *  - Sliders grandes para toque
+ *  - Guia de fluxo PBR completo
  */
 import { useState, useRef, useEffect } from 'react'
 import { useStore } from '../../store/useStore'
 import { IconClose } from '../ui/Icons'
-import { findMaterial } from '../../utils/materialLibrary'
-import { createPaintCanvas, paintAtUV, canvasToDataURL, dataURLToCanvas, generateProceduralTexture } from '../../utils/texturePaint'
+import { MATERIAL_LIBRARY, MATERIAL_CATEGORIES } from '../../utils/materialLibrary'
+import { createPaintCanvas, paintAtUV, canvasToDataURL, dataURLToCanvas, generateProceduralTexture, getPaintTexture } from '../../utils/texturePaint'
 
 const TEX_TABS = [
   { id: 'material', label: 'Material', icon: 'palette' },
@@ -29,6 +32,15 @@ const TEX_TABS = [
   { id: 'paint', label: 'Pintar', icon: '🖌️' },
   { id: 'procedural', label: 'Procedural', icon: 'spline' },
   { id: 'library', label: 'Biblio.', icon: 'book' },
+  { id: 'guide', label: 'Fluxo PBR', icon: '📖' },
+]
+
+// Canais de pintura suportados (passo 9 do pipeline)
+const PAINT_CHANNELS = [
+  { id: 'color',     label: 'Base Color',  desc: 'Cor/albedo do material' },
+  { id: 'roughness', label: 'Roughness',   desc: 'Rugosidade (controla reflexo)' },
+  { id: 'metallic',  label: 'Metallic',     desc: 'Metalicidade (condutor vs dielétrico)' },
+  { id: 'normal',    label: 'Normal Map',  desc: 'Relevo fino (não muda geometria)' },
 ]
 
 const MATERIAL_PRESETS = [
@@ -51,6 +63,10 @@ export default function TexturingPanel({ onClose }) {
   const selectedId = useStore((s) => s.selectedId)
   const updateObject = useStore((s) => s.updateObject)
   const toast = useStore((s) => s.toast)
+  const mode = useStore((s) => s.mode)
+  const setMode = useStore((s) => s.setMode)
+  const paintSettings = useStore((s) => s.paintSettings)
+  const setPaintSettings = useStore((s) => s.setPaintSettings)
 
   const selected = objects.find((o) => o.id === selectedId)
 
@@ -60,7 +76,14 @@ export default function TexturingPanel({ onClose }) {
   const [textureSlot, setTextureSlot] = useState('map') // map | normalMap | roughnessMap | metalnessMap | emissiveMap
 
   // Texture Paint state
-  const [brush, setBrush] = useState({ type: 'draw', color: '#ff0000', size: 30, strength: 0.5 })
+  const [brush, setBrush] = useState({
+    type: paintSettings.brushType || 'draw',
+    color: paintSettings.color || '#ff0000',
+    size: paintSettings.size || 30,
+    strength: paintSettings.strength ?? 0.5,
+    normalMode: paintSettings.normalMode || 'raise',
+  })
+  const [paintChannel, setPaintChannel] = useState(paintSettings.channel || 'color')
   const [cloneSource, setCloneSource] = useState(null)
   const paintCanvasRef = useRef(null)
   const [paintPreview, setPaintPreview] = useState(null)
@@ -69,22 +92,65 @@ export default function TexturingPanel({ onClose }) {
   const [procType, setProcType] = useState('noise')
   const [procParams, setProcParams] = useState({ scale: 4, color1: '#3a5a2a', color2: '#1a2a1a', octaves: 4 })
 
-  // Inicializar canvas de pintura quando o tab é aberto
+  // Mapear canal → chave no material (para buscar textura existente)
+  const CHANNEL_TO_MATKEY = {
+    color: 'map',
+    roughness: 'roughnessMap',
+    metallic: 'metalnessMap',
+    normal: 'normalMap',
+  }
+
+  // Inicializar canvas de pintura quando o tab é aberto OU canal muda
   useEffect(() => {
-    if (activeTab === 'paint' && selected && !paintCanvasRef.current) {
-      // Carregar textura existente ou criar nova
-      if (selected.material?.map) {
-        dataURLToCanvas(selected.material.map).then((c) => {
-          paintCanvasRef.current = c
-          setPaintPreview(canvasToDataURL(c))
-        })
+    if (activeTab !== 'paint' || !selected) return
+    refreshPaintPreview(paintChannel)
+  }, [activeTab, selected, paintChannel])
+
+  // Atualizar preview quando há pintura 3D (polling leve)
+  useEffect(() => {
+    if (activeTab !== 'paint' || !selected) return
+    const interval = setInterval(() => {
+      // Re-exportar a textura do canal ativo do PaintTextureManager
+      // para o preview refletir o que foi pintado em 3D
+      if (selected.id) {
+        const pt = getPaintTexture(selected.id, paintChannel)
+        if (pt && pt.canvas) {
+          // Sincronizar canvas do PaintTextureManager com o paintCanvasRef local
+          paintCanvasRef.current = pt.canvas
+          setPaintPreview(pt.canvas.toDataURL('image/png'))
+        }
+      }
+    }, 800) // 800ms — não bloquear a UI
+    return () => clearInterval(interval)
+  }, [activeTab, selected, paintChannel])
+
+  const refreshPaintPreview = (channel) => {
+    if (!selected) return
+    // Se há uma textura importada no canal, usá-la como canvas
+    const matKey = CHANNEL_TO_MATKEY[channel]
+    const existingTexture = selected.material?.[matKey]
+    if (existingTexture) {
+      dataURLToCanvas(existingTexture).then((c) => {
+        paintCanvasRef.current = c
+        setPaintPreview(canvasToDataURL(c))
+      })
+    } else if (selected.id) {
+      // Tentar usar o canvas do PaintTextureManager
+      const pt = getPaintTexture(selected.id, channel)
+      if (pt && pt.canvas) {
+        paintCanvasRef.current = pt.canvas
+        setPaintPreview(pt.canvas.toDataURL('image/png'))
       } else {
-        const c = createPaintCanvas(512)
+        // Último fallback — criar novo
+        const fill = channel === 'roughness' ? '#808080' :
+                     channel === 'metallic' ? '#000000' :
+                     channel === 'normal' ? '#8080ff' : '#ffffff'
+        const c = createPaintCanvas(512, fill)
         paintCanvasRef.current = c
         setPaintPreview(canvasToDataURL(c))
       }
     }
-  }, [activeTab, selected])
+  }
 
   const BRUSH_TYPES = [
     { id: 'draw', label: 'Draw', icon: '✏️', desc: 'Pincel padrão para aplicar cor' },
@@ -123,15 +189,20 @@ export default function TexturingPanel({ onClose }) {
   const savePaintTexture = () => {
     if (!paintCanvasRef.current || !selected) return
     const dataURL = canvasToDataURL(paintCanvasRef.current)
-    setMat({ map: dataURL })
-    toast('Textura pintada aplicada ao objeto', 'success')
+    const matKey = CHANNEL_TO_MATKEY[paintChannel]
+    setMat({ [matKey]: dataURL })
+    toast(`Textura de ${PAINT_CHANNELS.find(c=>c.id===paintChannel)?.label} pintada aplicada ao objeto`, 'success')
   }
 
   const clearPaint = () => {
     if (!paintCanvasRef.current) return
-    const c = createPaintCanvas(512)
-    paintCanvasRef.current = c
-    setPaintPreview(canvasToDataURL(c))
+    const fill = paintChannel === 'roughness' ? '#808080' :
+                 paintChannel === 'metallic' ? '#000000' :
+                 paintChannel === 'normal' ? '#8080ff' : '#ffffff'
+    const ctx = paintCanvasRef.current.getContext('2d')
+    ctx.fillStyle = fill
+    ctx.fillRect(0, 0, paintCanvasRef.current.width, paintCanvasRef.current.height)
+    setPaintPreview(canvasToDataURL(paintCanvasRef.current))
   }
 
   const setCloneSrc = (e) => {
@@ -178,6 +249,12 @@ export default function TexturingPanel({ onClose }) {
   const mat = selected.material || {}
   const setMat = (patch) => {
     updateObject(selected.id, { material: { ...mat, ...patch } })
+  }
+
+  const applyLibraryMaterial = (libMat) => {
+    // Aplica o material da biblioteca (com valores PBR reais) ao objeto selecionado
+    updateObject(selected.id, { material: { ...libMat.material } })
+    toast(`Material "${libMat.name}" aplicado (PBR real)`, 'success')
   }
 
   const handleTextureUpload = (e) => {
@@ -245,11 +322,13 @@ export default function TexturingPanel({ onClose }) {
             <span className="small muted"> · {selected.type}</span>
           </div>
 
-          {/* TAB: Material PBR */}
+          {/* TAB: Material PBR (MeshPhysicalMaterial completo) */}
           {activeTab === 'material' && (
             <>
+              {/* ---- BASE ---- */}
+              <div className="small muted mb-2" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Base</div>
               <div className="prop-row">
-                <label>Cor base</label>
+                <label>Cor base (albedo)</label>
                 <input type="color" value={mat.color || '#888888'} onChange={(e) => setMat({ color: e.target.value })} />
               </div>
               <div className="prop-row">
@@ -267,15 +346,99 @@ export default function TexturingPanel({ onClose }) {
                 <input type="range" min="0" max="1" step="0.01" value={mat.opacity ?? 1}
                   onChange={(e) => setMat({ opacity: Number(e.target.value) })} />
               </div>
+
+              {/* ---- EMISSIVE ---- */}
+              <div className="small muted mt-3 mb-2" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Emissive</div>
               <div className="prop-row">
                 <label>Emissive (cor)</label>
                 <input type="color" value={mat.emissive || '#000000'} onChange={(e) => setMat({ emissive: e.target.value })} />
               </div>
               <div className="prop-row">
-                <label>Emissive intensidade: {(mat.emissiveIntensity ?? 0).toFixed(2)}</label>
-                <input type="range" min="0" max="2" step="0.05" value={mat.emissiveIntensity ?? 0}
+                <label>Intensidade: {(mat.emissiveIntensity ?? 0).toFixed(2)}</label>
+                <input type="range" min="0" max="20" step="0.1" value={mat.emissiveIntensity ?? 0}
                   onChange={(e) => setMat({ emissiveIntensity: Number(e.target.value) })} />
               </div>
+
+              {/* ---- TRANSMISSÃO / IOR ---- */}
+              <div className="small muted mt-3 mb-2" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Transmissão & IOR</div>
+              <div className="prop-row">
+                <label>Transmission: {(mat.transmission ?? 0).toFixed(2)}</label>
+                <input type="range" min="0" max="1" step="0.01" value={mat.transmission ?? 0}
+                  onChange={(e) => setMat({ transmission: Number(e.target.value) })} />
+              </div>
+              <div className="prop-row">
+                <label>IOR (Index of Refraction): {(mat.ior ?? 1.5).toFixed(2)}</label>
+                <input type="range" min="1.0" max="3.0" step="0.01" value={mat.ior ?? 1.5}
+                  onChange={(e) => setMat({ ior: Number(e.target.value) })} />
+              </div>
+              <div className="prop-row">
+                <label>Thickness (volume): {(mat.thickness ?? 0).toFixed(2)}</label>
+                <input type="range" min="0" max="1" step="0.01" value={mat.thickness ?? 0}
+                  onChange={(e) => setMat({ thickness: Number(e.target.value) })} />
+              </div>
+              <div className="prop-row">
+                <label>Attenuation (cor)</label>
+                <input type="color" value={mat.attenuationColor || '#ffffff'} onChange={(e) => setMat({ attenuationColor: e.target.value })} />
+              </div>
+
+              {/* ---- CLEARCOAT (vernil) ---- */}
+              <div className="small muted mt-3 mb-2" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Clearcoat</div>
+              <div className="prop-row">
+                <label>Clearcoat: {(mat.clearcoat ?? 0).toFixed(2)}</label>
+                <input type="range" min="0" max="1" step="0.01" value={mat.clearcoat ?? 0}
+                  onChange={(e) => setMat({ clearcoat: Number(e.target.value) })} />
+              </div>
+              <div className="prop-row">
+                <label>Clearcoat Roughness: {(mat.clearcoatRoughness ?? 0).toFixed(2)}</label>
+                <input type="range" min="0" max="1" step="0.01" value={mat.clearcoatRoughness ?? 0}
+                  onChange={(e) => setMat({ clearcoatRoughness: Number(e.target.value) })} />
+              </div>
+
+              {/* ---- ANISOTROPY (metal escovado) ---- */}
+              <div className="small muted mt-3 mb-2" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Anisotropy</div>
+              <div className="prop-row">
+                <label>Anisotropy: {(mat.anisotropy ?? 0).toFixed(2)}</label>
+                <input type="range" min="0" max="1" step="0.01" value={mat.anisotropy ?? 0}
+                  onChange={(e) => setMat({ anisotropy: Number(e.target.value) })} />
+              </div>
+              <div className="prop-row">
+                <label>Anisotropy Rotation: {((mat.anisotropyRotation ?? 0) * 180 / Math.PI).toFixed(0)}°</label>
+                <input type="range" min="0" max="6.28" step="0.01" value={mat.anisotropyRotation ?? 0}
+                  onChange={(e) => setMat({ anisotropyRotation: Number(e.target.value) })} />
+              </div>
+
+              {/* ---- SHEEN (tecido, veludo) ---- */}
+              <div className="small muted mt-3 mb-2" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Sheen</div>
+              <div className="prop-row">
+                <label>Sheen: {(mat.sheen ?? 0).toFixed(2)}</label>
+                <input type="range" min="0" max="1" step="0.01" value={mat.sheen ?? 0}
+                  onChange={(e) => setMat({ sheen: Number(e.target.value) })} />
+              </div>
+              <div className="prop-row">
+                <label>Sheen (cor)</label>
+                <input type="color" value={mat.sheenColor || '#ffffff'} onChange={(e) => setMat({ sheenColor: e.target.value })} />
+              </div>
+              <div className="prop-row">
+                <label>Sheen Roughness: {(mat.sheenRoughness ?? 0.5).toFixed(2)}</label>
+                <input type="range" min="0" max="1" step="0.01" value={mat.sheenRoughness ?? 0.5}
+                  onChange={(e) => setMat({ sheenRoughness: Number(e.target.value) })} />
+              </div>
+
+              {/* ---- SPECULAR ---- */}
+              <div className="small muted mt-3 mb-2" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Specular</div>
+              <div className="prop-row">
+                <label>Specular Intensity: {(mat.specularIntensity ?? 1).toFixed(2)}</label>
+                <input type="range" min="0" max="1" step="0.01" value={mat.specularIntensity ?? 1}
+                  onChange={(e) => setMat({ specularIntensity: Number(e.target.value) })} />
+              </div>
+              <div className="prop-row">
+                <label>Env Map Intensity: {(mat.envMapIntensity ?? 1).toFixed(2)}</label>
+                <input type="range" min="0" max="3" step="0.05" value={mat.envMapIntensity ?? 1}
+                  onChange={(e) => setMat({ envMapIntensity: Number(e.target.value) })} />
+              </div>
+
+              {/* ---- OPCOES ---- */}
+              <div className="small muted mt-3 mb-2" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Opções</div>
               <div className="prop-row">
                 <label>
                   <input type="checkbox" checked={mat.wireframe || false} onChange={(e) => setMat({ wireframe: e.target.checked })}
@@ -365,11 +528,53 @@ export default function TexturingPanel({ onClose }) {
             </>
           )}
 
-          {/* TAB: Texture Paint (Pintura direta) */}
+          {/* TAB: Texture Paint (3D + multi-canal PBR) */}
           {activeTab === 'paint' && (
             <>
               <div className="small muted mb-2">
-                Pinta diretamente na textura do modelo. Arrasta no preview para pintar.
+                <strong>Pintura 3D direta no modelo.</strong> Seleciona o modo
+                <strong> Paint</strong> na cena e arrasta sobre o modelo. Também podes
+                pintar manualmente no preview 2D abaixo.
+              </div>
+
+              {/* Canal de pintura (passo 9 do pipeline) */}
+              <div className="prop-row">
+                <label>Canal</label>
+                <div className="tex-brush-grid">
+                  {PAINT_CHANNELS.map((c) => (
+                    <button
+                      key={c.id}
+                      className={`tex-brush-btn ${paintChannel === c.id ? 'active' : ''}`}
+                      onClick={() => {
+                        setPaintChannel(c.id)
+                        setPaintSettings({ channel: c.id })
+                        // Resetar preview ao mudar de canal
+                        refreshPaintPreview(c.id)
+                      }}
+                      title={c.desc}
+                    >
+                      <span>{c.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="small muted mt-1">
+                  {PAINT_CHANNELS.find(c => c.id === paintChannel)?.desc}
+                </div>
+              </div>
+
+              {/* Modo Paint da cena */}
+              <div className="prop-row">
+                <label>Modo da cena</label>
+                <button
+                  onClick={() => setMode('paint')}
+                  style={{
+                    width: '100%',
+                    background: mode === 'paint' ? 'var(--accent)' : 'var(--bg-elevated)',
+                    color: mode === 'paint' ? 'white' : 'inherit',
+                  }}
+                >
+                  {mode === 'paint' ? '✓ Modo Paint ativo — arrasta no modelo' : 'Ativar modo Paint'}
+                </button>
               </div>
 
               {/* Tipos de pincel */}
@@ -380,7 +585,10 @@ export default function TexturingPanel({ onClose }) {
                     <button
                       key={b.id}
                       className={`tex-brush-btn ${brush.type === b.id ? 'active' : ''}`}
-                      onClick={() => setBrush({ ...brush, type: b.id })}
+                      onClick={() => {
+                        setBrush({ ...brush, type: b.id })
+                        setPaintSettings({ brushType: b.id })
+                      }}
                       title={b.desc}
                     >
                       <span style={{ fontSize: 16 }}>{b.icon}</span>
@@ -393,8 +601,31 @@ export default function TexturingPanel({ onClose }) {
               {/* Cor do pincel */}
               {brush.type !== 'mask' && brush.type !== 'soften' && brush.type !== 'smudge' && (
                 <div className="prop-row">
-                  <label>Cor</label>
-                  <input type="color" value={brush.color} onChange={(e) => setBrush({ ...brush, color: e.target.value })} />
+                  <label>Cor {paintChannel === 'roughness' ? '(cinzento = valor de roughness)' :
+                              paintChannel === 'metallic' ? '(cinzento = valor de metallic)' :
+                              paintChannel === 'normal' ? '(cor do bump)' : '(cor RGB)'}</label>
+                  <input type="color" value={brush.color} onChange={(e) => {
+                    setBrush({ ...brush, color: e.target.value })
+                    setPaintSettings({ color: e.target.value })
+                  }} />
+                </div>
+              )}
+
+              {/* Modo normal (apenas para channel=normal) */}
+              {paintChannel === 'normal' && brush.type === 'draw' && (
+                <div className="prop-row">
+                  <label>Normal mode</label>
+                  <select
+                    value={brush.normalMode || 'raise'}
+                    onChange={(e) => {
+                      setBrush({ ...brush, normalMode: e.target.value })
+                      setPaintSettings({ normalMode: e.target.value })
+                    }}
+                  >
+                    <option value="raise">Raise (elevar)</option>
+                    <option value="lower">Lower (afundar)</option>
+                    <option value="smooth">Smooth (suavizar)</option>
+                  </select>
                 </div>
               )}
 
@@ -402,14 +633,20 @@ export default function TexturingPanel({ onClose }) {
               <div className="prop-row">
                 <label>Tamanho: {brush.size}px</label>
                 <input type="range" min="5" max="100" step="1" value={brush.size}
-                  onChange={(e) => setBrush({ ...brush, size: Number(e.target.value) })} />
+                  onChange={(e) => {
+                    setBrush({ ...brush, size: Number(e.target.value) })
+                    setPaintSettings({ size: Number(e.target.value) })
+                  }} />
               </div>
 
               {/* Força */}
               <div className="prop-row">
                 <label>Força: {brush.strength.toFixed(2)}</label>
                 <input type="range" min="0.05" max="1" step="0.05" value={brush.strength}
-                  onChange={(e) => setBrush({ ...brush, strength: Number(e.target.value) })} />
+                  onChange={(e) => {
+                    setBrush({ ...brush, strength: Number(e.target.value) })
+                    setPaintSettings({ strength: Number(e.target.value) })
+                  }} />
               </div>
 
               {/* Clone source */}
@@ -422,9 +659,9 @@ export default function TexturingPanel({ onClose }) {
                 </div>
               )}
 
-              {/* Preview de pintura */}
+              {/* Preview de pintura (2D manual) */}
               <div className="prop-row">
-                <label>Preview (pinta aqui)</label>
+                <label>Preview 2D — {PAINT_CHANNELS.find(c => c.id === paintChannel)?.label}</label>
                 <div
                   className="tex-paint-preview"
                   onMouseDown={brush.type === 'clone' && !cloneSource ? setCloneSrc : handlePaintClick}
@@ -447,6 +684,12 @@ export default function TexturingPanel({ onClose }) {
               <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                 <button onClick={clearPaint} style={{ flex: 1 }}>🧹 Limpar</button>
                 <button onClick={savePaintTexture} className="primary" style={{ flex: 1 }}>Aplicar ao objeto</button>
+              </div>
+
+              <div className="small muted mt-2">
+                <strong>Pipeline:</strong> raycast → triângulo → UV baricêntrica →
+                pixel → pincel → <code>texture.needsUpdate = true</code> → GPU.
+                Pintura é <strong>real-time</strong>: aparece instantaneamente no modelo 3D.
               </div>
             </>
           )}
@@ -533,26 +776,133 @@ export default function TexturingPanel({ onClose }) {
             </>
           )}
 
-          {/* TAB: Biblioteca */}
+          {/* TAB: Biblioteca PBR (20+ materiais com valores reais) */}
           {activeTab === 'library' && (
             <>
-              <div className="small muted mb-2">Clica num material para aplicar ao objeto selecionado.</div>
-              <div className="tex-presets-grid">
-                {MATERIAL_PRESETS.map((preset) => (
-                  <button
-                    key={preset.name}
-                    className="tex-preset-btn"
-                    onClick={() => applyPreset(preset)}
-                    title={preset.name}
-                  >
-                    <div className="tex-preset-swatch" style={{
-                      background: preset.color,
-                      opacity: preset.opacity ?? 1,
-                      boxShadow: preset.emissive ? `0 0 8px ${preset.emissive}` : 'none',
-                    }} />
-                    <span>{preset.name}</span>
-                  </button>
-                ))}
+              <div className="small muted mb-2">
+                {MATERIAL_LIBRARY.length} materiais PBR com valores fisicamente corretos.
+                Clica para aplicar ao objeto selecionado.
+              </div>
+              {MATERIAL_CATEGORIES.map((cat) => (
+                <div key={cat} style={{ marginBottom: 12 }}>
+                  <div className="small muted" style={{ textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
+                    {cat}
+                  </div>
+                  <div className="tex-presets-grid">
+                    {MATERIAL_LIBRARY.filter(m => m.category === cat).map((mat) => (
+                      <button
+                        key={mat.id}
+                        className="tex-preset-btn"
+                        onClick={() => applyLibraryMaterial(mat)}
+                        title={`${mat.name} — click para aplicar (valores PBR reais)`}
+                      >
+                        <div className="tex-preset-swatch" style={{
+                          background: mat.preview,
+                          opacity: mat.material.opacity ?? 1,
+                          boxShadow: mat.material.emissive && mat.material.emissive !== '#000000'
+                            ? `0 0 12px ${mat.material.emissive}` : 'none',
+                        }} />
+                        <span>{mat.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+
+          {/* TAB: Guia Fluxo PBR */}
+          {activeTab === 'guide' && (
+            <>
+              <div className="small muted mb-2" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+                Fluxo de trabalho PBR completo
+              </div>
+
+              <div className="prop-row">
+                <strong>1. UV Unwrap limpo</strong>
+                <div className="small muted mt-1">
+                  Antes de pintar, garante UVs sem sobreposição. Usa o unwrap
+                  automático (modo UV → planar/box) ou importa UVs do Blender.
+                  Sem UVs corretas, a pintura aparece desalinhada.
+                </div>
+              </div>
+
+              <div className="prop-row">
+                <strong>2. Base Color (albedo)</strong>
+                <div className="small muted mt-1">
+                  Define a cor base do material. Sem reflexos, sem relevo —
+                  apenas a cor difusa. Pinta riscos, manchas, desgaste de cor.
+                  <em> Slot: mat.map (canal "color" no Texture Paint).</em>
+                </div>
+              </div>
+
+              <div className="prop-row">
+                <strong>3. Roughness (rugosidade)</strong>
+                <div className="small muted mt-1">
+                  Controla a reflexão: 0 = espelho perfeito, 1 = superfície
+                  fosca. Pinta arranhões (low roughness = brilho) ou desgaste
+                  (high roughness = fosco).
+                  <em> Slot: mat.roughnessMap (canal "roughness" no Texture Paint).</em>
+                </div>
+              </div>
+
+              <div className="prop-row">
+                <strong>4. Normal Map (relevo fino)</strong>
+                <div className="small muted mt-1">
+                  Adiciona detalhe fino sem aumentar geometria. Pinta bordas,
+                  poros, rachadulas. As normais são armazenadas em RGB
+                  (R=X, G=Y, B=Z).
+                  <em> Slot: mat.normalMap (canal "normal" no Texture Paint).</em>
+                </div>
+              </div>
+
+              <div className="prop-row">
+                <strong>5. Metallic / Specular</strong>
+                <div className="small muted mt-1">
+                  Define tipo de superfície: 0 = dielétrico (madeira, pedra, plástico),
+                  1 = metal (ouro, ferro, alumínio). Pinta áreas metálicas
+                  expostas onde a tinta descascou.
+                  <em> Slot: mat.metalnessMap (canal "metallic" no Texture Paint).</em>
+                </div>
+              </div>
+
+              <div className="prop-row">
+                <strong>6. Iluminação / render final</strong>
+                <div className="small muted mt-1">
+                  Para avaliar o material, usa uma luz neutra (HDRI de estúdio)
+                  e observa reflexos, sombras eHighlights. Ajusta envMapIntensity
+                  para reforçar ou suavizar reflexos.
+                </div>
+              </div>
+
+              <div className="prop-row" style={{ background: 'var(--bg-elevated)', padding: 8, borderRadius: 4 }}>
+                <strong>📋 Teste recomendado</strong>
+                <ol style={{ paddingLeft: 18, marginTop: 4 }} className="small muted">
+                  <li>Cria uma esfera e seleciona-a.</li>
+                  <li>Ativa o modo Paint (aba Pintar → "Ativar modo Paint").</li>
+                  <li>Canal <strong>Base Color</strong>, pinta uma linha vermelha na frente do modelo.</li>
+                  <li>Verifica que a linha aparece exatamente onde clicaste (não desalinhada).</li>
+                  <li>Troca para canal <strong>Roughness</strong> e pinta uma área escura (low roughness = brilho).</li>
+                  <li>Verifica que a área ficou brilhante (não mudou a cor).</li>
+                  <li>Troca para <strong>Metallic</strong> e pinta com branco (1.0 = metálico).</li>
+                  <li>Verifica que a área ficou metálica.</li>
+                  <li>Troca para <strong>Normal</strong> e pinta para ver o relevo aparecer.</li>
+                </ol>
+              </div>
+
+              <div className="prop-row" style={{ background: 'var(--bg-elevated)', padding: 8, borderRadius: 4, marginTop: 8 }}>
+                <strong>🔍 Pipeline técnico (9 passos)</strong>
+                <ol style={{ paddingLeft: 18, marginTop: 4 }} className="small muted">
+                  <li>Modelo tem vértices + UVs (BufferGeometry)</li>
+                  <li>Textura 2D associada via UVs (CanvasTexture)</li>
+                  <li>Raycast da câmara → superfície (TexturePaintRaycaster)</li>
+                  <li>Triângulo atingido identificado (hit.face)</li>
+                  <li>UV exata via baricêntricas (hit.uv)</li>
+                  <li>Conversão UV → pixel (u × size, (1-v) × size)</li>
+                  <li>Pincel aplicado na região (paintAtUV)</li>
+                  <li>GPU atualizada (texture.needsUpdate = true)</li>
+                  <li>Multi-canal: Color/Roughness/Metallic/Normal</li>
+                </ol>
               </div>
             </>
           )}

@@ -186,6 +186,12 @@ export const useStore = create(
         color: '#ff5555',
         brushSize: 16,
         opacity: 0.8,
+        // NOVO: parâmetros do pincel PBR-aware (3D texture paint)
+        brushType: 'draw',     // draw | soften | smudge | clone | fill | mask
+        strength: 0.5,          // 0..1
+        channel: 'color',      // color | roughness | metallic | normal
+        normalMode: 'raise',   // raise | lower | smooth (apenas para channel=normal)
+        size: 30,              // raio do pincel em pixels no canvas UV (5..100)
       },
 
       // ===== Animation =====

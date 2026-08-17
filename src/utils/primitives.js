@@ -59,6 +59,8 @@ export function defaultMaterial() {
     metalness: 0.0,
     map: null,           // dataURL da textura difusa, ou null
     normalMap: null,     // dataURL da textura normal, ou null
+    roughnessMap: null,  // dataURL do mapa de roughness, ou null
+    metalnessMap: null,  // dataURL do mapa de metalness, ou null
     repeat: [1, 1],      // tiling UV
     offset: [0, 0],      // offset UV
     opacity: 1,
@@ -70,6 +72,24 @@ export function defaultMaterial() {
     emissiveIntensity: 0,
     // Múltiplas camadas de textura (camadas adicionais sobre o map principal)
     layers: [], // [{ map, blendMode, opacity, repeat, offset }]
+    // ===== PBR físico estendido (MeshPhysicalMaterial) =====
+    anisotropy: 0.0,             // 0..1 — anisotropia metálica (cabelo, metal escovado)
+    anisotropyRotation: 0.0,     // 0..2π
+    ior: 1.5,                    // 1.0..3.0 — Index of Refraction
+    transmission: 0.0,           // 0..1 — transparência física (vidro, plástico translúcido)
+    thickness: 0.0,              // 0..1 — espessura do volume
+    attenuationColor: '#ffffff', // cor da atenuação de transmissão
+    attenuationDistance: 0.5,    // 0..1
+    clearcoat: 0.0,              // 0..1 — verniz sobre a superfície (carro, cromado)
+    clearcoatRoughness: 0.0,     // 0..1
+    sheen: 0.0,                  // 0..1 — penugem (tecido, veludo)
+    sheenColor: '#ffffff',
+    sheenRoughness: 0.5,
+    specularIntensity: 1.0,      // 0..1 — intensidade do reflexo specular
+    specularColor: '#ffffff',
+    envMapIntensity: 1.0,        // 0..3 — intensidade da envmap (reflexos HDRI)
+    // ===== Indica que este material suporta pintura PBR multi-canal =====
+    paintEnabled: false,          // true quando o utilizador entrou em Texture Paint tab
   }
 }
 
