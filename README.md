@@ -2497,3 +2497,73 @@ O código está confirmadamente no GitHub (`origin/main = 3e8a35e`). A Vercel po
 6. **Mais Conects** (Wind, Cloud, DayNight) — não implementados
 7. **Pesquisa de engines concorrentes** — não realizada
 
+---
+
+## 🎨 Fase 9 — Editor UI: Drag, Resize, Rotação (Setembro 2026)
+
+O Editor de UI agora permite manipular elementos diretamente no canvas, como no Figma/Canva.
+
+### Funcionalidades implementadas
+
+| Funcionalidade | Como usar | Descrição |
+|---|---|---|
+| **Arrastar** | Click + arrastar elemento selecionado | Move o elemento no canvas. Posição em percentagem (%) para ser responsiva |
+| **Redimensionar** | Arrastar handle azul (canto inferior direito) | Ajusta largura e altura em pixels. Mínimo 30×20px |
+| **Rotacionar** | Arrastar handle verde (topo centro) | Roda o elemento em graus. Também ajustável via slider no painel de propriedades |
+| **Selecionar** | Click no elemento | Mostra borda tracejada azul + handles de edição |
+| **Deselecionar** | Click no canvas vazio | Remove seleção e hides handles |
+
+### Implementação
+
+**Arquivo:** `src/components/panels/ui-editor/UIEditor.jsx`
+
+Novo componente `DraggableUIElement` que envolve o `UIElementRenderer` existente:
+
+```
+DraggableUIElement (wrapper — drag/resize/rotate)
+  └── UIElementRenderer (conteúdo visual — partilhado com GameUIOverlay)
+      └── Handles de edição (só quando selecionado)
+          ├── Handle resize (azul, canto inferior direito)
+          ├── Handle rotação (verde, topo centro)
+          └── Borda tracejada (seleção visual)
+```
+
+**Eventos:** `pointerdown` → `pointermove` (window) → `pointerup` (window). Converte delta de pixels para percentagem (drag) ou pixels absolutos (resize) ou graus (rotate).
+
+**Propriedade nova:** `rotation` (número, 0-360°) adicionada ao painel de propriedades como slider.
+
+### Arquivos modificados
+
+| Arquivo | +Linhas | Descrição |
+|---|---|---|
+| `src/components/panels/ui-editor/UIEditor.jsx` | +143 | `DraggableUIElement` + handles + slider rotação |
+| **Total** | +143 | |
+
+### Verificação
+
+| Verificação | Resultado |
+|---|---|
+| `npm run build` | ✓ PASS (0 erros, 1.74s) |
+| `git diff --check` | ✓ PASS (exit 0) |
+| Bugs #1-#7 | ✓ Intactos |
+| Fases 1-8 | ✓ Não alteradas |
+
+### Notas sobre as abas de Construtores/Mecânicas
+
+As abas de Construtores, Mecânicas, Diálogos e VFX estão no `VerticalRail` e só aparecem quando:
+1. A HomePage está fechada (`homeVisible = false`) — o utilizador precisa de abrir ou criar um projeto
+2. O `appMode` é `modeling` ou `scene` (não `flirscript` nem `ui`)
+3. O `scenePreviewOpen` é `false` (não está em Play Mode)
+
+Os ícones foram corrigidos no commit anterior (`iconMap.jsx` agora tem `builders: Building2`, `mechanics: Target`, `dialogue: MessageCircle`).
+
+### Próximas fases planeadas
+
+| Fase | Item | Descrição |
+|---|---|---|
+| 10 | Hierarquia de objetos | Filho abaixo do conect + linhas de conexão + ver filhos |
+| 11 | Abas de Modelos e Animação | Nível profissional Blender |
+| 12 | Pincel 3D para Modificadores | Displace local via raycast |
+| 13 | Mais Conects | WindObject, CloudObject, DayNightCycleObject |
+| 14 | Pesquisa de engines concorrentes | Análise Unreal/Unity/Godot/ItsMagic |
+
