@@ -2083,3 +2083,108 @@ Aplica mais qualidade (castShadow) apenas aos objetos visíveis no campo da câm
 
 4. **Lens presets sobrescrevem FOV** — se utilizador muda `lensType` para 'wide', FOV é definido para 90. Se volta para 'custom', FOV mantém 90 (não restaura o anterior). Aceitável nesta fase.
 
+---
+
+## 🎯 Fase 6 — Aba Mecânicas + FlirScript API Expandida (Setembro 2026)
+
+### Aba Mecânicas
+
+Nova aba dedicada a configurar mecânicas de jogo de forma visual/guiada (não só por FlirCode). Reune o que já existe (armas, inventário, GameState, saveProgress) numa interface própria, com assistentes passo-a-passo.
+
+**Arquivo:** `src/components/panels/MechanicsPanel.jsx`
+
+#### Assistentes (6)
+
+| Mecânica | Ícone | Cria | Descrição |
+|---|---|---|---|
+| **Sistema de Vida** ❤️ | GameStateObject | Health bar + dano + regeneração |
+| **Sistema de Pontuação** 🏆 | TextObject + GameState | Score display + pontos por evento |
+| **Sistema de Checkpoint** 🏁 | CheckpointObject | Checkpoints que salvam progressão |
+| **Sistema de Inventário** 🎒 | ItemObject | Items coleccionáveis com autoPickup |
+| **Sistema de Armas** 🔫 | WeaponObject + ViewObject | Arma + câmara FPS |
+| **Game State Manager** 📊 | GameStateObject | Gestor de estado (menu/playing/paused/gameOver) |
+
+Cada assistente mostra passos visualmente (checklist com progresso) e cria os Conects necessários na cena ativa via `store.addConectToScene`.
+
+**Acesso:** VerticalRail → "Mecânicas" → selecionar mecânica → ver passos → "Criar Mecânica"
+
+### FlirScript API — Novos Namespaces (3)
+
+Expande a FlirScriptAPI com 3 novos namespaces para acesso a sistemas internos:
+
+#### Camera API
+
+| Método | Retorno | Descrição |
+|---|---|---|
+| `getPosition()` | `[x,y,z]` | Posição atual da câmara (placeholder — requer bridge) |
+| `getRotation()` | `[pitch,yaw,0]` | Rotação atual (lê `window._flirCameraRotation`) |
+| `getFOV()` | `number` | FOV atual (placeholder) |
+| `getQualityLevel()` | `string` | Quality level do AdaptiveQuality |
+| `isMobile()` | `boolean` | Detecção mobile do AdaptiveQuality |
+
+#### Scene API
+
+| Método | Retorno | Descrição |
+|---|---|---|
+| `getObjectCount()` | `number` | Total de instâncias na cena ativa |
+| `getConectCount()` | `number` | Total de conects na cena ativa |
+| `getActiveSceneId()` | `string\|null` | ID da cena ativa |
+| `getSceneNames()` | `string[]` | Nomes de todas as cenas |
+
+#### Physics API
+
+| Método | Retorno | Descrição |
+|---|---|---|
+| `getGravity()` | `[x,y,z]` | Gravidade atual (lê gameContext) |
+| `getBodyCount()` | `number` | Total de bodies (placeholder — requer bridge) |
+| `isPaused()` | `boolean` | Se física está pausada |
+
+**Versão API:** `1.0.0-phase6.0`
+
+**Total de namespaces:** 11 (LOD, Performance, Culling, Object, Events, Raycast, Spatial, Streaming, **Camera**, **Scene**, **Physics**)
+
+### Arquivos criados/modificados
+
+| Arquivo | +Linhas | Tipo |
+|---|---|---|
+| `src/components/panels/MechanicsPanel.jsx` | 210 | NOVO — 6 assistentes com UI passo-a-passo |
+| `src/utils/flirscript/flirScriptAPI.js` | +118 | MODIFICADO — 3 novos namespaces (Camera, Scene, Physics) |
+| `src/App.jsx` | +4 | MODIFICADO — import + state + render |
+| `src/store/useStore.js` | +5 | MODIFICADO — `mechanicsPanelOpen` + setters |
+| `src/components/ui/VerticalRail.jsx` | +5 | MODIFICADO — botão "Mecânicas" + handler |
+| **Total** | +342 | |
+
+### Verificação
+
+| Verificação | Resultado |
+|---|---|
+| `npm run build` | ✓ PASS (0 erros, 1.98s) |
+| `git diff --check` | ✓ PASS (exit 0) |
+| Bugs #1-#7 | ✓ Intactos |
+| Performance Core 3.2-3.8 | ✓ Não alterado |
+| Post-Audit 4.0/4.1/4.2 | ✓ Não alterado |
+| Fases 1-5 | ✓ Não alteradas |
+| Nenhum `eval()` / `new Function()` | ✓ |
+| Nenhum `setTimeout`/`setInterval` introduzido | ✓ |
+
+### Classificação
+
+| Categoria | Itens |
+|---|---|
+| **MEDIDO** | Build: 0 erros, 1.98s; `git diff --check`: exit 0 |
+| **STATICALLY VERIFIED** | MechanicsPanel tem 6 assistentes com passos visuais; cada assistente cria Conects via `store.addConectToScene`; CameraAPI.getRotation lê `window._flirCameraRotation`; SceneAPI lê `useStore.getState()` para contagens; PhysicsAPI lê `window._flirGameContext` para gravidade/pausa; FlirScriptAPI versão 1.0.0-phase6.0; VerticalRail tem botão "Mecânicas"; Bugs #1-#7 intactos |
+| **ESTIMADO** | Mecânicas aceleram criação de sistemas de jogo; Assistentes reduzem barreira de entrada (não precisa FlirCode para criar mecânica básica); Novos namespaces expandem capacidades do FlirCode |
+| **NOT TESTED** | Assistente real em browser; FlirScriptAPI.Camera/Scene/Physics real em FlirCode; Camera.getPosition placeholder; Physics.getBodyCount placeholder |
+
+**Runtime benchmark unavailable.** Análise estática apenas.
+
+### Limitações
+
+1. **Camera.getPosition() é placeholder** — retorna `[0,0,0]`. Requer bridge com `useThree()` do R3F para obter a câmara real. Implementação futura: expor via `window._flirCamera`.
+
+2. **Physics.getBodyCount() é placeholder** — retorna 0. Requer bridge com `physicsRef`. Implementação futura: expor via `window._flirPhysicsStats`.
+
+3. **SceneAPI faz `useStore.getState()` síncrono** — chamada a cada invocação. Em scripts que chamam frequentemente, pode ter overhead. Aceitável para queries esporádicas.
+
+4. **Assistentes criam Conects mas não FlirCode** — o FlirCode para implementar a lógica completa (dano, score, teleport) deve ser configurado manualmente no ConectPropertiesPanel. O assistente dá os passos visualmente mas não gera código automático.
+

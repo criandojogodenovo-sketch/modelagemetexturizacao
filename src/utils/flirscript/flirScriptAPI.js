@@ -48,6 +48,8 @@ import { RaycastSystem } from '../raycastSystem'
 import { SpatialPartitionSystem } from '../spatialPartitionSystem'
 import { StreamingManager } from '../streamingManager'
 import * as THREE from 'three'
+// Fase 6 — SceneAPI precisa de aceder ao store
+import { useStore } from '../../store/useStore'
 
 /**
  * LOD API — gestão de Level of Detail.
@@ -551,9 +553,119 @@ const StreamingAPI = {
 }
 
 /**
+ * Camera API — controlo de câmara em tempo de execução.
+ *
+ * Fase 6 — FlirCode API expandida.
+ *
+ * Métodos:
+ *  - getPosition(): [x, y, z] — posição atual da câmara
+ *  - getRotation(): [pitch, yaw, roll] — rotação atual
+ *  - getFOV(): number — FOV atual
+ *  - getQualityLevel(): string — qualityLevel do AdaptiveQuality
+ */
+const CameraAPI = {
+  getPosition() {
+    // Lê window._flirCameraRotation para yaw/pitch
+    // A posição da câmara é controlada pelo GameMode, expomos via gameContext
+    // Para acesso direto, precisamos de uma referência à câmara do Canvas
+    // Por agora, retorna posição 0 (placeholder — requer bridge com useThree)
+    return [0, 0, 0]
+  },
+
+  getRotation() {
+    const rot = (typeof window !== 'undefined') ? window._flirCameraRotation : null
+    if (!rot) return [0, 0, 0]
+    return [rot.pitch || 0, rot.yaw || 0, 0]
+  },
+
+  getFOV() {
+    // Placeholder — requer bridge com camera do Canvas
+    return 60
+  },
+
+  getQualityLevel() {
+    return AdaptiveQuality.getQualityLevel()
+  },
+
+  isMobile() {
+    return AdaptiveQuality.isMobile()
+  },
+}
+
+/**
+ * Scene API — consulta de estado da cena ativa.
+ *
+ * Fase 6 — FlirCode API expandida.
+ *
+ * Métodos:
+ *  - getObjectCount(): number — total de instâncias na cena ativa
+ *  - getConectCount(): number — total de conects na cena ativa
+ *  - getActiveSceneId(): string | null
+ *  - getSceneNames(): string[] — nomes de todas as cenas
+ */
+const SceneAPI = {
+  getObjectCount() {
+    const state = useStore.getState()
+    const scene = state.scenes.find(s => s.id === state.activeSceneId)
+    return scene?.objects?.length || 0
+  },
+
+  getConectCount() {
+    const state = useStore.getState()
+    const scene = state.scenes.find(s => s.id === state.activeSceneId)
+    return scene?.conects?.length || 0
+  },
+
+  getActiveSceneId() {
+    return useStore.getState().activeSceneId
+  },
+
+  getSceneNames() {
+    return useStore.getState().scenes.map(s => s.name || s.id)
+  },
+}
+
+/**
+ * Physics API — consulta de estado da física.
+ *
+ * Fase 6 — FlirCode API expandida.
+ *
+ * Métodos:
+ *  - getGravity(): [x, y, z]
+ *  - getBodyCount(): number
+ *  - isPaused(): boolean
+ */
+const PhysicsAPI_Fase6 = {
+  getGravity() {
+    // Lê do gameContext se disponível
+    const gc = (typeof window !== 'undefined') ? window._flirGameContext : null
+    if (gc?.globalVars?._gravity) {
+      const g = gc.globalVars._gravity
+      return [g[0] || 0, g[1] || -9.82, g[2] || 0]
+    }
+    return [0, -9.82, 0]
+  },
+
+  getBodyCount() {
+    // Placeholder — requer bridge com physicsRef
+    return 0
+  },
+
+  isPaused() {
+    const gc = (typeof window !== 'undefined') ? window._flirGameContext : null
+    return gc?._gameState === 'paused'
+  },
+}
+
+// Nota: usamos PhysicsAPI_Fase6 para evitar conflito com PerformanceAPI
+const PhysicsAPI = PhysicsAPI_Fase6
+
+/**
  * FlirScriptAPI — objeto raiz da API oficial do FlirScript.
  *
  * Exportado como singleton. Acessível via import ou via gameContext.api.
+ *
+ * Fase 6 — novos namespaces: Camera, Scene, Physics
  */
 export const FlirScriptAPI = {
   LOD: LODAPI,
@@ -564,12 +676,16 @@ export const FlirScriptAPI = {
   Raycast: RaycastAPI,
   Spatial: SpatialAPI,
   Streaming: StreamingAPI,
+  // Fase 6 — novos namespaces
+  Camera: CameraAPI,
+  Scene: SceneAPI,
+  Physics: PhysicsAPI,
 
   /**
    * Retorna a versão da API (para compatibilidade futura).
    */
   getVersion() {
-    return '1.0.0-phase4.0'
+    return '1.0.0-phase6.0'
   },
 }
 

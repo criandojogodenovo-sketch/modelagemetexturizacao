@@ -1515,6 +1515,11 @@ export const useStore = create(
       openBuildersPanel: () => set({ buildersPanelOpen: true }),
       closeBuildersPanel: () => set({ buildersPanelOpen: false }),
 
+      // Fase 6 — Aba Mecânicas
+      mechanicsPanelOpen: false,
+      openMechanicsPanel: () => set({ mechanicsPanelOpen: true }),
+      closeMechanicsPanel: () => set({ mechanicsPanelOpen: false }),
+
       // Terrain Sculpt 3D — escultura direta no viewport 3D
       terrainSculptActive: false,
       toggleTerrainSculpt: () => set((s) => ({ terrainSculptActive: !s.terrainSculptActive })),
