@@ -1327,6 +1327,12 @@ export const CONECT_TAXONOMY = [
       sunShininess: 80,
       fresnelPower: 5.0,
       ior: 1.333,
+      // Fase 4 — High Realism
+      windDirection: [1.0, 0.0],
+      windStrength: 0.3,
+      dynamicFoam: true,
+      foamIntensity: 0.8,
+      depthGradient: true,
     },
     properties: [
       prop('size', 'Tamanho (X,Z)', 'vec2', [50, 50]),
@@ -1343,6 +1349,11 @@ export const CONECT_TAXONOMY = [
       prop('foamColor', 'Cor da espuma', 'color', '#ffffff'),
       prop('fresnelPower', 'Poder Fresnel', 'number', 5.0, { min: 1, max: 10, step: 0.5 }),
       prop('ior', 'IOR (índice refracção)', 'number', 1.333, { min: 1.0, max: 2.5, step: 0.01 }),
+      // Fase 4 — High Realism
+      prop('windStrength', 'Vento: Força', 'number', 0.3, { min: 0, max: 1, step: 0.05 }),
+      prop('dynamicFoam', 'Espuma dinâmica', 'boolean', true),
+      prop('foamIntensity', 'Intensidade da espuma', 'number', 0.8, { min: 0, max: 1.5, step: 0.1 }),
+      prop('depthGradient', 'Gradiente de profundidade', 'boolean', true),
     ],
   },
 ]

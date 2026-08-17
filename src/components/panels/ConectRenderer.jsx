@@ -1346,11 +1346,18 @@ function RealWaterMesh({ conect, setMeshRef }) {
       fresnelPower: conect.fresnelPower,
       ior: conect.ior,
       sunDirection: conect.sunDirection,
+      // Fase 4 — High Realism
+      windDirection: conect.windDirection || [1.0, 0.0],
+      windStrength: conect.windStrength ?? 0.3,
+      dynamicFoam: conect.dynamicFoam !== false,
+      foamIntensity: conect.foamIntensity ?? 0.8,
+      depthGradient: conect.depthGradient !== false,
     })
   }, [
     conect.color, conect.deepColor, conect.clarity, conect.refraction,
     conect.reflection, conect.flowSpeed, conect.waveHeight, conect.waveFrequency,
     conect.foamThreshold, conect.foamColor, conect.fresnelPower, conect.ior, conect.sunDirection,
+    conect.windDirection, conect.windStrength, conect.dynamicFoam, conect.foamIntensity, conect.depthGradient,
   ])
 
   const geometry = useMemo(() => {

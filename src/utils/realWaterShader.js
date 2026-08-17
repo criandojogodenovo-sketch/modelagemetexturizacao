@@ -30,6 +30,12 @@ export function createRealWaterMaterial(opts = {}) {
     fresnelPower = 5.0,
     ior = 1.333,
     sunDirection = [0.5, 0.8, 0.3],
+    // Fase 4 — High Realism
+    windDirection = [1.0, 0.0],
+    windStrength = 0.3,
+    dynamicFoam = true,
+    foamIntensity = 0.8,
+    depthGradient = true,
   } = opts
 
   const uniforms = {
@@ -48,6 +54,12 @@ export function createRealWaterMaterial(opts = {}) {
     uIOR: { value: ior },
     uSunDirection: { value: new THREE.Vector3(...sunDirection).normalize() },
     uCameraPos: { value: new THREE.Vector3() },
+    // Fase 4 — High Realism uniforms
+    uWindDirection: { value: new THREE.Vector2(windDirection[0], windDirection[1]).normalize() },
+    uWindStrength: { value: windStrength },
+    uDynamicFoam: { value: dynamicFoam ? 1.0 : 0.0 },
+    uFoamIntensity: { value: foamIntensity },
+    uDepthGradient: { value: depthGradient ? 1.0 : 0.0 },
   }
 
   const vertexShader = /* glsl */ `
@@ -55,11 +67,14 @@ export function createRealWaterMaterial(opts = {}) {
     uniform float uWaveHeight;
     uniform float uWaveFrequency;
     uniform float uFlowSpeed;
+    uniform vec2 uWindDirection;
+    uniform float uWindStrength;
 
     varying vec3 vWorldPos;
     varying vec3 vNormal;
     varying float vWaveHeight;
     varying vec2 vUv;
+    varying float vFoamFactor;
 
     // Gerstner wave
     vec3 gerstnerWave(vec2 pos, vec2 dir, float freq, float amplitude, float speed, float steepness, inout vec3 tangent, inout vec3 binormal) {
@@ -92,12 +107,18 @@ export function createRealWaterMaterial(opts = {}) {
       vec3 tangent = vec3(1, 0, 0);
       vec3 binormal = vec3(0, 0, 1);
 
-      // 4 oitavas de ondas Gerstner com direções diferentes
+      // Fase 4 — High Realism: ondas influenciadas pelo vento
+      vec2 windDir = normalize(uWindDirection + vec2(0.001));
+      float windInfluence = uWindStrength;
+
+      // 4 oitavas de ondas Gerstner com direções influenciadas pelo vento
       float freq = uWaveFrequency * 0.5;
       float amp = uWaveHeight;
       vec3 offset = vec3(0.0);
-      offset += gerstnerWave(worldXZ, normalize(vec2(1.0, 0.4)), freq, amp * 0.5, uFlowSpeed, 0.6, tangent, binormal);
-      offset += gerstnerWave(worldXZ, normalize(vec2(-0.7, 1.0)), freq * 1.7, amp * 0.3, uFlowSpeed * 1.3, 0.5, tangent, binormal);
+      vec2 d1 = normalize(mix(normalize(vec2(1.0, 0.4)), windDir, windInfluence));
+      offset += gerstnerWave(worldXZ, d1, freq, amp * 0.5, uFlowSpeed, 0.6, tangent, binormal);
+      vec2 d2 = normalize(mix(normalize(vec2(-0.7, 1.0)), windDir, windInfluence * 0.5));
+      offset += gerstnerWave(worldXZ, d2, freq * 1.7, amp * 0.3, uFlowSpeed * 1.3, 0.5, tangent, binormal);
       offset += gerstnerWave(worldXZ, normalize(vec2(0.3, -1.0)), freq * 2.5, amp * 0.15, uFlowSpeed * 1.7, 0.4, tangent, binormal);
       offset += gerstnerWave(worldXZ, normalize(vec2(-1.0, -0.5)), freq * 3.7, amp * 0.07, uFlowSpeed * 2.1, 0.3, tangent, binormal);
 
@@ -109,6 +130,10 @@ export function createRealWaterMaterial(opts = {}) {
       vWorldPos = (modelMatrix * vec4(pos, 1.0)).xyz;
       vNormal = normalize(normalMatrix * normalize(cross(tangent, binormal)));
       vUv = uv;
+      // Fase 4 — Dynamic foam: cresting waves produzem mais espuma
+      float crestFactor = smoothstep(uWaveHeight * 0.6, uWaveHeight, offset.y);
+      float windFoam = uWindStrength * 0.3;
+      vFoamFactor = crestFactor + windFoam;
 
       gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
     }
@@ -129,11 +154,17 @@ export function createRealWaterMaterial(opts = {}) {
     uniform float uIOR;
     uniform vec3 uSunDirection;
     uniform vec3 uCameraPos;
+    uniform vec2 uWindDirection;
+    uniform float uWindStrength;
+    uniform float uDynamicFoam;
+    uniform float uFoamIntensity;
+    uniform float uDepthGradient;
 
     varying vec3 vWorldPos;
     varying vec3 vNormal;
     varying float vWaveHeight;
     varying vec2 vUv;
+    varying float vFoamFactor;
 
     // Simplex noise 2D (para flow mapping e caustics)
     vec3 mod289_3(vec3 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
@@ -171,7 +202,16 @@ export function createRealWaterMaterial(opts = {}) {
 
       // Cor base — mistura superficial/profunda com base na altura da onda
       float depthFactor = smoothstep(-uWaveHeight, uWaveHeight, vWaveHeight);
-      vec3 waterColor = mix(uDeepColor, uColor, depthFactor);
+      // Fase 4 — Depth gradient: variação de cor mais rica por profundidade
+      vec3 waterColor;
+      if (uDepthGradient > 0.5) {
+        // 3 níveis de cor: profundo → médio → superficial
+        vec3 midColor = mix(uDeepColor, uColor, 0.5);
+        waterColor = mix(uDeepColor, midColor, smoothstep(-uWaveHeight, 0.0, vWaveHeight));
+        waterColor = mix(waterColor, uColor, depthFactor);
+      } else {
+        waterColor = mix(uDeepColor, uColor, depthFactor);
+      }
 
       // Caustics (apenas visto através da água)
       vec2 causticsUv = vUv * 8.0 + uTime * 0.05;
@@ -202,7 +242,14 @@ export function createRealWaterMaterial(opts = {}) {
       // Adicionar ruído à espuma
       float foamNoise = snoise(vUv * 30.0 + uTime * 0.5) * 0.5 + 0.5;
       foamAmount *= smoothstep(0.3, 0.7, foamNoise);
-      waterColor = mix(waterColor, uFoamColor, foamAmount * 0.8);
+      // Fase 4 — Dynamic foam: espuma adicional de cristas + vento
+      if (uDynamicFoam > 0.5) {
+        float dynamicFoam = vFoamFactor * uFoamIntensity;
+        float foamNoise2 = snoise(vUv * 50.0 + uTime * 0.8 + uWindDirection * 10.0) * 0.5 + 0.5;
+        dynamicFoam *= smoothstep(0.4, 0.8, foamNoise2);
+        foamAmount = max(foamAmount, dynamicFoam);
+      }
+      waterColor = mix(waterColor, uFoamColor, foamAmount * uFoamIntensity);
 
       // Transparência final
       float alpha = mix(1.0 - uClarity, 1.0, fresnel);

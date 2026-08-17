@@ -12,6 +12,7 @@
 import { useStore } from '../../store/useStore'
 import CollapseSection from '../ui/CollapseSection'
 import { LIGHT_PRESETS, applyLightPreset, getPresetsByCategory } from '../../utils/lightPresets'
+import { SKY_PRESETS, applySkyPreset, getSkyPresets } from '../../utils/skyPresets'
 
 export default function SceneSettings() {
   const background = useStore((s) => s.background)
@@ -206,6 +207,62 @@ export default function SceneSettings() {
       <CollapseSection title="Presets de Luz" icon="sparkles" defaultOpen={false} storageKey="scene_light_presets">
         <PresetsSection />
       </CollapseSection>
+
+      <CollapseSection title="Presets de Céu" icon="cloud" defaultOpen={false} storageKey="scene_sky_presets">
+        <SkyPresetsSection />
+      </CollapseSection>
+    </>
+  )
+}
+
+// ===== Sub-componente: Presets de Céu =====
+function SkyPresetsSection() {
+  const store = useStore
+  const presets = getSkyPresets()
+
+  const handleApply = (presetId) => {
+    applySkyPreset(presetId, store.getState())
+  }
+
+  return (
+    <>
+      <div style={{ marginBottom: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+          {presets.map(preset => (
+            <button
+              key={preset.id}
+              onClick={() => handleApply(preset.id)}
+              title={preset.description}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '10px 4px',
+                background: 'var(--bg-tertiary, #161b22)',
+                border: '1px solid var(--border, #30363d)',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                color: 'var(--text, #e6edf3)',
+                fontSize: '11px',
+                transition: 'border-color 0.15s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#2f81f7' }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border, #30363d)' }}
+            >
+              <span style={{ fontSize: '24px' }}>{preset.icon}</span>
+              <span style={{ fontWeight: 600 }}>{preset.label}</span>
+              <span style={{ fontSize: '9px', opacity: 0.5, textAlign: 'center', lineHeight: '1.3' }}>
+                {preset.description}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ fontSize: '10px', opacity: 0.5, marginTop: '8px', lineHeight: '1.4' }}>
+        Aplicar um preset cria/atualiza um SkyObject na cena com configurações de céu procedural (rayleigh, turbidity, estrelas, etc.).
+      </div>
     </>
   )
 }

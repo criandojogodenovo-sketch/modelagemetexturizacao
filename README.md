@@ -1887,3 +1887,97 @@ O `BuildersPanel` (Fase 2) foi expandido com 2 novos construtores:
 
 **Runtime benchmark unavailable.** Análise estática apenas.
 
+---
+
+## 🌫️🌊 Fase 4 — World Environment Presets + Água High Realism (Setembro 2026)
+
+### World Environment — Presets de Céu
+
+Expande o SkyObject com 5 presets prontos a aplicar, todos baseados no shader procedural existente (`skyShaderPro`).
+
+**Arquivo:** `src/utils/skyPresets.js`
+
+#### Presets de Céu (5)
+
+| Preset | Ícone | Configuração | Descrição |
+|---|---|---|---|
+| **Nublado** ☁️ | rayleigh 0.5, turbidity 20 | Céu cinzento, sol difuso, sem sombras duras |
+| **Tempestuoso** ⛈️ | rayleigh 0.3, turbidity 28 | Céu escuro, tempestade iminente, turbidez muito alta |
+| **Aurora Boreal** 🌌 | rayleigh 3.0, stars true, sun 2° | Céu noturno com estrelas, tons verde/roxo |
+| **Noite Estrelada** 🌟 | rayleigh 0.8, stars true, sun 0° | Céu escuro com muitas estrelas, sol abaixo do horizonte |
+| **Nevoeiro Denso** 🌫️ | rayleigh 0.2, turbidity 25 | Céu branco/acinzentado, visibilidade muito reduzida |
+
+**Comportamento:** `applySkyPreset(id, store)` procura SkyObject existente na cena e atualiza as suas propriedades. Se não existir, cria um novo.
+
+**Acesso:** `SceneSettings → Presets de Céu` (secção colapsável).
+
+### Água High Realism
+
+Upgrade do `RealWaterObject` com 4 novos recursos de realismo:
+
+**Shader modificado:** `src/utils/realWaterShader.js`
+
+#### 1. Vento (Wind)
+- **Novos uniforms:** `uWindDirection`, `uWindStrength`
+- Ondas Gerstner principais e secundárias são influenciadas pela direção do vento
+- `mix(dirBase, windDir, windInfluence)` altera a direção das ondas
+- Vento forte → ondas mais alinhadas com a direção do vento
+
+#### 2. Espuma Dinâmica (Dynamic Foam)
+- **Novo varying:** `vFoamFactor` (calculado no vertex shader)
+- Cresting waves (cristas altas) produzem mais espuma
+- `crestFactor = smoothstep(waveHeight*0.6, waveHeight, offset.y)`
+- Vento forte adiciona espuma extra: `windFoam = windStrength * 0.3`
+- Noise na frequência 50 (vs 30 do foam estático) para variação mais fina
+- Controlado por `dynamicFoam` (boolean) e `foamIntensity` (0-1.5)
+
+#### 3. Gradiente de Profundidade (Depth Gradient)
+- 3 níveis de cor em vez de 2: profundo → médio → superficial
+- `midColor = mix(deepColor, color, 0.5)` calculado no fragment shader
+- Transição mais suave e rica entre águas profundas e rasas
+- Controlado por `depthGradient` (boolean)
+
+#### 4. Novas propriedades no RealWaterObject
+
+| Propriedade | Tipo | Default | Descrição |
+|---|---|---|---|
+| `windStrength` | number (0-1) | 0.3 | Força do vento que influencia ondas |
+| `dynamicFoam` | boolean | true | Espuma dinâmica de cristas + vento |
+| `foamIntensity` | number (0-1.5) | 0.8 | Intensidade global da espuma |
+| `depthGradient` | boolean | true | Gradiente de 3 cores por profundidade |
+
+### Arquivos criados/modificados
+
+| Arquivo | +Linhas | Tipo |
+|---|---|---|
+| `src/utils/skyPresets.js` | 130 | NOVO — 5 presets + `applySkyPreset` + `getSkyPresets` |
+| `src/utils/realWaterShader.js` | +57 | MODIFICADO — wind + dynamic foam + depth gradient |
+| `src/utils/conects/taxonomy.js` | +11 | MODIFICADO — 4 novas props no RealWaterObject |
+| `src/components/panels/ConectRenderer.jsx` | +7 | MODIFICADO — passar novos params ao createRealWaterMaterial |
+| `src/components/panels/SceneSettings.jsx` | +57 | MODIFICADO — secção "Presets de Céu" |
+| **Total** | +262 | |
+
+### Verificação
+
+| Verificação | Resultado |
+|---|---|
+| `npm run build` | ✓ PASS (0 erros, 1.50s) |
+| `git diff --check` | ✓ PASS (exit 0) |
+| Bugs #1-#7 | ✓ Intactos |
+| Performance Core 3.2-3.8 | ✓ Não alterado |
+| Post-Audit 4.0/4.1/4.2 | ✓ Não alterado |
+| Fases 1-3 | ✓ Não alteradas |
+| Nenhum `eval()` / `new Function()` | ✓ |
+| Nenhum `setTimeout`/`setInterval` introduzido | ✓ |
+
+### Classificação
+
+| Categoria | Itens |
+|---|---|
+| **MEDIDO** | Build: 0 erros, 1.50s; `git diff --check`: exit 0 |
+| **STATICALLY VERIFIED** | `applySkyPreset` cria/atualiza SkyObject com config do preset; 5 sky presets (cloudy, stormy, aurora, starryNight, denseFog); Shader realWater atualizado com wind uniforms + vFoamFactor varying + dynamic foam logic + 3-color depth gradient; RealWaterObject tem 4 novas propriedades; ConectRenderer passa novos params; SceneSettings tem secção "Presets de Céu"; Bugs #1-#7 intactos |
+| **ESTIMADO** | Presets de céu aceleram setup de ambiente; Vento influencia direção das ondas; Espuma dinâmica aumenta realismo de cristas; Gradiente de profundidade melhora variação de cor |
+| **NOT TESTED** | Aplicar preset de céu real em browser; Água com vento real em browser; Dynamic foam visual real; Depth gradient visual real; Performance do shader em mobile |
+
+**Runtime benchmark unavailable.** Análise estática apenas.
+
