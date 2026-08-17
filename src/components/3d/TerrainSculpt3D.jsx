@@ -197,6 +197,18 @@ export default function TerrainSculpt3D({
             hm[idx] += n * amount
             break
           }
+          // Fase 12 — Pincel 3D melhorado: planos e cubos
+          case 'plane': {
+            // Achatar para um nível alvo (cria planos/terraços)
+            const targetLevel = brushStrength * 0.5
+            hm[idx] += (targetLevel - hm[idx]) * f * 0.3
+            break
+          }
+          case 'cube': {
+            // Elevar em forma de bloco (sem falloff — bordas duras)
+            hm[idx] += strength * 0.15
+            break
+          }
         }
       }
     }
