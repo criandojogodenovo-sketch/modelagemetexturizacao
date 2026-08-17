@@ -407,6 +407,29 @@ function ModifierParams({ mod, onChange }) {
           </small>
         </div>
       )
+    case 'curve':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Tipo de curva</label>
+            <select value={params.curveType || 'sine'} onChange={(e) => onChange({ curveType: e.target.value })}>
+              <option value="sine">Sine (onda Y)</option>
+              <option value="cosine">Cosine (onda Z)</option>
+              <option value="twist">Twist (torcer)</option>
+            </select>
+          </div>
+          <div className="prop-row">
+            <label>Amplitude: {params.amplitude}</label>
+            <input type="range" min="0" max="2" step="0.05" value={params.amplitude}
+              onChange={(e) => onChange({ amplitude: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Frequência: {params.frequency}</label>
+            <input type="range" min="0.1" max="5" step="0.1" value={params.frequency}
+              onChange={(e) => onChange({ frequency: Number(e.target.value) })} />
+          </div>
+        </>
+      )
     default:
       return null
   }

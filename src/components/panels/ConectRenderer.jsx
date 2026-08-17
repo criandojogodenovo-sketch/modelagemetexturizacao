@@ -146,6 +146,11 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
   // Fase 8 — DialogueObject: gizmo de NPC diálogo
   if (conect.type === 'DialogueObject') return <DialogueMesh conect={conect} setMeshRef={setMeshRef} />
 
+  // Fase 13 — WindObject, CloudObject, DayNightCycleObject
+  if (conect.type === 'WindObject') return <WindMesh conect={conect} setMeshRef={setMeshRef} />
+  if (conect.type === 'CloudObject') return <CloudMesh conect={conect} setMeshRef={setMeshRef} />
+  if (conect.type === 'DayNightCycleObject') return <DayNightMesh conect={conect} setMeshRef={setMeshRef} />
+
   // ReferenceObject: renderiza conteúdo de outra cena
   if (conect.type === 'ReferenceObject') {
     return <ReferenceMesh conect={conect} setMeshRef={setMeshRef} />
@@ -1422,6 +1427,92 @@ function DialogueMesh({ conect, setMeshRef }) {
       <mesh>
         <sphereGeometry args={[conect.triggerRadius || 3, 16, 8]} />
         <meshBasicMaterial color="#2f81f7" wireframe transparent opacity={0.15} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== Fase 13 — WindObject (gizmo de vento) =====
+function WindMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  useFrame((_, dt) => {
+    if (ref.current) ref.current.rotation.z += dt * (conect.windStrength || 0.5) * 0.5
+  })
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      {/* Setas de vento */}
+      <mesh ref={ref}>
+        <coneGeometry args={[0.3, 1, 4]} />
+        <meshBasicMaterial color="#a0c4ff" wireframe transparent opacity={0.5} />
+      </mesh>
+      <mesh position={[0, -0.5, 0]}>
+        <cylinderGeometry args={[0.05, 0.05, 1, 4]} />
+        <meshBasicMaterial color="#a0c4ff" wireframe transparent opacity={0.3} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== Fase 13 — CloudObject (gizmo de nuvens) =====
+function CloudMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  const cloudCount = conect.cloudCount || 5
+  const cloudSize = conect.cloudSize || 3
+  const cloudHeight = conect.cloudHeight || 15
+  useFrame((_, dt) => {
+    if (ref.current) ref.current.position.x += dt * (conect.cloudSpeed || 0.1)
+  })
+  const clouds = []
+  for (let i = 0; i < cloudCount; i++) {
+    const x = (Math.random() - 0.5) * 30
+    const z = (Math.random() - 0.5) * 30
+    clouds.push(
+      <mesh key={i} position={[x, cloudHeight + Math.random() * 3, z]} scale={[cloudSize, cloudSize * 0.6, cloudSize]}>
+        <sphereGeometry args={[1, 12, 8]} />
+        <meshBasicMaterial color={conect.cloudColor || '#ffffff'} transparent opacity={conect.cloudOpacity || 0.6} depthWrite={false} />
+      </mesh>
+    )
+  }
+  return (
+    <group ref={(node) => { setMeshRef?.(node); if (node) ref.current = node }}>
+      {clouds}
+    </group>
+  )
+}
+
+// ===== Fase 13 — DayNightCycleObject (gizmo sol/lua) =====
+function DayNightMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  const sunRef = useRef()
+  useFrame((_, dt) => {
+    if (!conect.autoAdvance) return
+    const cycleDuration = conect.cycleDuration || 120
+    // Avançar tempo
+    conect.currentTime = ((conect.currentTime || 0) + dt / cycleDuration) % 1
+    if (sunRef.current) {
+      // Rotacionar sol ao redor do centro
+      const angle = (conect.currentTime || 0) * Math.PI * 2
+      const radius = 20
+      sunRef.current.position.set(
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius,
+        0
+      )
+    }
+  })
+  const time = conect.currentTime || 0.25
+  const isDay = time > 0.2 && time < 0.7
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      {/* Sol/Lua */}
+      <mesh ref={sunRef} position={[20, 0, 0]}>
+        <sphereGeometry args={[1.5, 16, 16]} />
+        <meshBasicMaterial color={isDay ? '#ffdd00' : '#cccccc'} />
+      </mesh>
+      {/* Indicador de tempo */}
+      <mesh position={[0, 0, 0]}>
+        <torusGeometry args={[2, 0.1, 8, 32]} />
+        <meshBasicMaterial color={isDay ? (conect.dayColor || '#87ceeb') : (conect.nightColor || '#0a0a2a')} wireframe transparent opacity={0.4} />
       </mesh>
     </group>
   )

@@ -211,6 +211,12 @@ export const MODIFIER_TYPES = {
     defaultParams: { threshold: 0.001 },
     description: 'Fundir vértices próximos (Merge by Distance)',
   },
+  curve: {
+    label: 'Curve (Deformar em Curva)',
+    icon: 'spline',
+    defaultParams: { curveType: 'sine', amplitude: 0.5, frequency: 1.0 },
+    description: 'Deforma a malha ao longo de uma curva (sine, cosine, twist)',
+  },
 }
 
 // Tipos de operações booleanas

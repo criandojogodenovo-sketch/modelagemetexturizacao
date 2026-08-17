@@ -193,6 +193,33 @@ function applyModifiers(geometry, modifiers) {
           // Weld = Merge by Distance — funde vértices próximos
           result = weldVertices(result, mod.params.threshold ?? 0.001)
           break
+        case 'curve':
+          // Curve = Deforma malha ao longo de uma curva
+          {
+            const pos = result.attributes.position
+            const amp = mod.params.amplitude ?? 0.5
+            const freq = mod.params.frequency ?? 1.0
+            const curveType = mod.params.curveType || 'sine'
+            for (let i = 0; i < pos.count; i++) {
+              const x = pos.getX(i)
+              const y = pos.getY(i)
+              const z = pos.getZ(i)
+              if (curveType === 'sine') {
+                pos.setY(i, y + Math.sin(x * freq) * amp)
+              } else if (curveType === 'cosine') {
+                pos.setZ(i, z + Math.cos(y * freq) * amp)
+              } else if (curveType === 'twist') {
+                const angle = y * freq * amp
+                const newX = x * Math.cos(angle) - z * Math.sin(angle)
+                const newZ = x * Math.sin(angle) + z * Math.cos(angle)
+                pos.setX(i, newX)
+                pos.setZ(i, newZ)
+              }
+            }
+            pos.needsUpdate = true
+            result.computeVertexNormals()
+          }
+          break
         default:
           break
       }

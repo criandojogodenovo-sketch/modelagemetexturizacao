@@ -2567,3 +2567,119 @@ Os ícones foram corrigidos no commit anterior (`iconMap.jsx` agora tem `builder
 | 13 | Mais Conects | WindObject, CloudObject, DayNightCycleObject |
 | 14 | Pesquisa de engines concorrentes | Análise Unreal/Unity/Godot/ItsMagic |
 
+---
+
+## 🔧 Fase 10 — Hierarquia + CSS Responsivo + Mesh Curve + Mais Conects (Setembro 2026)
+
+### Hierarquia de Objetos no Outliner
+
+**Arquivo:** `src/components/panels/SceneEditorPanel.jsx`
+
+- **Filhos abaixo do conect:** GroupObjects mostram filhos indentados com `├─` e border-left
+- **Expandir/Recolher:** Botão `▶/▼` para mostrar/esconder filhos de GroupObjects
+- **Contador de filhos:** `(N)` mostra quantos filhos um GroupObject tem
+- **Indicador de conexão:** `├─` mostra que é filho de outro conect
+
+### CSS Responsivo + Scroll na Barra de Cima
+
+**Arquivo:** `src/styles/global.css`
+
+- **Topbar com scroll horizontal:** `overflow-x: auto` com scrollbar fino (4px)
+- **Responsivo para telas ≤480px:** painéis mais estreitos (260px), botões menores (36px), modais 95% largura, tool-grid 2 colunas, timeline compacta, bottom-bar compacta
+- **Responsivo para telas ≤360px:** ainda mais compacto (240px painéis, 32px botões)
+- **UI Editor responsivo:** coluna única em telas pequenas com painéis limitados a 200px altura
+
+### Modificador Curve (Mesh Curve)
+
+**Arquivo:** `src/store/useStore.js` + `src/components/3d/SceneObject.jsx` + `src/components/panels/ModifiersPanel.jsx`
+
+Novo modificador `curve` que deforma a malha ao longo de uma curva:
+
+| Tipo | Efeito |
+|---|---|
+| **Sine** | Onda senoidal no eixo Y (`y += sin(x * freq) * amp`) |
+| **Cosine** | Onda cosenoidal no eixo Z (`z += cos(y * freq) * amp`) |
+| **Twist** | Torção rotacional (`x,z` rodam com `y * freq * amp`) |
+
+**Parâmetros:** `curveType` (select), `amplitude` (0-2), `frequency` (0.1-5)
+
+**Stack de modificadores agora (16):** subdivision, mirror, array, solidify, bevel, displace, bend, twist, taper, wireframe, remesh, smooth, spherify, weld, **curve**.
+
+### Novos Conects (3)
+
+**Arquivo:** `src/utils/conects/taxonomy.js` + `src/components/panels/ConectRenderer.jsx`
+
+| Conect | Categoria | Descrição | Gizmo |
+|---|---|---|---|
+| **WindObject** | Environment | Vento que afeta água (windDirection/windStrength) e partículas | Cone azul rotativo + cylinder |
+| **CloudObject** | Environment | Nuvens volumétricas simples com deslocação | N spheres brancas a flutuar |
+| **DayNightCycleObject** | Environment | Ciclo dia/noite automático — rotação do sol, mudança de cores | Sol/Lua que orbita + torus indicador |
+
+#### WindObject — Propriedades
+| Propriedade | Tipo | Default |
+|---|---|---|
+| `windStrength` | number (0-2) | 0.5 |
+| `windGusts` | boolean | false |
+| `gustFrequency` | number (0-2) | 0.3 |
+
+#### CloudObject — Propriedades
+| Propriedade | Tipo | Default |
+|---|---|---|
+| `cloudCount` | number (1-20) | 5 |
+| `cloudSize` | number (1-10) | 3 |
+| `cloudHeight` | number (5-50) | 15 |
+| `cloudColor` | color | #ffffff |
+| `cloudOpacity` | number (0-1) | 0.6 |
+| `cloudSpeed` | number (0-1) | 0.1 |
+
+#### DayNightCycleObject — Propriedades
+| Propriedade | Tipo | Default |
+|---|---|---|
+| `cycleDuration` | number (10-600s) | 120 |
+| `currentTime` | number (0-1) | 0.25 |
+| `autoAdvance` | boolean | true |
+| `dayColor` | color | #87ceeb |
+| `nightColor` | color | #0a0a2a |
+| `sunsetColor` | color | #ff6b35 |
+
+### Arquivos modificados
+
+| Arquivo | +Linhas | Descrição |
+|---|---|---|
+| `src/styles/global.css` | +112 | Scroll topbar + responsivo ≤480px + ≤360px |
+| `src/components/panels/SceneEditorPanel.jsx` | +134/-44 | Hierarquia de conects com expand/collapse |
+| `src/utils/conects/taxonomy.js` | +76 | 3 novos Conects (Wind, Cloud, DayNight) |
+| `src/components/panels/ConectRenderer.jsx` | +91 | Gizmos Wind/Cloud/DayNight |
+| `src/components/3d/SceneObject.jsx` | +27 | Modificador curve (sine/cosine/twist) |
+| `src/components/panels/ModifiersPanel.jsx` | +23 | UI curve (curveType/amplitude/frequency) |
+| `src/store/useStore.js` | +6 | curve em MODIFIER_TYPES |
+| **Total** | +469/-44 | |
+
+### Verificação
+
+| Verificação | Resultado |
+|---|---|
+| `npm run build` | ✓ PASS (0 erros, 1.72s) |
+| `git diff --check` | ✓ PASS (exit 0) |
+| Bugs #1-#7 | ✓ Intactos |
+
+### Total de Conects: 57 (era 54)
+
+Novos: DialogueObject (Fase 8), WindObject, CloudObject, DayNightCycleObject
+
+### Total de Modificadores: 16 (era 15)
+
+Novos: weld (Fase 1), curve (Fase 10)
+
+### Próximas fases pendentes
+
+| Fase | Item |
+|---|---|
+| 11 | Abas de Modelos e Animação — nível profissional Blender |
+| 12 | Pincel 3D para Modificadores — Displace local via raycast |
+| 14 | Pesquisa de engines concorrentes |
+| — | VFX profissional e realista |
+| — | Construtores realistas (referências reais) |
+| — | Mecânicas profissional |
+| — | Pincel 3D dos terrenos melhorado (planos, cubos) |
+

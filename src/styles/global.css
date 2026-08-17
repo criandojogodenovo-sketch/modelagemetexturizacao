@@ -256,6 +256,25 @@ label {
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
   z-index: 30;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  -webkit-overflow-scrolling: touch;
+  white-space: nowrap;
+}
+
+.topbar::-webkit-scrollbar {
+  height: 4px;
+}
+
+.topbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.topbar::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
 }
 
 .topbar .brand {
@@ -886,6 +905,99 @@ label {
   .topbar .group:nth-child(4),
   .topbar .group:nth-child(5) {
     display: none;
+  }
+
+  /* Fase 10 — Responsivo para telas muito pequenas */
+  .topbar {
+    padding: 0 4px;
+    gap: 2px;
+  }
+
+  .topbar .brand {
+    margin-right: 4px;
+    font-size: 11px;
+  }
+
+  .topbar .brand .logo {
+    width: 18px;
+    height: 18px;
+  }
+
+  .panel.left, .panel.right {
+    width: 260px;
+  }
+
+  .vertical-rail {
+    width: 44px;
+  }
+
+  .rail-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .modal {
+    width: 95% !important;
+    max-height: 85vh !important;
+  }
+
+  .tool-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  .prop-row label {
+    font-size: 11px;
+  }
+
+  .prop-row input[type="range"] {
+    height: 28px;
+  }
+
+  .ui-editor-full {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto 1fr auto !important;
+  }
+
+  .ui-editor-left, .ui-editor-right {
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .timeline {
+    font-size: 10px;
+  }
+
+  .timeline-controls {
+    gap: 4px;
+  }
+
+  .timeline-controls button {
+    padding: 2px 4px;
+  }
+
+  .bottom-bar {
+    padding: 0 4px;
+    gap: 2px;
+  }
+
+  .bottom-bar button {
+    padding: 4px 6px;
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 360px) {
+  .panel.left, .panel.right {
+    width: 240px;
+  }
+
+  .vertical-rail {
+    width: 40px;
+  }
+
+  .rail-btn {
+    width: 32px;
+    height: 32px;
   }
 }
 
