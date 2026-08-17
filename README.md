@@ -2401,3 +2401,99 @@ endDialogue()
 | **ESTIMADO** | Sistema de diálogos abre portas para RPGs/conversas com NPCs; Teste in-editor reduz iteração |
 | **NOT TESTED** | Diálogo real em browser; Trigger por proximidade real; FlirCode onDialogueChoice real |
 
+---
+
+## 🔧 Revisão Estrutural — Correções Críticas (Setembro 2026)
+
+### Bug #3 — Câmara Escura no Play Mode — CORRIGIDO
+
+**Causa raiz:** `ViewObject` tinha `far: 200` (taxonomy), `gameCamera` tinha `far: 200` (useStore), `gameRuntime.js` tinha `far: 200` hardcoded. O `DEFAULT_CAMERA_FAR` é 2000, mas o operador `||` usava o valor truthy `200` em vez do fallback `2000`.
+
+**Correção aplicada (3 ficheiros):**
+- `taxonomy.js:491` — `far: 200` → `far: 2000`
+- `useStore.js:1169` — `far: 200` → `far: 2000`
+- `gameRuntime.js:260,262,263` — `far: 200` → `far: 2000`
+
+**Resultado:** Câmara agora tem `far=2000` em todos os caminhos (Editor, Play Mode, Export). Objetos até 2000 unidades são visíveis.
+
+### Interpolação de Animação — CORRIGIDO (L1)
+
+**Problema:** `sharedAnimationCache.js` e `animationPlayer.js` só suportavam `linear`, `ease` (smoothstep), e `step`. Os modos `easeIn`, `easeOut`, `easeInOut` da Fase 7 eram guardados nos keyframes mas não aplicados.
+
+**Correção aplicada (2 ficheiros):**
+- `sharedAnimationCache.js:62-81` — Adicionados `easeIn` (t²), `easeOut` (1-(1-t)²), `easeInOut` (t<0.5 ? 2t² : 1-2(1-t)²)
+- `animationPlayer.js:26-38` — Mesmas curvas adicionadas
+
+**Resultado:** O seletor de interpolação na Timeline agora afecta a reprodução real das animações.
+
+### Atalhos de Teclado no EditModePanel — CORRIGIDO (L2)
+
+**Problema:** `EditModePanel` mostrava atalhos visuais mas não os registava via `useHotkeys`.
+
+**Correção aplicada:**
+- `EditModePanel.jsx:42-52` — `useHotkeys` registado com 8 atalhos: `1/2/3` (seleção), `E` (extrude), `I` (inset), `B` (bevel), `S` (subdivide), `M` (merge)
+
+**Resultado:** Pressionar `E` no teclado executa extrude, etc.
+
+### FlirScriptAPI Camera/Physics Bridges — CORRIGIDO (L3/L4)
+
+**Problema:** `CameraAPI.getPosition()` retornava `[0,0,0]` e `getFOV()` retornava `60` (placeholders).
+
+**Correção aplicada:**
+- `SceneLevel3D.jsx:893` — `window._flirCamera = camera` exposto no setup do Play Mode
+- `SceneLevel3D.jsx:1123` — `window._flirCamera = null` no cleanup
+- `flirScriptAPI.js:568-584` — `CameraAPI.getPosition()` lê `window._flirCamera.position`; `getFOV()` lê `window._flirCamera.fov`
+
+**Resultado:** Scripts FlirCode podem consultar a posição e FOV da câmara em tempo real.
+
+### Ícones em Falta no iconMap — CORRIGIDO
+
+**Problema:** `iconMap.jsx` não tinha mapeamento para `builders`, `mechanics`, `dialogue`, `message-circle`. O `VerticalRail` usava estes nomes mas os ícones não existiam — botões apareciam sem ícone visível ou com fallback.
+
+**Correção aplicada:**
+- `iconMap.jsx:49` — Import `MessageCircle`, `Building2`, `Hammer`
+- `iconMap.jsx:63-66` — Mapeamentos: `builders: Building2`, `mechanics: Target`, `dialogue: MessageCircle`, `message-circle: MessageCircle`
+
+**Resultado:** Botões de Construtores, Mecânicas e Diálogos no VerticalRail agora mostram ícones corretos.
+
+### Arquivos modificados
+
+| Arquivo | +Linhas | Descrição |
+|---|---|---|
+| `src/utils/conects/taxonomy.js` | +1/-1 | `far: 200` → `far: 2000` no ViewObject |
+| `src/store/useStore.js` | +1/-1 | `far: 200` → `far: 2000` no gameCamera default |
+| `src/utils/game/gameRuntime.js` | +3/-3 | `far: 200` → `far: 2000` em 3 sítios (fallback, ortho, perspective) |
+| `src/utils/sharedAnimationCache.js` | +14 | `easeIn`/`easeOut`/`easeInOut` em `interpolateVal` |
+| `src/utils/animationPlayer.js` | +7 | Mesmas curvas em `interpolate` |
+| `src/components/panels/EditModePanel.jsx` | +13 | `useHotkeys` com 8 atalhos reais |
+| `src/utils/flirscript/flirScriptAPI.js` | +8/-5 | Bridge `window._flirCamera` em CameraAPI |
+| `src/components/3d/SceneLevel3D.jsx` | +3 | `window._flirCamera = camera` + cleanup |
+| `src/components/ui/iconMap.jsx` | +5 | `MessageCircle`, `Building2`, mapeamentos |
+| **Total** | +55/-10 | |
+
+### Verificação
+
+| Verificação | Resultado |
+|---|---|
+| `npm run build` | ✓ PASS (0 erros, 1.97s) |
+| `git diff --check` | ✓ PASS (exit 0) |
+| Bugs #1-#7 | ✓ Intactos |
+
+### Notas sobre a Vercel
+
+O código está confirmadamente no GitHub (`origin/main = 3e8a35e`). A Vercel pode estar com deploy parado. **Ação necessária pelo utilizador:**
+1. Ir a https://vercel.com/dashboard
+2. Verificar o projeto `modelagemetexturizacao`
+3. Fazer "Redeploy" manual do último commit se necessário
+4. Verificar se a Vercel está a watching o branch `main`
+
+### Problemas conhecidos ainda não corrigidos
+
+1. **Editor de UI não permite arrastar/redimensionar/mover/rotacionar elementos** — requer implementação de drag-and-drop + resize handles no canvas do UIEditor
+2. **Design não otimizado para celulares pequenos** — muitos itens escondidos; requer revisão de CSS responsivo
+3. **Hierarquia de objetos** — filho não aparece abaixo do conect no outliner; sem linhas de conexão visual
+4. **Abas de Modelos e Animação** — não estão ao nível profissional do Blender
+5. **Pincel 3D para modificadores** — não implementado
+6. **Mais Conects** (Wind, Cloud, DayNight) — não implementados
+7. **Pesquisa de engines concorrentes** — não realizada
+

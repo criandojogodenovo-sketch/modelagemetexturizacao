@@ -257,10 +257,10 @@ function startGame() {
   var camState = createCameraState()
   camState.enabled = hasTZ
   camState.hasTouchZone = hasTZ
-  var cam = activeView || scene.gameCamera || { cameraType: 'perspective', position: [5, 4, 6], fov: 60, near: 0.1, far: 200 }
+  var cam = activeView || scene.gameCamera || { cameraType: 'perspective', position: [5, 4, 6], fov: 60, near: 0.1, far: 2000 }
   var camera = (cam.cameraType || cam.type) === 'orthographic'
-    ? new THREE.OrthographicCamera(-5, 5, 5, -5, cam.near || 0.1, cam.far || 200)
-    : new THREE.PerspectiveCamera(cam.fov || 60, window.innerWidth / window.innerHeight, cam.near || 0.1, cam.far || 200)
+    ? new THREE.OrthographicCamera(-5, 5, 5, -5, cam.near || 0.1, cam.far || 2000)
+    : new THREE.PerspectiveCamera(cam.fov || 60, window.innerWidth / window.innerHeight, cam.near || 0.1, cam.far || 2000)
   camera.position.set.apply(camera, cam.position || [5, 4, 6])
   if (activeView && activeView.rotation) {
     camera.rotation.set(activeView.rotation[0], activeView.rotation[1], activeView.rotation[2], 'YXZ')

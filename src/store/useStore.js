@@ -1166,7 +1166,7 @@ export const useStore = create(
             rotation: [0, 0, 0],
             fov: 50,
             near: 0.1,
-            far: 200,
+            far: 2000,
             orthoSize: 5,
           },
           background: null, // null = usar global; otherwise override

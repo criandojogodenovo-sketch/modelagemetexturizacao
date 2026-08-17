@@ -8,6 +8,7 @@
  * As operações são aplicadas ao objeto selecionado e guardadas em customGeometry.
  */
 import { useStore, useSelectedObject, EDIT_SELECTION_MODES } from '../../store/useStore'
+import { useHotkeys } from '../../hooks/useHotkeys'
 import {
   IconVertex,
   IconEdge,
@@ -37,6 +38,18 @@ export default function EditModePanel() {
   const setEditModeSelection = useStore((s) => s.setEditModeSelection)
   const applyMeshOp = useStore((s) => s.applyMeshOp)
   const toast = useStore((s) => s.toast)
+
+  // Fase 11 — Atalhos de teclado reais ligados às operações de malha
+  useHotkeys({
+    '1': () => setEditModeSelection('vertex'),
+    '2': () => setEditModeSelection('edge'),
+    '3': () => setEditModeSelection('face'),
+    'e': () => selected && applyMeshOp(selected.id, 'extrude', { amount: 0.3 }),
+    'i': () => selected && applyMeshOp(selected.id, 'inset', { amount: 0.15 }),
+    'b': () => selected && applyMeshOp(selected.id, 'bevel', { radius: 0.04, segments: 2 }),
+    's': () => selected && applyMeshOp(selected.id, 'subdivide', { levels: 1 }),
+    'm': () => selected && applyMeshOp(selected.id, 'merge', { threshold: 0.001 }),
+  })
 
   if (!selected) {
     return (

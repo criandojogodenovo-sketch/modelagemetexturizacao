@@ -46,6 +46,7 @@ import {
   FolderTree, Palette, Puzzle, Map, MapPinned, Navigation, Compass,
   Terminal, Bug, Activity, Gauge, Cpu,
   HelpCircle, Dice5,
+  MessageCircle, Building2, Hammer,
 } from 'lucide-react'
 
 // Mapa: nome semântico → componente lucide
@@ -59,6 +60,10 @@ const ICON_MAP = {
   file: FileText,
   'file-box': FileText,
   package: Package,
+  builders: Building2,
+  mechanics: Target,
+  dialogue: MessageCircle,
+  'message-circle': MessageCircle,
   search: Search,
   'more-horizontal': MoreHorizontal,
   boxes: Boxes,

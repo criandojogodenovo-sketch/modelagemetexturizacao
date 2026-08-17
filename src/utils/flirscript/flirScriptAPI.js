@@ -565,10 +565,9 @@ const StreamingAPI = {
  */
 const CameraAPI = {
   getPosition() {
-    // Lê window._flirCameraRotation para yaw/pitch
-    // A posição da câmara é controlada pelo GameMode, expomos via gameContext
-    // Para acesso direto, precisamos de uma referência à câmara do Canvas
-    // Por agora, retorna posição 0 (placeholder — requer bridge com useThree)
+    // Fase 11 — Bridge com window._flirCamera (definido pelo GameMode)
+    const cam = (typeof window !== 'undefined') ? window._flirCamera : null
+    if (cam) return [cam.position.x, cam.position.y, cam.position.z]
     return [0, 0, 0]
   },
 
@@ -579,7 +578,9 @@ const CameraAPI = {
   },
 
   getFOV() {
-    // Placeholder — requer bridge com camera do Canvas
+    // Fase 11 — Bridge com window._flirCamera
+    const cam = (typeof window !== 'undefined') ? window._flirCamera : null
+    if (cam) return cam.fov || 60
     return 60
   },
 

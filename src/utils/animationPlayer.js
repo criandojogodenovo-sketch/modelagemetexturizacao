@@ -26,6 +26,13 @@ import { getCachedPose, applyPose, clearPoseCache } from './sharedAnimationCache
 function interpolate(a, b, t, type = 'ease') {
   if (type === 'step') return a
   if (type === 'linear') return a + (b - a) * t
+  // Fase 7/11 — Curvas de interpolação reais
+  if (type === 'easeIn') return a + (b - a) * t * t
+  if (type === 'easeOut') return a + (b - a) * (1 - (1 - t) * (1 - t))
+  if (type === 'easeInOut') {
+    const eased = t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t)
+    return a + (b - a) * eased
+  }
   // ease (smoothstep)
   const eased = t * t * (3 - 2 * t)
   return a + (b - a) * eased

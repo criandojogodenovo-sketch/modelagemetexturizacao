@@ -889,6 +889,8 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     }
     window._flirGameContext = gameContext
     window._flirInventory = inventoryRef.current
+    // Fase 11 — Expor câmara para FlirScriptAPI.Camera.getPosition()/getFOV()
+    window._flirCamera = camera
     // Inicializar rotação da câmara (FPS/BR) — lida pelo GameMode no useFrame
     if (!window._flirCameraRotation) {
       window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: 1.0, enabled: true }
@@ -1118,6 +1120,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       window._flirGameContext = null
+      window._flirCamera = null
       window._flirInventory = null
       window._flirCameraRotation = null
       window._flirKeys = null

@@ -488,7 +488,7 @@ export const CONECT_TAXONOMY = [
       fov: 60,
       orthoSize: 5,
       near: 0.1,
-      far: 200,
+      far: 2000,
       followTarget: null,
       followMode: 'none',
       followDistance: 6,
