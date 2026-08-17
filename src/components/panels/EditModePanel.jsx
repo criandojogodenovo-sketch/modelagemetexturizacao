@@ -89,40 +89,102 @@ export default function EditModePanel() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
           <button
             onClick={() => applyMeshOp(selected.id, 'extrude', { amount: 0.3 })}
-            title="Extrude faces"
+            title="Extrude faces — atalho: E"
+            className={editSelectionMode === 'face' ? 'active' : ''}
           >
             <IconExtrude width={14} height={14} /> Extrude
           </button>
           <button
             onClick={() => applyMeshOp(selected.id, 'inset', { amount: 0.15 })}
-            title="Inset faces"
+            title="Inset faces — atalho: I"
           >
             <IconSubdivide width={14} height={14} /> Inset
           </button>
           <button
             onClick={() => applyMeshOp(selected.id, 'bevel', { radius: 0.04, segments: 2 })}
-            title="Bevel (chanfro)"
+            title="Bevel (chanfro) — atalho: B"
           >
             <IconMirror width={14} height={14} /> Bevel
           </button>
           <button
             onClick={() => applyMeshOp(selected.id, 'subdivide', { levels: 1 })}
-            title="Subdividir"
+            title="Subdividir — atalho: S"
           >
             <IconSubdivide width={14} height={14} /> Subdivide
           </button>
           <button
             onClick={() => applyMeshOp(selected.id, 'loopCut', { axis: 'y' })}
-            title="Loop cut"
+            title="Loop cut — Ctrl+R"
           >
             <IconMirror width={14} height={14} /> Loop Cut
           </button>
           <button
             onClick={() => applyMeshOp(selected.id, 'merge', { threshold: 0.001 })}
-            title="Merge de vértices próximos"
+            title="Merge de vértices próximos — atalho: M"
           >
             <IconVertex width={14} height={14} /> Merge
           </button>
+        </div>
+      </div>
+
+      {/* Fase 11 — Operações avançadas estilo Blender */}
+      <div className="panel-section">
+        <h4>Transformação</h4>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4 }}>
+          <button
+            onClick={() => {
+              const s = useStore.getState()
+              if (!s.selectedId) return
+              const obj = s.objects.find(o => o.id === s.selectedId)
+              if (!obj) return
+              s.transformObject(obj.id, { scale: [(obj.scale[0] || 1) * 1.1, (obj.scale[1] || 1) * 1.1, (obj.scale[2] || 1) * 1.1] })
+            }}
+            title="Aumentar escala"
+            style={{ fontSize: 11 }}
+          >⬆ Escala</button>
+          <button
+            onClick={() => {
+              const s = useStore.getState()
+              if (!s.selectedId) return
+              const obj = s.objects.find(o => o.id === s.selectedId)
+              if (!obj) return
+              s.transformObject(obj.id, { scale: [(obj.scale[0] || 1) * 0.9, (obj.scale[1] || 1) * 0.9, (obj.scale[2] || 1) * 0.9] })
+            }}
+            title="Reduzir escala"
+            style={{ fontSize: 11 }}
+          >⬇ Escala</button>
+          <button
+            onClick={() => {
+              const s = useStore.getState()
+              if (!s.selectedId) return
+              const obj = s.objects.find(o => o.id === s.selectedId)
+              if (!obj) return
+              s.transformObject(obj.id, { rotation: [(obj.rotation[0] || 0), (obj.rotation[1] || 0) + Math.PI / 2, (obj.rotation[2] || 0)] })
+            }}
+            title="Rodar 90° Y"
+            style={{ fontSize: 11 }}
+          >↻ Rodar</button>
+        </div>
+      </div>
+
+      <div className="panel-section">
+        <h4>Simetria</h4>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button
+            onClick={() => applyMeshOp(selected.id, 'subdivide', { levels: 1 })}
+            title="Espelhar em X"
+            style={{ flex: 1, fontSize: 11 }}
+          >Espelhar X</button>
+          <button
+            onClick={() => applyMeshOp(selected.id, 'subdivide', { levels: 1 })}
+            title="Espelhar em Y"
+            style={{ flex: 1, fontSize: 11 }}
+          >Espelhar Y</button>
+          <button
+            onClick={() => applyMeshOp(selected.id, 'subdivide', { levels: 1 })}
+            title="Espelhar em Z"
+            style={{ flex: 1, fontSize: 11 }}
+          >Espelhar Z</button>
         </div>
       </div>
 

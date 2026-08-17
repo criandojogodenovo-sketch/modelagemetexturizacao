@@ -220,6 +220,39 @@ export default function Timeline() {
           />
           Loop
         </label>
+        {/* Fase 11 — Controles profissionais de animação */}
+        <select
+          value={animation.speed || 1}
+          onChange={(e) => setAnimation({ speed: Number(e.target.value) })}
+          title="Velocidade de reprodução"
+          style={{ width: 'auto', maxWidth: 60, fontSize: 10 }}
+        >
+          <option value={0.25}>0.25x</option>
+          <option value={0.5}>0.5x</option>
+          <option value={1}>1x</option>
+          <option value={1.5}>1.5x</option>
+          <option value={2}>2x</option>
+        </select>
+        <button
+          onClick={() => setAnimation({ currentTime: 0 })}
+          title="Ir para início"
+          style={{ padding: '2px 4px', fontSize: 10 }}
+        >⏮</button>
+        <button
+          onClick={() => setAnimation({ currentTime: Math.max(0, animation.currentTime - 0.5) })}
+          title="Recuar 0.5s"
+          style={{ padding: '2px 4px', fontSize: 10 }}
+        >◀</button>
+        <button
+          onClick={() => setAnimation({ currentTime: Math.min(animation.duration, animation.currentTime + 0.5) })}
+          title="Avançar 0.5s"
+          style={{ padding: '2px 4px', fontSize: 10 }}
+        >▶</button>
+        <button
+          onClick={() => setAnimation({ currentTime: animation.duration })}
+          title="Ir para fim"
+          style={{ padding: '2px 4px', fontSize: 10 }}
+        >⏭</button>
       </div>
     </div>
   )
