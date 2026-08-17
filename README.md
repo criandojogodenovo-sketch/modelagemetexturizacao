@@ -1764,3 +1764,126 @@ Cada gerador cria objetos no catálogo (se ainda não existirem com o mesmo nome
 
 **Runtime benchmark unavailable.** Análise estática apenas.
 
+---
+
+## 🌲✨ Fase 3 — Gerador de Florestas + VFX (Setembro 2026)
+
+### Gerador de Florestas
+
+Sistema procedural que espalha árvores e vegetação numa área, com variação automática de escala/rotação/tipo.
+
+**Arquivo:** `src/utils/forestGenerator.js`
+
+#### Tipos de árvore (3)
+
+| Tipo | Composição | Descrição |
+|---|---|---|
+| **Pinheiro** | cylinder (tronco) + cone (folhagem) | Clássico — cone verde sobre tronco castanho |
+| **Carvalho** | cylinder (tronco) + sphere (folhagem) | Denso — esfera verde sobre tronco grosso |
+| **Bétula** | cylinder fino (tronco) + cone estreito (folhagem) | Delicado — cone estreito sobre tronco branco |
+
+#### Vegetação extra
+
+| Tipo | Composição | Descrição |
+|---|---|---|
+| **Arbusto** | sphere achatada | Vegetação baixa, verde |
+| **Pedra** | cube com escala irregular | Elementos rochosos dispersos |
+
+#### Variação automática
+
+- **Escala:** 0.7 a 1.4 (cada árvore tem tamanho diferente)
+- **Rotação:** 0 a 2π (aleatória no eixo Y)
+- **Cores:** 4 paletas por tipo (tronco, pinheiro, carvalho, bétula, arbusto, pedra)
+- **Posição:** Aleatória dentro da área configurável
+
+#### Respeita terreno
+
+Se um `TerrainObject` estiver presente na cena, o gerador lê o heightmap para posicionar árvores na superfície do terreno (em vez de y=0). Parâmetros `terrainHeightmap`, `terrainSize`, `terrainHeightScale` permitem integração.
+
+#### Configuração via UI
+
+| Parâmetro | Range | Default |
+|---|---|---|
+| Nº de árvores | 5-100 | 30 |
+| Área de dispersão | 10-100 | 40 |
+| Incluir arbustos | checkbox | true |
+| Incluir pedras | checkbox | true |
+
+### VFX — Sistema de Efeitos Visuais
+
+Sistema de presets VFX que cria `ParticleObject` pré-configurados para eventos de jogo comuns.
+
+**Arquivo:** `src/utils/vfxPresets.js`
+
+#### VFX Presets (6)
+
+| Preset | Categoria | Configuração | Descrição |
+|---|---|---|---|
+| **Explosão** 💥 | Combat | 80 partículas, vermelho, gravidade +2, vida 0.8s | Partículas vermelhas/laranjas com gravidade, vida curta |
+| **Impacto** ⚡ | Combat | 30 partículas, amarelo, sem gravidade, vida 0.5s | Faíscas amarelas, dispersão direcional |
+| **Rasto Mágico** ✨ | Magic | 60 partículas, roxo, sem gravidade, vida 3s | Partículas roxas/azuis, vida longa |
+| **Fumo** 💨 | Environment | 50 partículas, cinza, gravidade -1.5, vida 4s | Partículas cinzas que sobem |
+| **Fogo** 🔥 | Environment | 70 partículas, laranja, sem gravidade, vida 1.2s | Partículas vermelhas/laranjas emissivas |
+| **Brilho** ⭐ | Magic | 40 partículas, branco, dispersão ampla, vida 1.5s | Partículas brancas pequenas, emissivas |
+
+#### API
+
+```js
+import { applyVfxPreset, VFX_PRESETS } from '../utils/vfxPresets'
+
+// Criar explosão numa posição
+applyVfxPreset('explosion', [5, 2, 3], useStore.getState())
+
+// Listar presets por categoria
+import { getVfxByCategory } from '../utils/vfxPresets'
+const { combat, magic, environment } = getVfxByCategory()
+```
+
+**FlirCode integration:** Use `emitSignal('vfx_preset')` para disparar VFX durante o jogo via FlirScript.
+
+### Integração no BuildersPanel
+
+O `BuildersPanel` (Fase 2) foi expandido com 2 novos construtores:
+
+| Construtor | Ícone | Categoria |
+|---|---|---|
+| Floresta | 🌲 | Nature |
+| VFX | ✨ | Effects |
+
+**Acesso:** VerticalRail → "Construtores" → selecionar "Floresta" ou "VFX" → configurar parâmetros → "Gerar"
+
+### Arquivos criados/modificados
+
+| Arquivo | +Linhas | Tipo |
+|---|---|---|
+| `src/utils/forestGenerator.js` | 275 | NOVO — `generateForest` + `TREE_TYPES` |
+| `src/utils/vfxPresets.js` | 175 | NOVO — 6 VFX presets + `applyVfxPreset` + `getVfxByCategory` |
+| `src/components/panels/BuildersPanel.jsx` | +70 | MODIFICADO — Forest + VFX no handleGenerate + renderOptions + BuilderIcon |
+| `src/utils/proceduralBuilders.js` | +18 | MODIFICADO — Forest + VFX adicionados a `BUILDER_LIST` |
+| **Total** | +538 | |
+
+### Verificação
+
+| Verificação | Resultado |
+|---|---|
+| `npm run build` | ✓ PASS (0 erros, 1.51s) |
+| `git diff --check` | ✓ PASS (exit 0) |
+| Bugs #1-#7 | ✓ Intactos |
+| Performance Core 3.2-3.8 | ✓ Não alterado |
+| Post-Audit 4.0/4.1/4.2 | ✓ Não alterado |
+| Fase 1 (Weld + Presets) | ✓ Não alterado |
+| Fase 2 (Construtores) | ✓ Não alterado |
+| Nenhum `eval()` / `new Function()` | ✓ |
+| Nenhum `setTimeout`/`setInterval` introduzido | ✓ |
+
+### Classificação
+
+| Categoria | Itens |
+|---|---|
+| **MEDIDO** | Build: 0 erros, 1.51s; `git diff --check`: exit 0 |
+| **STATICALLY VERIFIED** | `generateForest` cria 3 tipos de árvore (tronco + folhagem) + arbustos + pedras; Variação automática de escala/rotação/cor; `getTerrainHeight` lê heightmap se disponível; `applyVfxPreset` cria ParticleObject com config do preset; 6 VFX presets (explosion, impact, magicTrail, smoke, fire, sparkle); BuildersPanel tem Forest + VFX com configuração; Bugs #1-#7 intactos |
+| **ESTIMADO** | Florestas aceleram criação de cenas naturais; VFX presets aceleram criação de efeitos de jogo; Variação automática evita repetição visual |
+| **NOT TESTED** | Gerar floresta real em browser; VFX real em browser; Performance com florestas grandes em mobile; Posicionamento no terreno real; Variação visual real |
+
+**Runtime benchmark unavailable.** Análise estática apenas.
+

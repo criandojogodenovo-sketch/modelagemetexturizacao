@@ -2,9 +2,10 @@
  * BuildersPanel — painel modal para construtores profissionais.
  *
  * Fase 2 — Construtores Profissionais.
+ * Fase 3 — Gerador de Florestas + VFX.
  *
- * Permite gerar cenas complexas (cidades, edifícios, carros, mobiliário)
- * de forma visual, com configuração de parâmetros.
+ * Permite gerar cenas complexas (cidades, edifícios, carros, mobiliário,
+ * florestas, VFX) de forma visual, com configuração de parâmetros.
  *
  * Acesso: VerticalRail → "Construtores" (abre este painel)
  */
@@ -18,6 +19,8 @@ import {
   generateStreetFurniture,
   BUILDER_LIST,
 } from '../../utils/proceduralBuilders'
+import { generateForest, TREE_TYPES } from '../../utils/forestGenerator'
+import { VFX_PRESETS, applyVfxPreset, getVfxByCategory } from '../../utils/vfxPresets'
 
 export default function BuildersPanel({ onClose }) {
   const store = useStore
@@ -65,6 +68,19 @@ export default function BuildersPanel({ onClose }) {
           count: Number(options.count) || 5,
           area: Number(options.area) || 20,
         })
+        break
+      case 'forest':
+        generateForest(state, {
+          position,
+          count: Number(options.treeCount) || 30,
+          area: Number(options.forestArea) || 40,
+          types: options.treeTypes || ['pine', 'oak', 'birch'],
+          includeBushes: options.includeBushes !== false,
+          includeRocks: options.includeRocks !== false,
+        })
+        break
+      case 'vfx':
+        applyVfxPreset(options.vfxPreset || 'explosion', position, state)
         break
     }
 
@@ -135,6 +151,52 @@ export default function BuildersPanel({ onClose }) {
               onChange={(v) => setOptions({ ...options, count: v })} />
             <OptionRow label="Área de dispersão" value={options.area ?? 20} min={5} max={50} step={5}
               onChange={(v) => setOptions({ ...options, area: v })} />
+          </>
+        )
+      case 'forest':
+        return (
+          <>
+            <OptionRow label="Nº de árvores" value={options.treeCount ?? 30} min={5} max={100} step={5}
+              onChange={(v) => setOptions({ ...options, treeCount: v })} />
+            <OptionRow label="Área de dispersão" value={options.forestArea ?? 40} min={10} max={100} step={5}
+              onChange={(v) => setOptions({ ...options, forestArea: v })} />
+            <div className="prop-row">
+              <label className="checkbox-row">
+                <input type="checkbox" checked={options.includeBushes !== false}
+                  onChange={(e) => setOptions({ ...options, includeBushes: e.target.checked })} />
+                Incluir arbustos
+              </label>
+            </div>
+            <div className="prop-row">
+              <label className="checkbox-row">
+                <input type="checkbox" checked={options.includeRocks !== false}
+                  onChange={(e) => setOptions({ ...options, includeRocks: e.target.checked })} />
+                Incluir pedras
+              </label>
+            </div>
+            <div style={{ fontSize: '11px', opacity: 0.6, marginTop: '8px', lineHeight: '1.4' }}>
+              Tipos de árvore: {TREE_TYPES.map(t => t.label).join(', ')}
+            </div>
+          </>
+        )
+      case 'vfx':
+        return (
+          <>
+            <div className="prop-row">
+              <label>Efeito VFX</label>
+              <select value={options.vfxPreset ?? 'explosion'}
+                onChange={(e) => setOptions({ ...options, vfxPreset: e.target.value })}>
+                {Object.values(VFX_PRESETS).map(preset => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.icon} {preset.label} — {preset.description}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ fontSize: '11px', opacity: 0.6, marginTop: '8px', lineHeight: '1.4' }}>
+              Cria um ParticleObject pré-configurado na posição central da cena.
+              Use FlirCode emitSignal('vfx_preset') para disparar durante o jogo.
+            </div>
           </>
         )
       default:
@@ -253,6 +315,10 @@ function BuilderIcon({ type }) {
       return <span style={{ ...style, fontSize: '24px' }}>🚗</span>
     case 'streetFurniture':
       return <span style={{ ...style, fontSize: '24px' }}>💡</span>
+    case 'forest':
+      return <span style={{ ...style, fontSize: '24px' }}>🌲</span>
+    case 'vfx':
+      return <span style={{ ...style, fontSize: '24px' }}>✨</span>
     default:
       return <span style={{ ...style, fontSize: '24px' }}>📦</span>
   }

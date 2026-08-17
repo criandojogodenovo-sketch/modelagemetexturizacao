@@ -492,6 +492,24 @@ export const BUILDER_LIST = [
     category: 'urban',
     defaultOptions: { count: 5, area: 20 },
   },
+  // Fase 3 — Gerador de Florestas + VFX (definidos nos próprios módulos,
+  // mas listados aqui para aparecerem no BuildersPanel)
+  {
+    id: 'forest',
+    label: 'Floresta',
+    description: 'Árvores (pinheiro/carvalho/bétula), arbustos e pedras com variação',
+    icon: 'tree',
+    category: 'nature',
+    defaultOptions: { treeCount: 30, forestArea: 40 },
+  },
+  {
+    id: 'vfx',
+    label: 'VFX',
+    description: 'Efeitos visuais: explosão, impacto, magia, fumo, fogo, brilho',
+    icon: 'sparkles',
+    category: 'effects',
+    defaultOptions: { vfxPreset: 'explosion' },
+  },
 ]
 
 export default {
