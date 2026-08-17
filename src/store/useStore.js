@@ -205,6 +205,12 @@ export const MODIFIER_TYPES = {
     defaultParams: { factor: 0.5 },
     description: 'Deforma a malha em direcção a uma esfera',
   },
+  weld: {
+    label: 'Weld (Fundir Vértices)',
+    icon: 'cube',
+    defaultParams: { threshold: 0.001 },
+    description: 'Fundir vértices próximos (Merge by Distance)',
+  },
 }
 
 // Tipos de operações booleanas

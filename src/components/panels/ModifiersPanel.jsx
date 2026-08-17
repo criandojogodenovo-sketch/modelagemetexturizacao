@@ -396,6 +396,17 @@ function ModifierParams({ mod, onChange }) {
             onChange={(e) => onChange({ factor: Number(e.target.value) })} />
         </div>
       )
+    case 'weld':
+      return (
+        <div className="prop-row">
+          <label>Threshold: {params.threshold}</label>
+          <input type="range" min="0.0001" max="0.1" step="0.0001" value={params.threshold}
+            onChange={(e) => onChange({ threshold: Number(e.target.value) })} />
+          <small style={{ display: 'block', opacity: 0.6, fontSize: '10px', marginTop: '4px' }}>
+            Funde vértices mais próximos que esta distância
+          </small>
+        </div>
+      )
     default:
       return null
   }

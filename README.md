@@ -1572,3 +1572,92 @@ Validação de argumentos adicionada em todos os métodos que recebem IDs:
 
 **Runtime benchmark unavailable.** Toda a análise de performance é estática. Nenhuma métrica de runtime foi medida.
 
+---
+
+## 🎨 Fase 1 — Weld Modifier + Presets de Luz RGB (Setembro 2026)
+
+### Modificador Weld (Fundir Vértices)
+
+**Novo modificador** que completa o set de modificadores Blender-style da engine.
+
+| Item | Detalhe |
+|---|---|
+| **Função** | `weldVertices(geometry, threshold)` em `meshOperations.js` |
+| **Equivalente Blender** | Merge by Distance |
+| **Comportamento** | Funde vértices mais próximos que `threshold` (default 0.001), limpando geometria duplicada |
+| **Use case** | Limpar modelos importados com vértices redundantes, após boolean ops, ou para otimizar contagem de vértices |
+| **Implementação** | Usa `BufferGeometryUtils.mergeVertices` internamente |
+| **UI** | Slider `threshold` (0.0001 a 0.1) no `ModifiersPanel` com descrição |
+
+**Stack de modificadores agora (14):** subdivision, mirror, array, solidify, bevel, displace, bend, twist, taper, wireframe, remesh, smooth, spherify, **weld**.
+
+### Presets de Luz RGB + Cinematográficos
+
+**Novo sistema** de presets de luz que aplica pares de cores a 2 luzes complementares na cena.
+
+| Arquivo | Função |
+|---|---|
+| `src/utils/lightPresets.js` | `LIGHT_PRESETS` (12 presets), `applyLightPreset(id, store)`, `getPresetsByCategory()` |
+| `src/components/panels/SceneSettings.jsx` | Secção "Presets de Luz" com botões visuais (cor + label) |
+
+#### Presets RGB (7)
+
+| Preset | Cores | Descrição |
+|---|---|---|
+| **Ember Glow** | Vermelho + Laranja | Calor, fogo, aconchego |
+| **Neon Edge** | Roxo + Azul | Cyberpunk, neon, futurista |
+| **Ocean Breeze** | Turquesa + Verde | Frescura, água, natureza |
+| **Galaxy Vibes** | Rosa + Roxo | Galáxia, sonho, mistério |
+| **Arctic Ice** | Ciano + Branco | Frio, gelo, limpeza |
+| **Sunset Drive** | Amarelo + Rosa | Pôr do sol, nostalgia, estrada |
+| **Deep Space** | Azul + Índigo | Espaço profundo, noite, mistério |
+
+#### Presets Cinematográficos (5)
+
+| Preset | Estilo | Descrição |
+|---|---|---|
+| **Chiaroscuro** | Caravaggio | Alto contraste — luz dura lateral, sombras profundas |
+| **Rembrandt** | Retrato clássico | Luz lateral suave, sombra triangular na face oposta |
+| **Three-Point** | Estúdio profissional | Key + Fill + Back — iluminação de estúdio |
+| **Golden Hour** | Hora dourada | Luz quente baixa, sombras longas, atmosfera cinematográfica |
+| **Blue Hour** | Hora azul | Luz fria, ambiente crepuscular, melancolia |
+
+**Comportamento:** Aplicar um preset remove luzes Sun/Point/Ambient existentes na cena e cria 2 novas luzes complementares (SunObject + PointObject/AmbientObject) com cores e intensidades do preset.
+
+**Acesso:** `SceneSettings → Presets de Luz` (secção colapsável, default fechada).
+
+### Arquivos modificados
+
+| Arquivo | +Linhas | Descrição |
+|---|---|---|
+| `src/utils/lightPresets.js` | 165 (NOVO) | 12 presets + `applyLightPreset` + `getPresetsByCategory` |
+| `src/components/panels/SceneSettings.jsx` | +98 | Secção "Presets de Luz" com sub-componente `PresetsSection` |
+| `src/utils/meshOperations.js` | +19 | `weldVertices(geometry, threshold)` |
+| `src/store/useStore.js` | +6 | `weld` em `MODIFIER_TYPES` |
+| `src/components/3d/SceneObject.jsx` | +5 | Import `weldVertices` + `case 'weld'` em `applyModifiers` |
+| `src/components/panels/ModifiersPanel.jsx` | +11 | `case 'weld'` com slider threshold |
+| **Total** | +139 | |
+
+### Verificação
+
+| Verificação | Resultado |
+|---|---|
+| `npm run build` | ✓ PASS (0 erros, 1.90s) |
+| `git diff --check` | ✓ PASS (exit 0) |
+| Bugs #1-#7 | ✓ Intactos |
+| Performance Core 3.2-3.8 | ✓ Não alterado |
+| Post-Audit 4.0/4.1/4.2 | ✓ Não alterado |
+| Nenhum `eval()` / `new Function()` | ✓ |
+| Nenhum `setTimeout`/`setInterval` introduzido | ✓ |
+
+### Classificação
+
+| Categoria | Itens |
+|---|---|
+| **MEDIDO** | Build: 0 erros, 1.90s; `git diff --check`: exit 0 |
+| **STATICALLY VERIFIED** | `weldVertices` usa `BufferGeometryUtils.mergeVertices` (já existente); `applyLightPreset` valida preset e store; ModifiersPanel tem `case 'weld'`; SceneSettings tem secção de presets; Bugs #1-#7 intactos |
+| **ESTIMADO** | Weld completa stack de modificadores Blender; Presets de luz aceleram setup de iluminação |
+| **NOT TESTED** | Aplicar preset real em browser; Weld real em modelo importado; Performance dos presets em mobile |
+
+**Runtime benchmark unavailable.** Análise estática apenas.
+

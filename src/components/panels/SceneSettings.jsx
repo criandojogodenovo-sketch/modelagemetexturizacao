@@ -5,11 +5,13 @@
  *  - Fundo (cor sólida ou gradiente)
  *  - Grelha (visibilidade, tamanho, cor)
  *  - Luzes (ambiente + direcional)
+ *  - Presets de Luz (RGB + cinematográficos)
  *
  * Secções colapsáveis via CollapseSection.
  */
 import { useStore } from '../../store/useStore'
 import CollapseSection from '../ui/CollapseSection'
+import { LIGHT_PRESETS, applyLightPreset, getPresetsByCategory } from '../../utils/lightPresets'
 
 export default function SceneSettings() {
   const background = useStore((s) => s.background)
@@ -200,6 +202,102 @@ export default function SceneSettings() {
           </div>
         </div>
       </CollapseSection>
+
+      <CollapseSection title="Presets de Luz" icon="sparkles" defaultOpen={false} storageKey="scene_light_presets">
+        <PresetsSection />
+      </CollapseSection>
+    </>
+  )
+}
+
+// ===== Sub-componente: Presets de Luz =====
+function PresetsSection() {
+  const store = useStore
+  const { rgb, cinematic } = getPresetsByCategory()
+
+  const handleApply = (presetId) => {
+    applyLightPreset(presetId, store.getState())
+  }
+
+  return (
+    <>
+      <div style={{ marginBottom: '12px' }}>
+        <div style={{ fontSize: '12px', fontWeight: 600, opacity: 0.7, marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          Presets RGB
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+          {rgb.map(preset => (
+            <button
+              key={preset.id}
+              onClick={() => handleApply(preset.id)}
+              title={preset.description}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '8px 4px',
+                background: 'var(--bg-tertiary, #161b22)',
+                border: '1px solid var(--border, #30363d)',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                color: 'var(--text, #e6edf3)',
+                fontSize: '11px',
+                transition: 'border-color 0.15s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = preset.primary.color }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border, #30363d)' }}
+            >
+              <div style={{ display: 'flex', gap: '2px' }}>
+                <span style={{ width: '14px', height: '14px', borderRadius: '50%', background: preset.primary.color, border: '1px solid rgba(255,255,255,0.2)' }} />
+                <span style={{ width: '14px', height: '14px', borderRadius: '50%', background: preset.secondary.color, border: '1px solid rgba(255,255,255,0.2)' }} />
+              </div>
+              <span>{preset.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '12px' }}>
+        <div style={{ fontSize: '12px', fontWeight: 600, opacity: 0.7, marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          Presets Cinematográficos
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+          {cinematic.map(preset => (
+            <button
+              key={preset.id}
+              onClick={() => handleApply(preset.id)}
+              title={preset.description}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '8px 4px',
+                background: 'var(--bg-tertiary, #161b22)',
+                border: '1px solid var(--border, #30363d)',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                color: 'var(--text, #e6edf3)',
+                fontSize: '11px',
+                transition: 'border-color 0.15s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = preset.primary.color }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border, #30363d)' }}
+            >
+              <div style={{ display: 'flex', gap: '2px' }}>
+                <span style={{ width: '14px', height: '14px', borderRadius: '50%', background: preset.primary.color, border: '1px solid rgba(255,255,255,0.2)' }} />
+                <span style={{ width: '14px', height: '14px', borderRadius: '50%', background: preset.secondary.color, border: '1px solid rgba(255,255,255,0.2)' }} />
+              </div>
+              <span>{preset.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ fontSize: '10px', opacity: 0.5, marginTop: '8px', lineHeight: '1.4' }}>
+        Aplicar um preset substitui luzes Sun/Point/Ambient existentes na cena por 2 novas luzes complementares.
+      </div>
     </>
   )
 }

@@ -27,6 +27,7 @@ import {
   bendGeometry as meshBendGeometry,
   smoothGeometry as meshSmoothGeometry,
   decimateGeometry,
+  weldVertices,
 } from '../../utils/meshOperations'
 import { compositeTextureLayers } from '../../utils/textureCompositor'
 
@@ -187,6 +188,10 @@ function applyModifiers(geometry, modifiers) {
           break
         case 'spherify':
           result = spherifyGeometry(result, mod.params.factor || 0.5)
+          break
+        case 'weld':
+          // Weld = Merge by Distance — funde vértices próximos
+          result = weldVertices(result, mod.params.threshold ?? 0.001)
           break
         default:
           break
