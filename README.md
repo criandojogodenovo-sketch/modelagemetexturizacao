@@ -1661,3 +1661,106 @@ Validação de argumentos adicionada em todos os métodos que recebem IDs:
 
 **Runtime benchmark unavailable.** Análise estática apenas.
 
+---
+
+## 🏗️ Fase 2 — Construtores Profissionais (Setembro 2026)
+
+Sistema de construtores profissionais que geram cenas complexas (cidades, edifícios, carros, mobiliário urbano) usando objetos do catálogo + instâncias na cena ativa.
+
+### Arquitetura
+
+```
+BuildersPanel (UI modal)
+    ↓
+proceduralBuilders.js (geradores)
+    ↓
+store.addObject (cria objetos no catálogo)
+    ↓
+store.addObjectToScene (adiciona instâncias à cena ativa)
+```
+
+Cada gerador cria objetos no catálogo (se ainda não existirem com o mesmo nome+tipo) e adiciona instâncias à cena ativa com variação automática (altura, rotação, escala, cor) para evitar repetição.
+
+### Construtores disponíveis (4)
+
+| Construtor | Descrição | Variação automática |
+|---|---|---|
+| **Cidade** | Gera quarteirões com edifícios de altura/estilo variado + mobiliário urbano | Estilos: modern/classic/industrial; Altura: 2-6 andares |
+| **Edifício** | Edifício modular com base, andares, telhado e varanda | Altura: ±1 andar; Largura/profundidade: ±0.5; Cor: 8 paletas |
+| **Carro** | Carro com carroçaria, cabine, 4 rodas, 2 faróis e spoiler (se sports) | 4 tipos: sedan/suv/sports/truck; 8 cores |
+| **Mobiliário Urbano** | Postes de luz, bancos e sinais espalhados numa área | 3 tipos; Posição aleatória; Rotação aleatória |
+
+### Edifício — peças modulares
+
+| Peça | Primitiva | Material |
+|---|---|---|
+| Base (fundação) | cube | Cinza escuro, roughness 0.9 |
+| Andares (N×) | cube | Cor variada (8 paletas), roughness 0.8 |
+| Telhado (modern/industrial) | cube fino | Cor variada (4 paletas), roughness 0.9 |
+| Telhado (classic) | cone 4 lados | Cor variada (4 paletas), roughness 0.85 |
+| Varanda (modern, se >1 andar) | cube | Cinza, roughness 0.7 |
+
+### Carro — peças modulares
+
+| Peça | Primitiva | Material |
+|---|---|---|
+| Carroçaria | cube | Cor escolhida, metalness 0.7 |
+| Cabine | cube | Vidro escuro (transparente, opacity 0.7) |
+| Rodas (4×) | cylinder | Preto, roughness 0.9 |
+| Faróis (2×) | cube pequeno | Amarelo, emissive |
+| Spoiler (sports) | cube | Preto, roughness 0.5 |
+
+### Mobiliário — tipos
+
+| Tipo | Peças | Descrição |
+|---|---|---|
+| Poste de luz | cylinder + sphere | Poste alto + lâmpada emissiva no topo |
+| Banco | cube (assento) + 2 cubes (pernas) | Assento de madeira com pernas metálicas |
+| Sinal | cylinder (poste) + plane (placa) | Poste com placa vermelha |
+
+### Configuração via UI
+
+**Acesso:** VerticalRail → "Construtores" → `BuildersPanel` (modal)
+
+| Construtor | Parâmetros |
+|---|---|
+| Cidade | Quarteirões por lado (1-4), Edifícios por quarteirão (1-5), Tamanho do quarteirão (8-30), Largura da rua (2-8) |
+| Edifício | Andares (1-10), Largura (2-10), Profundidade (2-10), Altura do andar (2-5), Estilo (modern/classic/industrial) |
+| Carro | Tipo (sedan/suv/sports/truck), Cor (color picker) |
+| Mobiliário | Quantidade (1-20), Área de dispersão (5-50) |
+
+### Arquivos criados/modificados
+
+| Arquivo | +Linhas | Tipo |
+|---|---|---|
+| `src/utils/proceduralBuilders.js` | 340 | NOVO — 4 geradores + `BUILDER_LIST` |
+| `src/components/panels/BuildersPanel.jsx` | 260 | NOVO — UI modal com configuração |
+| `src/App.jsx` | +4 | MODIFICADO — import + state + render |
+| `src/store/useStore.js` | +5 | MODIFICADO — `buildersPanelOpen` + setters |
+| `src/components/ui/VerticalRail.jsx` | +2/-2 | MODIFICADO — `openBuildersPanel()` em vez de `setAppMode('scene')` |
+| **Total** | +611 | |
+
+### Verificação
+
+| Verificação | Resultado |
+|---|---|
+| `npm run build` | ✓ PASS (0 erros, 1.55s) |
+| `git diff --check` | ✓ PASS (exit 0) |
+| Bugs #1-#7 | ✓ Intactos |
+| Performance Core 3.2-3.8 | ✓ Não alterado |
+| Post-Audit 4.0/4.1/4.2 | ✓ Não alterado |
+| Fase 1 (Weld + Presets) | ✓ Não alterado |
+| Nenhum `eval()` / `new Function()` | ✓ |
+| Nenhum `setTimeout`/`setInterval` introduzido | ✓ |
+
+### Classificação
+
+| Categoria | Itens |
+|---|---|
+| **MEDIDO** | Build: 0 erros, 1.55s; `git diff --check`: exit 0 |
+| **STATICALLY VERIFIED** | `generateBuilding` cria base + N andares + telhado + varanda; `generateCity` organiza quarteirões em grid + chama `generateBuilding` + `generateStreetFurniture`; `generateCar` cria 5-7 peças (carroçaria, cabine, 4 rodas, 2 faróis, spoiler); `generateStreetFurniture` cria 3 tipos (pole, bench, sign); `ensureCatalogObject` evita duplicados no catálogo; `BuildersPanel` tem 4 construtores com parâmetros configuráveis; VerticalRail abre `BuildersPanel` em vez de mudar para modo cena; Bugs #1-#7 intactos |
+| **ESTIMADO** | Construtores aceleram criação de cenas urbanas; Variação automática evita repetição visual; Reutilização de objetos do catálogo (mesmo objeto, múltiplas instâncias) |
+| **NOT TESTED** | Gerar cidade real em browser; Gerar carro real em browser; Performance com cenas grandes em mobile; Posicionamento correto das instâncias; Variação visual real |
+
+**Runtime benchmark unavailable.** Análise estática apenas.
+

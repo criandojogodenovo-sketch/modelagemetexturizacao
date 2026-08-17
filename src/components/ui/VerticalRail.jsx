@@ -80,8 +80,8 @@ export default function VerticalRail() {
       case 'toggleMainMenu': toggleMainMenu(); break
       case 'openSettingsPanel': toggleMainMenu(); break
       case 'openBuilders':
-        // Construtores — abrir modo cena (o painel de construtores está no SceneEditorPanel)
-        setAppMode('scene')
+        // Fase 2 — Abrir painel de Construtores Profissionais
+        useStore.getState().openBuildersPanel()
         break
     }
   }

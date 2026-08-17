@@ -1510,6 +1510,11 @@ export const useStore = create(
       openInstancingPanel: () => set({ instancingPanelOpen: true }),
       closeInstancingPanel: () => set({ instancingPanelOpen: false }),
 
+      // Fase 2 — Construtores Profissionais
+      buildersPanelOpen: false,
+      openBuildersPanel: () => set({ buildersPanelOpen: true }),
+      closeBuildersPanel: () => set({ buildersPanelOpen: false }),
+
       // Terrain Sculpt 3D — escultura direta no viewport 3D
       terrainSculptActive: false,
       toggleTerrainSculpt: () => set((s) => ({ terrainSculptActive: !s.terrainSculptActive })),
