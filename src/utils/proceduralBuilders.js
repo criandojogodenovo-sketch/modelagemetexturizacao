@@ -66,14 +66,33 @@ function addInstance(store, objectId, position, rotation, scale) {
 const BUILDING_COLORS = [
   '#8b8b8b', '#a0a0a0', '#b5b5b5', '#7a7a7a',
   '#9c9c9c', '#888888', '#b0b0b0', '#8f8f8f',
+  '#c4b89a', '#a8a098', '#d4c8b0', '#988878',
 ]
 
-const ROOF_COLORS = ['#3a3a3a', '#4a4a4a', '#2a2a2a', '#5a3a3a']
+const ROOF_COLORS = ['#3a3a3a', '#4a4a4a', '#2a2a2a', '#5a3a3a', '#4a3a2a']
 
 const CAR_COLORS = [
   '#e63946', '#457b9d', '#2a9d8f', '#f4a261',
   '#264653', '#e9c46a', '#1d3557', '#a8dadc',
+  '#000000', '#ffffff', '#333333', '#6c757d',
 ]
+
+// Fase 14 — Paletas realistas baseadas em referências reais
+const REALISTIC_BUILDING_MATERIALS = [
+  { color: '#c4b89a', roughness: 0.9, metalness: 0.0 }, // arenito
+  { color: '#a8a098', roughness: 0.85, metalness: 0.0 }, // concreto
+  { color: '#6b5b4f', roughness: 0.95, metalness: 0.0 }, // tijolo escuro
+  { color: '#d4c8b0', roughness: 0.8, metalness: 0.0 }, // arenito claro
+  { color: '#8a8a8a', roughness: 0.7, metalness: 0.1 }, // metal pintado
+  { color: '#4a4a4a', roughness: 0.6, metalness: 0.3 }, // vidro escuro
+]
+
+const REALISTIC_CAR_MATERIALS = {
+  sedan: { roughness: 0.2, metalness: 0.8 },
+  suv: { roughness: 0.3, metalness: 0.7 },
+  sports: { roughness: 0.1, metalness: 0.9 },
+  truck: { roughness: 0.4, metalness: 0.6 },
+}
 
 const FURNITURE_COLORS = {
   pole: '#4a4a4a',
@@ -116,7 +135,9 @@ export function generateBuilding(store, options = {}) {
   const floors = Math.max(1, baseFloors + Math.floor(rand(-1, 2)))
   const actualWidth = width + rand(-0.5, 0.5)
   const actualDepth = depth + rand(-0.5, 0.5)
-  const buildingColor = pickColor(BUILDING_COLORS)
+  // Fase 14 — Material realista (referência: arenito, concreto, tijolo, vidro)
+  const realMat = pick(REALISTIC_BUILDING_MATERIALS)
+  const buildingColor = realMat.color
   const roofColor = pickColor(ROOF_COLORS)
 
   const buildingIds = []
@@ -136,7 +157,7 @@ export function generateBuilding(store, options = {}) {
   // 2. Andares (cada um é um cube)
   const floorId = ensureCatalogObject(store, `Edifício_Andar_${style}`, 'cube', {
     size: 1,
-  }, { ...defaultMaterial(), color: buildingColor, roughness: 0.8 })
+  }, { ...defaultMaterial(), color: buildingColor, roughness: buildingRoughness, metalness: buildingMetalness })
   buildingIds.push(floorId)
 
   for (let f = 0; f < floors; f++) {
@@ -303,10 +324,11 @@ export function generateCar(store, options = {}) {
 
   store._pushHistory?.()
 
-  // 1. Carroçaria inferior (cube)
+  // 1. Carroçaria inferior (cube) — Fase 14: material realista com metalness
+  const carMat = REALISTIC_CAR_MATERIALS[bodyType] || REALISTIC_CAR_MATERIALS.sedan
   const bodyId = ensureCatalogObject(store, `Carro_Carroçaria_${bodyType}`, 'cube', {
     size: 1,
-  }, { ...defaultMaterial(), color, roughness: 0.3, metalness: 0.7 })
+  }, { ...defaultMaterial(), color, roughness: carMat.roughness, metalness: carMat.metalness })
   const bodyInst = addInstance(store, bodyId,
     [position[0], position[1] + d.rideH + d.height / 2, position[2]],
     [0, 0, 0], [d.length, d.height, d.width])
