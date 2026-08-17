@@ -32,6 +32,7 @@ import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/e
 import { createFlirCodeRuntime } from '../../utils/flirscript/flircode'
 import { FlirScriptAPI } from '../../utils/flirscript/flirScriptAPI'
 import { RaycastSystem } from '../../utils/raycastSystem'
+import { SpatialPartitionSystem } from '../../utils/spatialPartitionSystem'
 import { createAnimationPlayer } from '../../utils/animationPlayer'
 import { clearPoseCache } from '../../utils/sharedAnimationCache'
 import { createNPCAI } from '../../utils/conects/npcAI'
@@ -276,7 +277,7 @@ function ViewModelFPS({ activeScene, isGameMode }) {
 
 // ===== Componente que gere o modo jogo dentro do canvas =====
 function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }) {
-  const { camera } = useThree()
+  const { camera, scene } = useThree()
   const physicsRef = useRef(null)
   const runtimesRef = useRef(new Map())
   const animPlayersRef = useRef(new Map())
@@ -1381,7 +1382,15 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     // Câmara
     const camRotation = window._flirCameraRotation || { yaw: 0, pitch: 0, enabled: false }
     if (activeView) {
-      const targetFov = activeView.fov || activeScene.gameCamera?.fov || 60
+      // Fase 5 — Lens presets: ajustar FOV baseado no lensType
+      const lensType = activeView.lensType || 'normal'
+      let lensFov = activeView.fov || activeScene.gameCamera?.fov || 60
+      if (lensType === 'wide') lensFov = 90
+      else if (lensType === 'normal') lensFov = 60
+      else if (lensType === 'telephoto') lensFov = 30
+      // 'custom' usa o FOV do utilizador
+
+      const targetFov = lensFov
       const targetNear = activeView.near || activeScene.gameCamera?.near || 0.1
       const targetFar = activeView.far || activeScene.gameCamera?.far || DEFAULT_CAMERA_FAR
       if (camera.fov !== targetFov || camera.far !== targetFar || camera.near !== targetNear) {
@@ -1456,6 +1465,49 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         camera.rotation.set(...gc.rotation)
       } else {
         camera.lookAt(0, 0, 0)
+      }
+    }
+
+    // Fase 5 — DOF (Depth of Field) simulado via fog
+    // Não temos EffectComposer, mas usamos scene.fog como proxy:
+    // objetos fora da gama de foco ficam "nebulosos" (simula blur)
+    if (activeView?.dofEnabled) {
+      const focusDist = activeView.dofFocusDistance || 10
+      const focusRange = activeView.dofFocusRange || 5
+      const intensity = activeView.dofIntensity || 0.5
+      const near = Math.max(0.1, focusDist - focusRange / 2)
+      const far = focusDist + focusRange / 2
+      // Aplicar fog apenas se não há já um fog definido pelo utilizador
+      if (!scene.fog) {
+        const bgColor = scene.background
+        const fogColor = bgColor instanceof THREE.Color ? bgColor : new THREE.Color('#000000')
+        scene.fog = new THREE.Fog(fogColor, near, far)
+        scene.userData._dofFog = scene.fog
+        scene.userData._dofIntensity = intensity
+      }
+    } else if (scene.userData._dofFog) {
+      // Remover fog do DOF quando desativado
+      scene.fog = null
+      delete scene.userData._dofFog
+      delete scene.userData._dofIntensity
+    }
+
+    // Fase 5 — SmartCamera: boost quality de objetos visíveis
+    // Se smartFocus ativo, usa SpatialPartitionSystem para encontrar objetos
+    // próximos da câmara e ativa castShadow neles (mesmo que ShadowOptimizer
+    // os tenha desativado por distância). Objetos invisíveis mantêm castShadow=false.
+    if (activeView?.smartFocus && physicsRef.current) {
+      const camPos = camera.position
+      // Query espacial: objetos dentro de 30 unidades da câmara
+      const visibleIds = SpatialPartitionSystem.querySphere(
+        camPos.x, camPos.y, camPos.z, 30
+      )
+      // Para cada mesh visível, garantir castShadow=true
+      for (const id of visibleIds) {
+        const mesh = meshRefs.current.get(id) || conectMeshRefs.current.get(id)
+        if (mesh && !mesh.castShadow) {
+          mesh.castShadow = true
+        }
       }
     }
   })

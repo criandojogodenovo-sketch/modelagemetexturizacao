@@ -496,6 +496,13 @@ export const CONECT_TAXONOMY = [
       eyeHeight: 1.6,
       isActive: true,
       cameraRole: 'primary', // primary | secondary | player
+      // Fase 5 — Câmaras Cinemáticas
+      lensType: 'normal', // wide | normal | telephoto | custom
+      dofEnabled: false,
+      dofFocusDistance: 10,
+      dofFocusRange: 5,
+      dofIntensity: 0.5,
+      smartFocus: false, // SmartCamera: boost quality de objetos visíveis
     },
     properties: [
       prop('cameraRole', 'Papel da câmara', 'select', 'primary', { options: ['primary', 'secondary', 'player'] }),
@@ -510,6 +517,13 @@ export const CONECT_TAXONOMY = [
       prop('followDistance', 'Distância (3rd/side)', 'number', 6, { min: 1, max: 30, step: 0.5 }),
       prop('followHeight', 'Altura (3rd/side)', 'number', 3, { min: 0, max: 20, step: 0.5 }),
       prop('eyeHeight', 'Altura dos olhos (1st)', 'number', 1.6, { min: 0.5, max: 3, step: 0.1 }),
+      // Fase 5 — Câmaras Cinemáticas
+      prop('lensType', 'Lente', 'select', 'normal', { options: ['wide', 'normal', 'telephoto', 'custom'] }),
+      prop('dofEnabled', 'Profundidade de Campo (DOF)', 'boolean', false),
+      prop('dofFocusDistance', 'DOF: Distância de foco', 'number', 10, { min: 1, max: 100, step: 1 }),
+      prop('dofFocusRange', 'DOF: Gama de foco', 'number', 5, { min: 1, max: 50, step: 1 }),
+      prop('dofIntensity', 'DOF: Intensidade', 'number', 0.5, { min: 0, max: 1, step: 0.1 }),
+      prop('smartFocus', 'SmartCamera (qualidade só em visíveis)', 'boolean', false),
     ],
   },
   // FASE 8: Zona de toque para rodar câmara (FPS/BR-style)

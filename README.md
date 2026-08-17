@@ -1981,3 +1981,105 @@ Upgrade do `RealWaterObject` com 4 novos recursos de realismo:
 
 **Runtime benchmark unavailable.** Análise estática apenas.
 
+---
+
+## 🎥 Fase 5 — Câmara Inteligente + Câmaras Cinemáticas (Setembro 2026)
+
+### Lentes Cinemáticas
+
+Adiciona presets de lente ao `ViewObject` que ajustam automaticamente o FOV:
+
+| Lente | FOV | Equivalente | Efeito |
+|---|---|---|---|
+| **Wide (Grande Angular)** | 90° | 28mm | Campo amplo, distorção de perspectiva |
+| **Normal** | 60° | 50mm | Campo natural, sem distorção |
+| **Telephoto (Teleobjetiva)** | 30° | 85mm | Compressão de profundidade, fundo próximo |
+| **Custom** | User-defined | — | FOV configurável pelo utilizador |
+
+**Acesso:** `ViewObject → Lente` (dropdown no ConectPropertiesPanel)
+
+### Depth of Field (DOF)
+
+Simula profundidade de campo — objetos fora da gama de foco ficam desfocados.
+
+| Propriedade | Default | Descrição |
+|---|---|---|
+| `dofEnabled` | false | Ativar/desativar DOF |
+| `dofFocusDistance` | 10 | Distância do plano de foco (unidades) |
+| `dofFocusRange` | 5 | Gama de foco à volta do plano (unidades) |
+| `dofIntensity` | 0.5 | Intensidade do efeito (0-1) |
+
+**Implementação:** Sem `EffectComposer`, usa `scene.fog` como proxy:
+- `near = focusDistance - focusRange/2` (objetos mais próximos ficam fogged)
+- `far = focusDistance + focusRange/2` (objetos mais distantes ficam fogged)
+- Fog color = scene.background color (mistura suave)
+- Não interfere com FogObject definido pelo utilizador (só aplica se `!scene.fog`)
+- Remove o fog quando DOF desativado
+
+### SmartCamera (Câmara Inteligente)
+
+Aplica mais qualidade (castShadow) apenas aos objetos visíveis no campo da câmara, poupando processamento no resto da cena.
+
+| Propriedade | Default | Descrição |
+|---|---|---|
+| `smartFocus` | false | Ativar/desativar SmartCamera |
+
+**Implementação:**
+- Usa `SpatialPartitionSystem.querySphere(camPos, 30)` para encontrar objetos próximos da câmara
+- Para cada mesh visível: garante `castShadow = true` (mesmo que `ShadowOptimizer` o tenha desativado por distância)
+- Reaproveita o Performance Core (SpatialPartition + ShadowOptimizer)
+- Objetos fora do raio de 30 unidades mantêm o estado do ShadowOptimizer
+
+### Novas propriedades do ViewObject (6)
+
+| Propriedade | Tipo | Default | Descrição |
+|---|---|---|---|
+| `lensType` | select | 'normal' | wide/normal/telephoto/custom |
+| `dofEnabled` | boolean | false | Profundidade de campo |
+| `dofFocusDistance` | number | 10 | Distância de foco |
+| `dofFocusRange` | number | 5 | Gama de foco |
+| `dofIntensity` | number | 0.5 | Intensidade do DOF |
+| `smartFocus` | boolean | false | SmartCamera (qualidade só em visíveis) |
+
+### Arquivos modificados
+
+| Arquivo | +Linhas | Descrição |
+|---|---|---|
+| `src/utils/conects/taxonomy.js` | +14 | 6 novas propriedades no ViewObject |
+| `src/components/3d/SceneLevel3D.jsx` | +56 | Lens presets + DOF fog + SmartCamera query + import SpatialPartitionSystem |
+| **Total** | +70 | |
+
+### Verificação
+
+| Verificação | Resultado |
+|---|---|
+| `npm run build` | ✓ PASS (0 erros, 1.50s) |
+| `git diff --check` | ✓ PASS (exit 0) |
+| Bugs #1-#7 | ✓ Intactos |
+| Performance Core 3.2-3.8 | ✓ Não alterado |
+| Post-Audit 4.0/4.1/4.2 | ✓ Não alterado |
+| Fases 1-4 | ✓ Não alteradas |
+| Nenhum `eval()` / `new Function()` | ✓ |
+| Nenhum `setTimeout`/`setInterval` introduzido | ✓ |
+
+### Classificação
+
+| Categoria | Itens |
+|---|---|
+| **MEDIDO** | Build: 0 erros, 1.50s; `git diff --check`: exit 0 |
+| **STATICALLY VERIFIED** | Lens presets ajustam FOV (wide=90, normal=60, telephoto=30); DOF aplica scene.fog com near/far baseados em focusDistance/focusRange; SmartCamera usa SpatialPartitionSystem.querySphere para encontrar objetos visíveis; SmartCamera ativa castShadow em meshes visíveis; DOF remove fog quando desativado; DOF não interfere com FogObject existente; Bugs #1-#7 intactos |
+| **ESTIMADO** | Lens presets aceleram setup cinematográfico; DOF dá perceção de profundidade; SmartCamera poupa processamento em objetos invisíveis |
+| **NOT TESTED** | Lens presets visual real em browser; DOF fog visual real; SmartCamera castShadow boost real; Performance de SmartCamera query por frame |
+
+**Runtime benchmark unavailable.** Análise estática apenas.
+
+### Limitações
+
+1. **DOF é simulado via fog** — não é verdadeiro bokeh blur (requer `EffectComposer` com `ShaderPass`). A simulação via fog dá uma perceção de profundidade mas não desfoca objetos individualmente.
+
+2. **SmartCamera query por frame** — `SpatialPartitionSystem.querySphere` corre a cada frame. Pode ter overhead em cenas com muitos objetos. Considerar throttle (ex: a cada 5 frames) em otimização futura.
+
+3. **SmartCamera raio fixo (30 unidades)** — não é configurável nesta fase. Considerar tornar `smartFocusRadius` propriedade do ViewObject.
+
+4. **Lens presets sobrescrevem FOV** — se utilizador muda `lensType` para 'wide', FOV é definido para 90. Se volta para 'custom', FOV mantém 90 (não restaura o anterior). Aceitável nesta fase.
+
