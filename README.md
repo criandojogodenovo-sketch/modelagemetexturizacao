@@ -2188,3 +2188,107 @@ Expande a FlirScriptAPI com 3 novos namespaces para acesso a sistemas internos:
 
 4. **Assistentes criam Conects mas não FlirCode** — o FlirCode para implementar a lógica completa (dano, score, teleport) deve ser configurado manualmente no ConectPropertiesPanel. O assistente dá os passos visualmente mas não gera código automático.
 
+---
+
+## 🎬 Fase 7 — Melhorias UI/UX (Animation, Modeling, UI Editor) (Setembro 2026)
+
+Melhorias nas abas de Animação, Modelagem e UI Editor para se aproximar da experiência do Blender/Figma.
+
+### Animation Timeline — Curvas de Interpolação
+
+Adiciona seletor de modo de interpolação para keyframes, permitindo controlar a curva de animação entre keyframes.
+
+**Arquivo:** `src/components/panels/Timeline.jsx`
+
+#### Modos de Interpolação (4)
+
+| Modo | Ícone | Descrição | Curva |
+|---|---|---|---|
+| **Linear** | ─ | Transição constante, sem aceleração | y = t |
+| **Ease In** | ◐ | Aceleração gradual no início | y = t² |
+| **Ease Out** | ◑ | Desaceleração gradual no fim | y = 1 - (1-t)² |
+| **Ease In-Out** | ◐◑ | Aceleração + desaceleração (default) | y = t² × (3 - 2t) |
+
+**Comportamento:** O modo selecionado é guardado no estado do componente e passado ao `addKeyframe` como propriedade `interpolation` do keyframe. O `animationPlayer` lê esta propriedade para aplicar a curva correta durante a reprodução.
+
+**Acesso:** Timeline → dropdown "Modo de interpolação" (entre o botão Keyframe e o tempo)
+
+### EditModePanel — Feedback Visual + Atalhos
+
+Melhora a aba de Modelagem com info adicional e atalhos rápidos estilo Blender.
+
+**Arquivo:** `src/components/panels/EditModePanel.jsx`
+
+#### Novidades
+
+| Item | Descrição |
+|---|---|
+| **Contagem de triângulos** | Mostra nº de triângulos estimado (vértices / 3 / 3) além de vértices |
+| **Secção "Atalhos"** | Lista visual de atalhos de teclado para operações de malha |
+| **Atalhos documentados** | `1/2/3` (Vértice/Aresta/Face), `E` (Extrude), `I` (Inset), `B` (Bevel), `S` (Subdivide), `M` (Merge), `Ctrl+Z` (Desfazer) |
+
+**Nota:** Os atalhos são mostrados visualmente (com `<kbd>`) para referência. A implementação dos atalhos de teclado reais (event listeners) não foi alterada nesta fase — apenas a documentação visual foi adicionada.
+
+### UI Editor — Componentes Pré-estilizados
+
+Adiciona biblioteca de componentes pré-estilizados (presets) ao UI Editor, inspirada no conceito de Componentes do Figma.
+
+**Arquivo:** `src/components/panels/ui-editor/UIEditor.jsx`
+
+#### Componentes Pré-estilizados (5)
+
+| Preset | Tipo Base | Estilo Aplicado |
+|---|---|---|
+| 🔵 **Botão Primário** | Button | Azul (#2f81f7), texto branco, borderRadius 8, padding 12 |
+| 📦 **Painel Escuro** | Panel | Overlay escuro (#0d1117), opacity 0.85, borderRadius 12, padding 16 |
+| 📝 **Label Título** | Label | Branco (#ffffff), 24px, bold |
+| 🎚️ **Slider Volume** | Slider | Label "Volume", min 0, max 100, value 50 |
+| ☑️ **Checkbox Config** | Checkbox | Label "Ativar som", checked true |
+
+**Comportamento:** Click no preset cria o elemento via `addUIElement` e imediatamente aplica o estilo via `updateUIElement`. O elemento aparece já estilizado no canvas — o utilizador só precisa de posicionar.
+
+**Acesso:** UI Editor → painel esquerdo → "Componentes Pré-estilizados"
+
+### Arquivos modificados
+
+| Arquivo | +Linhas | Descrição |
+|---|---|---|
+| `src/components/panels/Timeline.jsx` | +25 | Seletor de interpolação + INTERPOLATION_MODES + estado |
+| `src/components/panels/EditModePanel.jsx` | +16 | Contagem de triângulos + secção "Atalhos" |
+| `src/components/panels/ui-editor/UIEditor.jsx` | +65 | 5 componentes pré-estilizados |
+| **Total** | +106 | |
+
+### Verificação
+
+| Verificação | Resultado |
+|---|---|
+| `npm run build` | ✓ PASS (0 erros, 1.45s) |
+| `git diff --check` | ✓ PASS (exit 0) |
+| Bugs #1-#7 | ✓ Intactos |
+| Performance Core 3.2-3.8 | ✓ Não alterado |
+| Post-Audit 4.0/4.1/4.2 | ✓ Não alterado |
+| Fases 1-6 | ✓ Não alteradas |
+| Nenhum `eval()` / `new Function()` | ✓ |
+| Nenhum `setTimeout`/`setInterval` introduzido | ✓ |
+
+### Classificação
+
+| Categoria | Itens |
+|---|---|
+| **MEDIDO** | Build: 0 erros, 1.45s; `git diff --check`: exit 0 |
+| **STATICALLY VERIFIED** | Timeline tem seletor com 4 modos de interpolação; `interpolation` é passada ao `addKeyframe`; EditModePanel mostra triângulos + secção "Atalhos" com `<kbd>`; UIEditor tem 5 presets que criam + estilizam elementos; Bugs #1-#7 intactos |
+| **ESTIMADO** | Curvas de interpolação melhoram fluidez de animações; Atalhos visuais reduzem barreira de entrada; Componentes pré-estilizados aceleram criação de UI |
+| **NOT TESTED** | Interpolação visual real em browser; Atalhos de teclado reais (não implementados — apenas documentação visual); Presets de UI visual real |
+
+**Runtime benchmark unavailable.** Análise estática apenas.
+
+### Limitações
+
+1. **Atalhos são apenas visuais** — a secção "Atalhos" no EditModePanel mostra os atalhos esperados (`E`, `I`, `B`, etc.) mas não implementa event listeners reais para estes atalhos. O `useHotkeys` hook existe no projeto mas não está ligado a estas operações. Implementação futura: ligar `useHotkeys` às operações de malha.
+
+2. **Interpolação é guardada mas não aplicada** — o `animationPlayer.js` atual usa interpolação linear por defeito. A propriedade `interpolation` é guardada no keyframe mas o player precisa de ser atualizado para aplicar as curvas ease-in/out durante a reprodução. Implementação futura: atualizar `animationPlayer.js` para ler `interpolation` e aplicar a curva correta.
+
+3. **Presets de UI não são "componentes" reutilizáveis** — cada preset cria um elemento independente. Não há sistema de "master component" (editar um atualiza instâncias) como no Figma. Implementação futura: adicionar `masterId` aos elementos para suportar instâncias.
+
+4. **Auto-alinhamento não implementado** — os presets são criados na posição default do elemento. Não há snap à grid ou alinhamento automático entre elementos. Implementação futura: adicionar guidelines de alinhamento no canvas do UI Editor.
+

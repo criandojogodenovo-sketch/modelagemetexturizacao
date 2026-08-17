@@ -135,6 +135,71 @@ export default function UIEditor() {
           </div>
         )}
 
+        {/* Fase 7 — Componentes pré-estilizados (presets estilo Figma) */}
+        {activeScreen && (
+          <div className="panel-section">
+            <h4>Componentes Pré-estilizados</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <button
+                onClick={() => {
+                  const el = addUIElement('Button', activeScreen.id)
+                  if (el?.id) updateUIElement(el.id, {
+                    label: 'Confirmar', color: '#2f81f7', textColor: '#ffffff',
+                    borderRadius: 8, fontSize: 14, padding: 12,
+                  })
+                }}
+                style={{ textAlign: 'left', padding: '6px 8px', fontSize: 11 }}
+              >
+                🔵 Botão Primário (azul, arredondado)
+              </button>
+              <button
+                onClick={() => {
+                  const el = addUIElement('Panel', activeScreen.id)
+                  if (el?.id) updateUIElement(el.id, {
+                    color: '#0d1117', opacity: 0.85, borderRadius: 12, padding: 16,
+                  })
+                }}
+                style={{ textAlign: 'left', padding: '6px 8px', fontSize: 11 }}
+              >
+                📦 Painel Escuro (overlay)
+              </button>
+              <button
+                onClick={() => {
+                  const el = addUIElement('Label', activeScreen.id)
+                  if (el?.id) updateUIElement(el.id, {
+                    label: 'Título', textColor: '#ffffff', fontSize: 24, fontWeight: 'bold',
+                  })
+                }}
+                style={{ textAlign: 'left', padding: '6px 8px', fontSize: 11 }}
+              >
+                📝 Label Título (branco, 24px, bold)
+              </button>
+              <button
+                onClick={() => {
+                  const el = addUIElement('Slider', activeScreen.id)
+                  if (el?.id) updateUIElement(el.id, {
+                    label: 'Volume', min: 0, max: 100, value: 50,
+                  })
+                }}
+                style={{ textAlign: 'left', padding: '6px 8px', fontSize: 11 }}
+              >
+                🎚️ Slider Volume (0-100)
+              </button>
+              <button
+                onClick={() => {
+                  const el = addUIElement('Checkbox', activeScreen.id)
+                  if (el?.id) updateUIElement(el.id, {
+                    label: 'Ativar som', checked: true,
+                  })
+                }}
+                style={{ textAlign: 'left', padding: '6px 8px', fontSize: 11 }}
+              >
+                ☑️ Checkbox Config
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Outliner de elementos da tela ativa */}
         {activeScreen && activeScreen.elements.length > 0 && (
           <div className="panel-section">

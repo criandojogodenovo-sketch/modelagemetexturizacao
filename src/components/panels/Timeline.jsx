@@ -7,6 +7,7 @@
  *  - Barra de progresso (clique para posicionar)
  *  - Marcadores de keyframes do clip ativo
  *  - Seletor de clip
+ *  - Fase 7 — Seletor de interpolação (linear, ease-in, ease-out, ease-in-out)
  *
  * Aparece sempre que há um objeto selecionado com skeleton ou animações.
  * Em mobile, ocupa largura total; em desktop, ocupa o centro.
@@ -16,6 +17,14 @@ import { IconPlay, IconPause, IconKey } from '../ui/Icons'
 import { useRef, useState, useMemo } from 'react'
 
 const DEFAULT_CLIPS = ['idle', 'walk', 'run', 'jump', 'attack']
+
+// Fase 7 — Modos de interpolação para keyframes
+const INTERPOLATION_MODES = [
+  { id: 'linear', label: 'Linear', icon: '─' },
+  { id: 'easeIn', label: 'Ease In', icon: '◐' },
+  { id: 'easeOut', label: 'Ease Out', icon: '◑' },
+  { id: 'easeInOut', label: 'Ease In-Out', icon: '◐◑' },
+]
 
 // Cores para faixas (ciclo)
 const TRACK_COLORS = [
@@ -38,6 +47,8 @@ export default function Timeline() {
   const addKeyframe = useStore((s) => s.addKeyframe)
   const trackRef = useRef(null)
   const [selectedBoneId, setSelectedBoneId] = useState(null)
+  // Fase 7 — Modo de interpolação ativo para novos keyframes
+  const [interpolation, setInterpolation] = useState('easeInOut')
 
   if (!selected) return null
   const hasSkeleton = selected.skeleton && selected.skeleton.bones.length > 0
@@ -96,6 +107,7 @@ export default function Timeline() {
                 position: [...targetBone.position],
                 rotation: [...targetBone.rotation],
                 scale: [...targetBone.scale],
+                interpolation, // Fase 7 — passa o modo de interpolação
               })
             }
           }}
@@ -106,6 +118,19 @@ export default function Timeline() {
         <div className="timeline-time">
           {animation.currentTime.toFixed(1)} / {animation.duration}
         </div>
+        {/* Fase 7 — Seletor de interpolação */}
+        <select
+          value={interpolation}
+          onChange={(e) => setInterpolation(e.target.value)}
+          title="Modo de interpolação para novos keyframes"
+          style={{ width: 'auto', maxWidth: 80, fontSize: 10 }}
+        >
+          {INTERPOLATION_MODES.map(mode => (
+            <option key={mode.id} value={mode.id}>
+              {mode.icon} {mode.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Faixas por osso — cada uma com cor distinta */}

@@ -137,6 +137,8 @@ export default function EditModePanel() {
           {selected.customGeometry ? (
             <>
               <div>Geometria editada: <strong>{(selected.customGeometry.positions?.length / 3).toFixed(0)}</strong> vértices</div>
+              {/* Fase 7 — Info adicional: triângulos estimados */}
+              <div>Triângulos: <strong>{Math.floor((selected.customGeometry.positions?.length / 3) / 3)}</strong></div>
               <div className="mt-2 small">
                 A geometria original da primitiva foi substituída pela malha editada.
               </div>
@@ -144,6 +146,20 @@ export default function EditModePanel() {
           ) : (
             <>Geometria original da primitiva (não editada).</>
           )}
+        </div>
+      </div>
+
+      {/* Fase 7 — Atalhos rápidos de modelagem */}
+      <div className="panel-section">
+        <h4>Atalhos</h4>
+        <div className="small muted" style={{ lineHeight: 1.6 }}>
+          <div><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> — Vértice / Aresta / Face</div>
+          <div><kbd>E</kbd> — Extrude</div>
+          <div><kbd>I</kbd> — Inset</div>
+          <div><kbd>B</kbd> — Bevel</div>
+          <div><kbd>S</kbd> — Subdivide</div>
+          <div><kbd>M</kbd> — Merge</div>
+          <div><kbd>Ctrl+Z</kbd> — Desfazer</div>
         </div>
       </div>
     </>
