@@ -432,7 +432,7 @@ export function autoSplatCombinedRules(hm, segs, options = {}, maxLayers = 4) {
 //  HONESTIDADE: o que é vs não é realista em mobile WebGL
 // ============================================================
 export const TERRAIN_UE5_FEATURES = {
-  // ✅ Implementado e realista para mobile
+  // Implementado e realista para mobile
   lodByDistance: {
     implemented: true,
     description: 'LOD geométrico por distância — reduz segmentos de tiles distantes',
@@ -453,7 +453,7 @@ export const TERRAIN_UE5_FEATURES = {
     description: 'Auto-paint combinando altura + inclinação + proximidade a água',
     mobileFriendly: true,
   },
-  // ❌ Não realista para mobile (documentado)
+  // Não realista para mobile (documentado)
   mipmapStreaming: {
     implemented: false,
     description: 'Streaming de mipmaps de disco — mobile não tem disco acessível',

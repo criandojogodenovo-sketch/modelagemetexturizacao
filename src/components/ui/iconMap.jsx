@@ -10,7 +10,7 @@
  *   <Icon name="cube" color="var(--accent)" />
  *
  * Para Conects (taxonomy.js), usar o nome do ícone em vez de emoji:
- *   icon: 'cube'  // em vez de '📦'
+ *   icon: 'cube'  // em vez de 'package'
  */
 
 import {
@@ -46,6 +46,7 @@ import {
   FolderTree, Palette, Puzzle, Map, MapPinned, Navigation, Compass,
   Terminal, Bug, Activity, Gauge, Cpu,
   HelpCircle, Dice5,
+  MessageCircle, Building2, Hammer,
 } from 'lucide-react'
 
 // Mapa: nome semântico → componente lucide
@@ -59,8 +60,13 @@ const ICON_MAP = {
   file: FileText,
   'file-box': FileText,
   package: Package,
+  builders: Building2,
+  mechanics: Target,
+  dialogue: MessageCircle,
+  'message-circle': MessageCircle,
   search: Search,
   'more-horizontal': MoreHorizontal,
+  boxes: Boxes,
   'chevron-down': ChevronDown,
   'chevron-right': ChevronRight,
   'chevron-left': ChevronLeft,

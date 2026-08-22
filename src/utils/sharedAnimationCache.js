@@ -62,6 +62,20 @@ function findKeyframeBinary(sortedKfs, time) {
 function interpolateVal(a, b, t, type) {
   if (type === 'step') return a
   if (type === 'linear') return a + (b - a) * t
+  // Fase 7/11 — Curvas de interpolação reais
+  if (type === 'easeIn') {
+    const eased = t * t
+    return a + (b - a) * eased
+  }
+  if (type === 'easeOut') {
+    const eased = 1 - (1 - t) * (1 - t)
+    return a + (b - a) * eased
+  }
+  if (type === 'easeInOut') {
+    const eased = t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t)
+    return a + (b - a) * eased
+  }
+  // ease (smoothstep) — default
   const eased = t * t * (3 - 2 * t)
   return a + (b - a) * eased
 }

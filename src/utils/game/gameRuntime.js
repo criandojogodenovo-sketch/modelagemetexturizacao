@@ -11,6 +11,10 @@
  * O runtime é funcionalmente idêntico ao "Executar Jogo" do editor.
  */
 
+// ===== Imports (para módulo ES no HTML exportado) =====
+import * as THREE from 'three'
+import * as CANNON from 'cannon-es'
+
 // ===== FlirCode Parser (inline, sem dependências) =====
 function parseFlirCode(src) {
   var errors = [], fns = {}, lines = src.split('\n'), cl = []
@@ -81,7 +85,42 @@ function createFlirCodeRuntime(src, gc) {
     var m
     if (m = s.t.match(/^var\s+(\w+)\s*=\s*(.+)$/)) { vars[m[1]] = evalVal(m[2], vars, gc); return }
     if (m = s.t.match(/^(\w+)\s*=\s*(.+)$/)) { vars[m[1]] = evalVal(m[2], vars, gc); return }
-    if (m = s.t.match(/^if\s*\((.+)\)$/)) { if (evalCond(m[1], vars, gc)) { /* procurar begincode seguinte */ } return }
+    if (m = s.t.match(/^if\s*\((.+)\)$/)) {
+      var cond = evalCond(m[1], vars, gc)
+      if (cond) {
+        // Procurar o begincode seguinte e executar o bloco
+        var bi = s.l // linha atual
+        // Procurar begincode nas linhas seguintes
+        for (var j = 0; j < cl.length; j++) {
+          if (cl[j].l > bi && cl[j].t === 'begincode') {
+            // Encontrar endcode correspondente
+            var depth = 1
+            var blockStmts = []
+            for (var k = j + 1; k < cl.length && depth > 0; k++) {
+              if (cl[k].t === 'begincode') depth++
+              else if (cl[k].t === 'endcode') depth--
+              else if (depth === 1) blockStmts.push(cl[k])
+            }
+            // Executar bloco
+            for (var bi2 = 0; bi2 < blockStmts.length; bi2++) {
+              try { execS(blockStmts[bi2], params) } catch (e) { dbg('Erro: ' + e.message, 'error') }
+            }
+            return
+          }
+        }
+      }
+      return
+    }
+    // else if
+    if (m = s.t.match(/^else\s+if\s*\((.+)\)$/)) {
+      // Processado no contexto do if anterior — ignorar aqui
+      return
+    }
+    // else
+    if (s.t === 'else') {
+      // Processado no contexto do if anterior — ignorar aqui
+      return
+    }
     if (m = s.t.match(/^(\w+)\s*\(([^)]*)\)$/)) {
       execBuiltin(m[1], m[2].split(',').map(function (a) { return evalVal(a.trim(), vars, gc) }), params)
       return
@@ -196,7 +235,7 @@ function startGame() {
   renderer.shadowMap.enabled = true
 
   var scene3d = new THREE.Scene()
-  var bg = data.scene.background
+  var bg = scene.background
   if (bg && bg.type === 'gradient') {
     var c = document.createElement('canvas'); c.width = 2; c.height = 256
     var ctx = c.getContext('2d')
@@ -212,18 +251,22 @@ function startGame() {
   var dir = new THREE.DirectionalLight(0xffffff, 1.2); dir.position.set(5, 8, 5); dir.castShadow = true
   scene3d.add(dir)
 
-  // Câmara
-  var viewConects = (scene.conects || []).filter(function (c) { return c.type === 'ViewObject' })
-  var activeView = viewConects.find(function (c) { return c.cameraRole === 'player' })
-    || viewConects.find(function (c) { return c.cameraRole === 'primary' })
-    || viewConects[0]
-  var cam = activeView || scene.gameCamera || { cameraType: 'perspective', position: [5, 4, 6], fov: 60, near: 0.1, far: 200 }
+  // Câmara — usar resolveActiveView do cameraController embebido
+  var activeView = resolveActiveView(scene.conects) || scene.gameCamera
+  var hasTZ = hasCameraTouchZone(scene.conects)
+  var camState = createCameraState()
+  camState.enabled = hasTZ
+  camState.hasTouchZone = hasTZ
+  var cam = activeView || scene.gameCamera || { cameraType: 'perspective', position: [5, 4, 6], fov: 60, near: 0.1, far: 2000 }
   var camera = (cam.cameraType || cam.type) === 'orthographic'
-    ? new THREE.OrthographicCamera(-5, 5, 5, -5, cam.near || 0.1, cam.far || 200)
-    : new THREE.PerspectiveCamera(cam.fov || 60, window.innerWidth / window.innerHeight, cam.near || 0.1, cam.far || 200)
+    ? new THREE.OrthographicCamera(-5, 5, 5, -5, cam.near || 0.1, cam.far || 2000)
+    : new THREE.PerspectiveCamera(cam.fov || 60, window.innerWidth / window.innerHeight, cam.near || 0.1, cam.far || 2000)
   camera.position.set.apply(camera, cam.position || [5, 4, 6])
-  if (activeView && activeView.rotation) camera.rotation.set.apply(camera, activeView.rotation)
-  else camera.lookAt(0, 0, 0)
+  if (activeView && activeView.rotation) {
+    camera.rotation.set(activeView.rotation[0], activeView.rotation[1], activeView.rotation[2], 'YXZ')
+  } else {
+    camera.lookAt(0, 0, 0)
+  }
 
   // Física
   var world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) })
@@ -242,14 +285,77 @@ function startGame() {
     getUIValue: function (name) { var ss = data.uiScreens || []; for (var i = 0; i < ss.length; i++) { var e = ss[i].elements.find(function (e) { return e.name === name }); if (e) return e.value || e.text || '' } return '' },
     setUIValue: function (name, val) { var ss = data.uiScreens || []; for (var i = 0; i < ss.length; i++) { var e = ss[i].elements.find(function (e) { return e.name === name }); if (e) { e.value = val; e.text = val; e.label = val; renderUI(); return } } },
     triggerUIEvent: function (en, payload) { for (var k in runtimes) { runtimes[k].triggerEvent(en, payload) } },
-    spawnObject: function (name, pos) { dbg('spawnObject: ' + name + ' em ' + pos, 'log') },
+    spawnObject: function (name, pos) {
+      // Procurar objeto do catálogo por nome e cloná-lo
+      var obj = (data.objects || []).find(function (o) { return o.name === name })
+      if (!obj) { dbg('spawnObject: objeto "' + name + '" não encontrado no catálogo', 'warning', 'Spawn'); return null }
+      var geo = obj.bufferGeometry || new THREE.BoxGeometry(1, 1, 1)
+      var mat = new THREE.MeshStandardMaterial({ color: obj.material?.color || '#cccccc', roughness: 0.7 })
+      var mesh = new THREE.Mesh(geo, mat)
+      mesh.position.set(pos[0] || 0, pos[1] || 0, pos[2] || 0)
+      mesh.castShadow = true; mesh.receiveShadow = true
+      mesh._name = name + '_' + Date.now()
+      mesh._isSpawned = true
+      scene3d.add(mesh)
+      // Adicionar ao meshMap para ser encontrável por name/distanceTo
+      var newId = 'spawned_' + Date.now() + '_' + Math.floor(Math.random() * 1000)
+      meshMap[newId] = mesh
+      dbg('spawnObject: ' + name + ' spawnado em [' + pos.join(',') + '] (id=' + newId + ')', 'log', 'Spawn')
+      return newId
+    },
     collidingWith: function (id, type) { for (var k in bodies) { if (k === id) continue; if (bodies[k]._conect.type === type || bodies[k]._conect.name === type) { if (bodies[id].position.distanceTo(bodies[k].position) < 1.5) return true } } return false },
     distanceTo: function (id, name) { for (var k in meshMap) { if (meshMap[k]._name === name) { return meshMap[id].position.distanceTo(meshMap[k].position) } } return 0 },
     isTouching: function () { return joystick.active },
-    // Sistema 2: Armas e combate (exportado)
-    shoot: function () { dbg('shoot() — sem implementação no export', 'log', 'Weapon') },
-    reload: function () { dbg('reload()', 'log', 'Weapon') },
-    equipWeapon: function (name) { dbg('equipWeapon: ' + name, 'log', 'Weapon') },
+    // Sistema 2: Armas e combate (exportado) — implementação real com raycast
+    shoot: function () {
+      if ((gc._weaponAmmo || 0) <= 0) { dbg('shoot: sem munição! Pressiona reload()', 'warning', 'Weapon'); return false }
+      gc._weaponAmmo = (gc._weaponAmmo || 0) - 1
+      // Raycast a partir da câmara
+      var raycaster = new THREE.Raycaster()
+      var origin = camera.position.clone()
+      var dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
+      raycaster.set(origin, dir)
+      raycaster.far = gc._weaponRange || 100
+      // Colectar todos os meshes com _conect (inimigos/NPCs)
+      var targets = []
+      for (var k in meshMap) {
+        if (meshMap[k]._conect && meshMap[k].visible !== false) targets.push(meshMap[k])
+      }
+      var hits = raycaster.intersectObjects(targets, true)
+      if (hits.length > 0) {
+        var hit = hits[0]
+        var hitMesh = hit.object
+        // Subir na hierarquia até encontrar um mesh com _conect
+        while (hitMesh && !hitMesh._conect && hitMesh.parent) hitMesh = hitMesh.parent
+        if (hitMesh && hitMesh._conect) {
+          var id = hitMesh._conect.instanceId
+          dbg('shoot: atingiu ' + (hitMesh._conect.name || id) + ' a ' + hit.distance.toFixed(1) + 'm', 'log', 'Weapon')
+          // Aplicar dano
+          if (gc.takeDamage) gc.takeDamage(id, gc._weaponDamage || 25)
+          // Disparar evento onHit no target
+          if (runtimes[id]) runtimes[id].triggerEvent('onHit', { damage: gc._weaponDamage || 25, point: [hit.point.x, hit.point.y, hit.point.z] })
+          return id
+        }
+      }
+      dbg('shoot: disparou mas não atingiu nada', 'log', 'Weapon')
+      return false
+    },
+    reload: function () {
+      var max = gc._weaponMaxAmmo || 30
+      gc._weaponAmmo = max
+      dbg('reload: munição restaurada para ' + max, 'log', 'Weapon')
+    },
+    equipWeapon: function (name) {
+      // Procurar WeaponObject na cena com este nome
+      var w = (scene.conects || []).find(function (c) { return c.type === 'WeaponObject' && c.name === name })
+      if (!w) { dbg('equipWeapon: arma "' + name + '" não encontrada', 'warning', 'Weapon'); return false }
+      gc._weaponDamage = w.damage || 25
+      gc._weaponRange = w.range || 100
+      gc._weaponMaxAmmo = w.maxAmmo || 30
+      gc._weaponAmmo = gc._weaponMaxAmmo
+      dbg('equipWeapon: ' + name + ' equipada (dano=' + gc._weaponDamage + ', alcance=' + gc._weaponRange + ', munição=' + gc._weaponMaxAmmo + ')', 'log', 'Weapon')
+      return true
+    },
     getAmmo: function () { return gc._weaponAmmo || 0 },
     takeDamage: function (id, amount) {
       for (var i = 0; i < scene.conects.length; i++) {
@@ -337,7 +443,7 @@ function startGame() {
 
   // Objects
   (scene.objects || []).forEach(function (inst) {
-    var obj = (data.scene.objects || []).find(function (o) { return o.id === inst.objectId })
+    var obj = (scene.objects || []).find(function (o) { return o.id === inst.objectId })
     if (!obj) return
     var mesh = setupMesh(obj, inst.position, inst.rotation, inst.scale)
     meshMap[inst.instanceId] = mesh
@@ -415,6 +521,32 @@ function startGame() {
   window.addEventListener('keydown', function (e) { keys[e.key.toLowerCase()] = true })
   window.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false })
 
+  // Câmera FPS — input via cameraController (applyCameraInput + applyCameraKeyInput)
+  // Setas para rodar câmara
+  window.addEventListener('keydown', function (e) {
+    var key = e.key.toLowerCase()
+    if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].indexOf(key) >= 0) {
+      e.preventDefault()
+      applyCameraKeyInput(key, camState)
+    }
+  })
+  // Rato — arrastar para rodar câmara (estilo FPS desktop)
+  var mouseDragging = false
+  var mouseLast = null
+  canvas.addEventListener('mousedown', function (e) {
+    if (e.button !== 0) return
+    mouseDragging = true
+    mouseLast = { x: e.clientX, y: e.clientY }
+  })
+  window.addEventListener('mousemove', function (e) {
+    if (!mouseDragging || !mouseLast) return
+    var dx = e.clientX - mouseLast.x
+    var dy = e.clientY - mouseLast.y
+    mouseLast = { x: e.clientX, y: e.clientY }
+    applyCameraInput(dx, dy, camState)
+  })
+  window.addEventListener('mouseup', function () { mouseDragging = false; mouseLast = null })
+
   // UI rendering
   function renderUI() {
     var overlay = document.getElementById('ui-overlay')
@@ -432,9 +564,43 @@ function startGame() {
           if (el.linkType && el.linkType !== 'none' && gc.linkTo) { gc.linkTo(el.linkType, el.linkTarget); return }
           gc.triggerUIEvent(el.eventName || 'onClick', { element: el })
         }
-        if (el.type === 'Checkbox') { dom.innerHTML = '<input type="checkbox" ' + (el.checked ? 'checked' : '') + '> <span>' + (el.label || '') + '</span>'; dom.querySelector('input').onchange = function () { el.checked = this.checked; gc.triggerUIEvent('onChange', { element: el, value: this.checked }) } }
-        if (el.type === 'Slider') { dom.innerHTML = '<input type="range" min="' + (el.min || 0) + '" max="' + (el.max || 100) + '" value="' + (el.value || 50) + '"><span style="font-size:10px">' + (el.value || '') + '</span>'; dom.querySelector('input').oninput = function () { el.value = Number(this.value); gc.triggerUIEvent('onChange', { element: el, value: Number(this.value) }) } }
-        if (el.type === 'Image' && el.url) dom.innerHTML = '<img src="' + el.url + '" style="width:100%;height:100%;object-fit:contain">'
+        // Post-Audit 4.0 — A3/S1: Substituído innerHTML por createElement + appendChild
+        // para evitar XSS via el.label / el.url / el.min / el.max / el.value não sanitizados.
+        // Antes: dom.innerHTML = '<input type="checkbox" ...> <span>' + el.label + '</span>'
+        // Agora: construção segura via DOM API.
+        if (el.type === 'Checkbox') {
+          var cbInput = document.createElement('input')
+          cbInput.type = 'checkbox'
+          cbInput.checked = !!el.checked
+          var cbLabel = document.createElement('span')
+          cbLabel.textContent = el.label || ''
+          dom.appendChild(cbInput)
+          dom.appendChild(cbLabel)
+          cbInput.onchange = function () { el.checked = this.checked; gc.triggerUIEvent('onChange', { element: el, value: this.checked }) }
+        }
+        if (el.type === 'Slider') {
+          var slInput = document.createElement('input')
+          slInput.type = 'range'
+          slInput.min = String(el.min || 0)
+          slInput.max = String(el.max || 100)
+          slInput.value = String(el.value || 50)
+          var slLabel = document.createElement('span')
+          slLabel.style.fontSize = '10px'
+          slLabel.textContent = String(el.value || '')
+          dom.appendChild(slInput)
+          dom.appendChild(slLabel)
+          slInput.oninput = function () { el.value = Number(this.value); gc.triggerUIEvent('onChange', { element: el, value: Number(this.value) }) }
+        }
+        if (el.type === 'Image' && el.url) {
+          // Post-Audit 4.0 — A3/S1: setAttribute('src') em vez de innerHTML.
+          // setAttribute não interpreta HTML — el.url é tratado como string literal.
+          var img = document.createElement('img')
+          img.setAttribute('src', el.url)
+          img.style.width = '100%'
+          img.style.height = '100%'
+          img.style.objectFit = 'contain'
+          dom.appendChild(img)
+        }
         overlay.appendChild(dom)
       })
     })
@@ -456,7 +622,7 @@ function startGame() {
     // FlirCode onTick
     for (var rid in runtimes) { runtimes[rid].triggerEvent('tick', { deltaTime: delta }) }
 
-    // PersonalObject movement
+    // PersonalObject movement — camera-relative (estilo Godot, igual ao editor)
     var player = (scene.conects || []).find(function (c) { return c.type === 'PersonalObject' })
     if (player && bodies[player.instanceId]) {
       var speed = player.moveSpeed || 5
@@ -466,29 +632,30 @@ function startGame() {
       if (keys['s'] || keys['arrowdown']) mz = speed
       if (keys['a'] || keys['arrowleft']) mx = -speed
       if (keys['d'] || keys['arrowright']) mx = speed
-      bodies[player.instanceId].velocity.x = mx
-      bodies[player.instanceId].velocity.z = mz
+      // Rodar (mx, mz) pelo yaw da câmara — movimento camera-relative
+      var yaw = camState.yaw
+      var cosY = Math.cos(yaw)
+      var sinY = Math.sin(yaw)
+      var vx =  mx * cosY + mz * sinY
+      var vz = -mx * sinY + mz * cosY
+      bodies[player.instanceId].velocity.x = vx
+      bodies[player.instanceId].velocity.z = vz
       if ((keys[' '] || keys['space']) && player.canJump) bodies[player.instanceId].velocity.y = player.jumpForce || 8
     }
 
-    // Camera follow — via cameraController (suporta first/third/top/side/none)
-    if (activeView) {
-      var targetId = activeView.followTarget
-      if (!targetId && activeView.cameraRole === 'player' && player) targetId = player.instanceId
-      var targetMesh = targetId ? meshMap[targetId] : null
-      if (targetMesh) {
-        var targetState = {
-          x: targetMesh.position.x,
-          y: targetMesh.position.y,
-          z: targetMesh.position.z,
-          rotation: { x: targetMesh.rotation.x, y: targetMesh.rotation.y, z: targetMesh.rotation.z }
-        }
-        updateCameraSerialized(camera, activeView, targetState, { lerpFactor: 0.1 })
-      } else if (activeView.followMode === 'none' || !activeView.followMode) {
-        // Câmara estática na posição da ViewObject
-        updateCameraSerialized(camera, activeView, null, { lerpFactor: 0.1 })
-      }
+    // Camera follow — usando cameraController unificado (CAMERA_CONTROLLER_SOURCE embebido)
+    var av = activeView
+    var pm = (activeView && activeView.cameraRole === 'player' && player && meshMap[player.instanceId]) ? meshMap[player.instanceId] : null
+    var targetMeshForCam = pm
+    // Verificar followTarget explícito
+    if (av && av.followTarget && meshMap[av.followTarget]) {
+      targetMeshForCam = meshMap[av.followTarget]
     }
+    updateCamera(camera, av, targetMeshForCam, camState, {
+      gameCamera: scene.gameCamera,
+      hasTouchZone: hasTZ,
+      delta: 1/60,
+    })
 
     renderer.render(scene3d, camera)
   }

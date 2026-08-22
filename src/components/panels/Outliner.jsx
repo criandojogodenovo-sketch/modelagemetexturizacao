@@ -2,13 +2,16 @@
  * Outliner — lista de objetos da cena com nomes editáveis.
  *
  * Funcionalidades:
+ *  - Pesquisa por texto no topo (sempre visível)
  *  - Click para selecionar
  *  - Duplo-click para editar nome inline
- *  - Botões rápidos: visibilidade, duplicar, apagar
+ *  - Botões rápidos: visibilidade (eye), duplicar, apagar
+ *  - Indentação para hierarquia (filhos recuados)
  */
 import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../../store/useStore'
 import { IconVisible, IconHidden, IconDuplicate, IconTrash } from '../ui/Icons'
+import { Icon } from '../ui/iconMap'
 
 export default function Outliner() {
   const objects = useStore((s) => s.objects)
@@ -18,6 +21,11 @@ export default function Outliner() {
   const duplicateObject = useStore((s) => s.duplicateObject)
   const deleteObject = useStore((s) => s.deleteObject)
   const toggleVisibility = useStore((s) => s.toggleVisibility)
+  const [search, setSearch] = useState('')
+
+  const filtered = search.trim()
+    ? objects.filter((o) => o.name?.toLowerCase().includes(search.toLowerCase()))
+    : objects
 
   if (objects.length === 0) {
     return (
@@ -29,19 +37,36 @@ export default function Outliner() {
   }
 
   return (
-    <div className="outliner">
-      {objects.map((obj) => (
-        <OutlinerItem
-          key={obj.id}
-          obj={obj}
-          isSelected={obj.id === selectedId}
-          onSelect={() => selectObject(obj.id)}
-          onRename={(name) => renameObject(obj.id, name)}
-          onDuplicate={() => duplicateObject(obj.id)}
-          onDelete={() => deleteObject(obj.id)}
-          onToggleVisibility={() => toggleVisibility(obj.id)}
+    <div>
+      {/* Pesquisa sempre visível no topo */}
+      <div className="outliner-search">
+        <input
+          type="text"
+          placeholder="Pesquisar objetos..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
         />
-      ))}
+      </div>
+      <div className="outliner">
+        {filtered.length === 0 ? (
+          <div className="empty-state small" style={{ padding: '12px 8px' }}>
+            Nenhum resultado para "{search}"
+          </div>
+        ) : (
+          filtered.map((obj) => (
+            <OutlinerItem
+              key={obj.id}
+              obj={obj}
+              isSelected={obj.id === selectedId}
+              onSelect={() => selectObject(obj.id)}
+              onRename={(name) => renameObject(obj.id, name)}
+              onDuplicate={() => duplicateObject(obj.id)}
+              onDelete={() => deleteObject(obj.id)}
+              onToggleVisibility={() => toggleVisibility(obj.id)}
+            />
+          ))
+        )}
+      </div>
     </div>
   )
 }
@@ -104,24 +129,26 @@ function OutlinerItem({ obj, isSelected, onSelect, onRename, onDuplicate, onDele
           {obj.name}
         </span>
       )}
-      <div className="actions">
+      <div className="outliner-actions">
         <button
+          className="outliner-action-btn"
           onClick={(e) => { e.stopPropagation(); onToggleVisibility() }}
           title={obj.visible !== false ? 'Ocultar' : 'Mostrar'}
         >
           {obj.visible !== false ? <IconVisible width={12} height={12} /> : <IconHidden width={12} height={12} />}
         </button>
         <button
+          className="outliner-action-btn"
           onClick={(e) => { e.stopPropagation(); onDuplicate() }}
           title="Duplicar"
         >
           <IconDuplicate width={12} height={12} />
         </button>
         <button
-          className="danger"
+          className="outliner-action-btn"
           onClick={(e) => { e.stopPropagation(); onDelete() }}
           title="Apagar"
-          style={{ padding: '2px 4px' }}
+          style={{ color: 'var(--danger)' }}
         >
           <IconTrash width={12} height={12} />
         </button>

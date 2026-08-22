@@ -9,7 +9,6 @@
  *  - Renderização de todos os objetos da cena
  *  - TransformControls (gizmo) — só em modo 'object'
  *  - Modo Sculpt: raycast + sculptStrokeAt ao clicar/arrastar
- *  - Modo Paint: raycast + paintStrokeOnMesh ao clicar/arrastar (3D texture paint real)
  *  - Modo Edit: seleção de vértices/arestas/faces (visual overlay)
  *  - Click no vazio = deselect
  */
@@ -18,8 +17,18 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls, Grid, TransformControls, ContactShadows } from '@react-three/drei'
 import * as THREE from 'three'
 import SceneObject from './SceneObject'
+import SkeletonGizmo from './SkeletonGizmo'
+import ShadowOptimizer from './ShadowOptimizer'
+import { RaycastSystem } from '../../utils/raycastSystem'
 import { useStore } from '../../store/useStore'
-import { paintStrokeOnMesh } from '../../utils/texturePaint'
+import {
+  DEFAULT_CAMERA_FAR,
+  updatePanSpeed,
+  focusSelected as focusSelectedUtil,
+  frameAll as frameAllUtil,
+  resetCamera as resetCameraUtil,
+  updateTargetToSelection,
+} from '../../utils/navigationUtils'
 
 // ----- Componente interno: aplica o fundo da cena -----
 function SceneBackground({ background }) {
@@ -82,7 +91,10 @@ function SculptRaycaster({ meshRefs, orbitRef }) {
       const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
       const y = -((e.clientY - rect.top) / rect.height) * 2 + 1
       raycaster.current.setFromCamera(new THREE.Vector2(x, y), camera)
-      const intersects = raycaster.current.intersectObject(mesh)
+      // Performance Core 3.5 — Usar RaycastSystem (BVH se aplicável, fallback automático)
+      const origin = raycaster.current.ray.origin
+      const direction = raycaster.current.ray.direction
+      const intersects = RaycastSystem.intersectMesh(mesh, origin, direction)
       if (intersects.length === 0) return
       const hit = intersects[0]
       sculptStrokeAt(selectedId, [hit.point.x, hit.point.y, hit.point.z],
@@ -104,84 +116,6 @@ function SculptRaycaster({ meshRefs, orbitRef }) {
   return null
 }
 
-// ----- Componente interno: raycast para Texture Paint (3D real) -----
-// Implementa os 9 passos do pipeline Blender-style:
-//   1. Raycast da câmara → mesh selecionado
-//   2. intersectObject devolve hit.face (triângulo) e hit.uv (interpolado baricêntrico)
-//   3. paintStrokeOnMesh aplica o pincel no canal ativo na UV exata
-//   4. CanvasTexture.needsUpdate = true (atualização GPU incremental, sem recriar)
-function TexturePaintRaycaster({ meshRefs, orbitRef }) {
-  const { gl, camera, pointer } = useThree()
-  const mode = useStore((s) => s.mode)
-  const selectedId = useStore((s) => s.selectedId)
-  const paintSettings = useStore((s) => s.paintSettings)
-  const isDraggingRef = useRef(false)
-  const raycaster = useRef(new THREE.Raycaster())
-
-  useEffect(() => {
-    if (mode !== 'paint' || !selectedId) return
-    const canvas = gl.domElement
-
-    const onPointerDown = (e) => {
-      // Só ativar com botão principal (esquerdo ou touch)
-      if (e.button !== undefined && e.button !== 0) return
-      isDraggingRef.current = true
-      if (orbitRef.current) orbitRef.current.enabled = false
-      doStroke(e)
-    }
-    const onPointerMove = (e) => {
-      if (!isDraggingRef.current) return
-      doStroke(e)
-    }
-    const onPointerUp = () => {
-      isDraggingRef.current = false
-      if (orbitRef.current) orbitRef.current.enabled = true
-    }
-    const doStroke = (e) => {
-      const mesh = meshRefs.current.get(selectedId)
-      if (!mesh) return
-      const rect = canvas.getBoundingClientRect()
-      const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
-      const y = -((e.clientY - rect.top) / rect.height) * 2 + 1
-      raycaster.current.setFromCamera(new THREE.Vector2(x, y), camera)
-      // Intersectar o mesh selecionado
-      const intersects = raycaster.current.intersectObject(mesh, false)
-      if (intersects.length === 0) return
-      const hit = intersects[0]
-      // hit.uv é interpolado por three.js via baricêntricas automaticamente
-      // (passo 5: coordenadas baricêntricas para UV exata)
-      if (!hit.uv) {
-        // Sem UV no hit — mesh pode não ter UV attribute. Sinalizar e sair.
-        console.warn('[TexturePaint] Mesh sem UVs — não é possível pintar.')
-        return
-      }
-      // Construir brush no formato esperado por paintStrokeOnMesh
-      const brush = {
-        type: paintSettings.brushType || 'draw',
-        color: paintSettings.color || '#ff5555',
-        size: paintSettings.size || 30,
-        strength: paintSettings.strength ?? 0.5,
-        channel: paintSettings.channel || 'color',
-        normalMode: paintSettings.normalMode || 'raise',
-        cloneSource: paintSettings.cloneSource || null,
-      }
-      paintStrokeOnMesh(selectedId, { u: hit.uv.x, v: hit.uv.y }, brush)
-    }
-
-    canvas.addEventListener('pointerdown', onPointerDown)
-    canvas.addEventListener('pointermove', onPointerMove)
-    window.addEventListener('pointerup', onPointerUp)
-    return () => {
-      canvas.removeEventListener('pointerdown', onPointerDown)
-      canvas.removeEventListener('pointermove', onPointerMove)
-      window.removeEventListener('pointerup', onPointerUp)
-      if (orbitRef.current) orbitRef.current.enabled = true
-    }
-  }, [mode, selectedId, paintSettings, gl, camera, meshRefs, orbitRef])
-
-  return null
-}
-
 // ----- Componente interno: TransformControls -----
 function SelectedTransformControls({ selectedMesh, orbitRef }) {
   const transformMode = useStore((s) => s.transformMode)
@@ -196,7 +130,7 @@ function SelectedTransformControls({ selectedMesh, orbitRef }) {
     <TransformControls
       object={selectedMesh}
       mode={transformMode}
-      size={0.8}
+      size={1.2}
       onMouseDown={() => {
         if (orbitRef.current) orbitRef.current.enabled = false
       }}
@@ -233,6 +167,7 @@ export default function Scene3D() {
   const grid = useStore((s) => s.grid)
   const lights = useStore((s) => s.lights)
   const mode = useStore((s) => s.mode)
+  const renderSettings = useStore((s) => s.renderSettings)
 
   const orbitRef = useRef(null)
   const meshRefs = useRef(new Map())
@@ -240,20 +175,55 @@ export default function Scene3D() {
 
   useEffect(() => {
     if (selectedId && meshRefs.current.has(selectedId)) {
-      setSelectedMesh(meshRefs.current.get(selectedId))
+      const mesh = meshRefs.current.get(selectedId)
+      setSelectedMesh(mesh)
+      // Actualizar target do OrbitControls para o objeto seleccionado (sem mover a câmara)
+      updateTargetToSelection(orbitRef, mesh)
     } else {
       // O mesh pode ainda não estar montado — tentar novamente no próximo tick
       setSelectedMesh(null)
       if (selectedId) {
         const timer = setTimeout(() => {
           if (meshRefs.current.has(selectedId)) {
-            setSelectedMesh(meshRefs.current.get(selectedId))
+            const mesh = meshRefs.current.get(selectedId)
+            setSelectedMesh(mesh)
+            updateTargetToSelection(orbitRef, mesh)
           }
         }, 50)
         return () => clearTimeout(timer)
       }
     }
   }, [selectedId, objects])
+
+  // Atalhos de navegação: F=Focus Selected, A=Frame All, Home=Reset Camera
+  useEffect(() => {
+    const handler = (e) => {
+      const tag = e.target.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return
+      const key = e.key.toLowerCase()
+      if (key === 'f') {
+        e.preventDefault()
+        if (selectedMesh && orbitRef.current) {
+          const { camera } = orbitRef.current.object.parent // canvas camera
+          // Obter a câmara do three via R3F — usar orbitRef.current.object (que é a câmara)
+          focusSelectedUtil(orbitRef, orbitRef.current.object, selectedMesh, 50)
+        }
+      } else if (key === 'a') {
+        e.preventDefault()
+        if (orbitRef.current) {
+          const meshes = Array.from(meshRefs.current.values()).filter(Boolean)
+          frameAllUtil(orbitRef, orbitRef.current.object, meshes, 50)
+        }
+      } else if (key === 'home') {
+        e.preventDefault()
+        if (orbitRef.current) {
+          resetCameraUtil(orbitRef, orbitRef.current.object)
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [selectedMesh])
 
   const setMeshRef = useCallback((id, node) => {
     if (node) {
@@ -267,11 +237,19 @@ export default function Scene3D() {
     }
   }, [selectedId])
 
+  // DPR e shadowMapSize do renderSettings
+  const pixelRatio = renderSettings?.pixelRatio || 1
+  const dprMax = pixelRatio >= 2 ? 2 : pixelRatio >= 1.5 ? 1.5 : 1
+  const shadowMapSize = renderSettings?.shadowMapSize || 1024
+  // Editor: preserveDrawingBuffer sempre true (screenshots/export precisam)
+  // shadowOptimizations respeita config do utilizador
+  const shadowsEnabled = renderSettings?.shadowOptimizations !== false
+
   return (
     <Canvas
-      shadows
-      dpr={[1, 2]}
-      camera={{ position: [5, 4, 6], fov: 50, near: 0.1, far: 200 }}
+      shadows={shadowsEnabled}
+      dpr={[1, dprMax]}
+      camera={{ position: [5, 4, 6], fov: 50, near: 0.1, far: DEFAULT_CAMERA_FAR }}
       gl={{ antialias: true, preserveDrawingBuffer: true, alpha: false }}
       onPointerMissed={(e) => {
         if (e.type === 'click' || e.type === 'touchend') {
@@ -282,6 +260,9 @@ export default function Scene3D() {
       <Suspense fallback={null}>
         <SceneBackground background={background} />
 
+        {/* Performance Core 3.2 — ShadowOptimizer no Editor (distance culling) */}
+        <ShadowOptimizer meshRefs={meshRefs} enabled={true} />
+
         {/* Iluminação */}
         <ambientLight intensity={lights.ambient.intensity} color={lights.ambient.color} />
         <directionalLight
@@ -289,8 +270,8 @@ export default function Scene3D() {
           color={lights.directional.color}
           position={lights.directional.position}
           castShadow
-          shadow-mapSize-width={2048}
-          shadow-mapSize-height={2048}
+          shadow-mapSize-width={shadowMapSize}
+          shadow-mapSize-height={shadowMapSize}
           shadow-camera-left={-15}
           shadow-camera-right={15}
           shadow-camera-top={15}
@@ -300,7 +281,7 @@ export default function Scene3D() {
         />
         <hemisphereLight intensity={0.3} groundColor="#1a1a2e" color="#ffffff" />
 
-        {/* Grelha de chão */}
+        {/* Grelha de chão — infinita para não dar sensação de "mundo acaba" */}
         {grid.visible && (
           <Grid
             position={[0, 0, 0]}
@@ -309,9 +290,9 @@ export default function Scene3D() {
             sectionColor={grid.color}
             sectionThickness={1.2}
             cellThickness={0.6}
-            fadeDistance={30}
+            fadeDistance={100}
             fadeStrength={1}
-            infiniteGrid={false}
+            infiniteGrid={true}
           />
         )}
 
@@ -338,21 +319,22 @@ export default function Scene3D() {
         {/* Gizmo de transformação no objeto selecionado (só em modo object) */}
         <SelectedTransformControls selectedMesh={selectedMesh} orbitRef={orbitRef} />
 
+        {/* Esqueleto sobreposto ao modelo (quando em modo rig/animate) */}
+        <SkeletonGizmo meshRef={selectedMesh} />
+
         {/* Raycast para sculpt */}
         <SculptRaycaster meshRefs={meshRefs} orbitRef={orbitRef} />
 
-        {/* Raycast para Texture Paint (3D real) */}
-        <TexturePaintRaycaster meshRefs={meshRefs} orbitRef={orbitRef} />
-
-        {/* Câmara orbital — desativada em modo sculpt durante o arraste */}
+        {/* Câmara orbital — sem limites artificiais de distância; maxPolarAngle permite olhar de baixo */}
         <OrbitControls
           ref={orbitRef}
           makeDefault
           enableDamping
           dampingFactor={0.08}
-          minDistance={1}
-          maxDistance={50}
-          maxPolarAngle={Math.PI * 0.495}
+          minDistance={0.5}
+          maxDistance={Infinity}
+          maxPolarAngle={Math.PI}
+          screenSpacePanning={false}
           mouseButtons={{
             LEFT: THREE.MOUSE.ROTATE,
             MIDDLE: THREE.MOUSE.DOLLY,
@@ -361,6 +343,21 @@ export default function Scene3D() {
           touches={{
             ONE: THREE.TOUCH.ROTATE,
             TWO: THREE.TOUCH.DOLLY_PAN,
+          }}
+          onPointerDown={() => updatePanSpeed(orbitRef)}
+          onWheel={(e) => {
+            // Zoom logarítmico: cada scroll multiplica a distância por ZOOM_FACTOR
+            if (!orbitRef.current) return
+            const controls = orbitRef.current
+            const distance = controls.getDistance()
+            const factor = e.deltaY > 0 ? 1.1 : 0.9
+            const newDistance = distance * factor
+            const dir = new THREE.Vector3()
+            dir.subVectors(controls.object.position, controls.target)
+            if (dir.lengthSq() < 0.001) dir.set(0, 0, 1)
+            dir.normalize()
+            controls.object.position.copy(controls.target).addScaledVector(dir, newDistance)
+            controls.update()
           }}
         />
       </Suspense>

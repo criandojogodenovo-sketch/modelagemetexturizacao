@@ -138,6 +138,7 @@ export default function JoystickControl({
     zIndex: 95,
     touchAction: 'none',
     userSelect: 'none',
+    pointerEvents: 'auto', // CRITICAL: parent .game-ui-overlay has pointer-events:none; must override
   }
 
   const baseStyle = {

@@ -28,7 +28,7 @@ const EFFECTS = [
   {
     id: 'ssao',
     label: 'SSAO',
-    icon: '🌑',
+icon: '',
     desc: 'Oclusão ambiente — sombras suaves em cantos',
     perfCost: 'high',
     defaults: { enabled: false, intensity: 0.5, radius: 0.1 },

@@ -18,6 +18,8 @@ import {
   IconDuplicate,
   IconTrash,
 } from '../../ui/Icons'
+import { Icon } from '../../ui/iconMap'
+import CollapseSection from '../../ui/CollapseSection'
 
 export default function ConectPropertiesPanel({ conectId }) {
   const scenes = useStore((s) => s.scenes)
@@ -59,10 +61,13 @@ export default function ConectPropertiesPanel({ conectId }) {
 
   return (
     <div className="conect-properties">
-      {/* Cabeçalho */}
+      {/* Cabeçalho — sempre visível, não colapsável */}
       <div className="panel-section">
         <div className="row between" style={{ marginBottom: 6 }}>
-          <span className="tag accent">{def.icon} {def.label}</span>
+          <span className="tag accent" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Icon name={def.icon} size={12} />
+            {def.label}
+          </span>
           <div className="row" style={{ gap: 4 }}>
             <button
               className="icon"
@@ -92,9 +97,8 @@ export default function ConectPropertiesPanel({ conectId }) {
         </div>
       </div>
 
-      {/* Transformação */}
-      <div className="panel-section">
-        <h4>Transformação</h4>
+      {/* Transformação — colapsável */}
+      <CollapseSection title="Transformação" icon="move" storageKey={`conect_${conect.type}`}>
         <div className="prop-row">
           <label>Posição</label>
           <div className="vec3-input">
@@ -131,11 +135,10 @@ export default function ConectPropertiesPanel({ conectId }) {
               onChange={(v) => setTransform('scale', 2, v)} />
           </div>
         </div>
-      </div>
+      </CollapseSection>
 
-      {/* Propriedades específicas do tipo */}
-      <div className="panel-section">
-        <h4>Propriedades — {def.label}</h4>
+      {/* Propriedades específicas do tipo — colapsável */}
+      <CollapseSection title={`Propriedades — ${def.label}`} icon={def.icon} storageKey={`conect_props_${conect.type}`}>
         {def.properties.map((propDef) => (
           <PropertyField
             key={propDef.key}
@@ -145,25 +148,23 @@ export default function ConectPropertiesPanel({ conectId }) {
             onFocus={_pushHistory}
           />
         ))}
-      </div>
+      </CollapseSection>
 
-      {/* FlirScript */}
+      {/* FlirScript — colapsável */}
       {def.flirScriptable && (
-        <div className="panel-section">
-          <h4>FlirScript (lógica)</h4>
+        <CollapseSection title="FlirScript (lógica)" icon="puzzle" defaultOpen={false} storageKey={`conect_script_${conect.type}`}>
           <button
             onClick={() => setFlirScriptTarget(activeSceneId, conect.instanceId)}
             className={conect.flirScript ? 'primary' : ''}
             style={{ width: '100%' }}
             title="Abrir editor FlirScript para este Conect"
-          >{conect.flirScript ? 'Editar FlirScript ✓' : 'Criar FlirScript'}
+          >{conect.flirScript ? 'Editar FlirScript' : 'Criar FlirScript'}
           </button>
-        </div>
+        </CollapseSection>
       )}
 
-      {/* Estado do Conect */}
-      <div className="panel-section">
-        <h4>Estado</h4>
+      {/* Estado — colapsável, fechado por defeito */}
+      <CollapseSection title="Estado" icon="info" defaultOpen={false} storageKey={`conect_state_${conect.type}`}>
         <div className="small muted">
           <div>Tipo: <strong>{conect.type}</strong></div>
           <div>ID: <code>{conect.instanceId.slice(-8)}</code></div>
@@ -171,7 +172,7 @@ export default function ConectPropertiesPanel({ conectId }) {
           {def.hasVisual && <div>Tem visual</div>}
           {def.flirScriptable && <div>Suporta FlirScript</div>}
         </div>
-      </div>
+      </CollapseSection>
     </div>
   )
 }

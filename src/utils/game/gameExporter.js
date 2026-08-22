@@ -1,21 +1,23 @@
 /**
  * gameExporter.js — gera um build jogável autónomo a partir do projeto.
  *
- * **Fase 6 (reconstruído)**: O HTML exportado inclui:
+ * O HTML exportado inclui:
  *  - Runtime completo como <script> embutido (de gameRuntime.js)
- *  - Three.js + cannon-es via CDN
- *  - FlirCode parser + runtime
+ *  - Three.js + cannon-es via importmap (CDN com fallback)
+ *  - FlirCode parser + runtime (com if/else/switch/case)
  *  - Física ativa com Conects
  *  - GameUIOverlay com todos os ecrãs
- *  - Câmara do ViewObject ativo (via cameraController embutido)
+ *  - Câmara do ViewObject ativo
  *  - Eventos: onStart, onTick, onCollide, onClick, onChange, etc.
  *
- * O HTML exportado é funcionalmente idêntico ao "Executar Jogo" do editor.
+ * Nota: O HTML usa importmap para carregar three.js e cannon-es.
+ * Requer conexão à internet na primeira execução (CDN jsdelivr).
+ * Para uso 100% offline, copiar three.module.js e cannon-es.js para
+ * a mesma pasta e alterar o importmap para caminhos relativos.
  */
 import { downloadText } from '../helpers'
 import gameRuntimeSource from './gameRuntime.js?raw'
-// cameraController é embutido inline no HTML para garantir compatibilidade
-// (sem precisar de resolver "import * as THREE" no browser).
+import { CAMERA_CONTROLLER_SOURCE } from '../cameraController'
 
 export async function optimizeProject(projectData, options = {}) {
   return JSON.parse(JSON.stringify(projectData))
@@ -25,8 +27,6 @@ export function generateGameHTML(projectData, options = {}) {
   const projectName = options.name || 'Meu Jogo'
   const dataStr = JSON.stringify(projectData)
   // O runtime é embutido como texto (não executado no build) via ?raw
-  // O cameraController é embutido ANTES do runtime para que updateCameraSerialized
-  // esteja disponível quando o runtime executar.
   return `<!DOCTYPE html>
 <html lang="pt">
 <head>
@@ -107,162 +107,25 @@ export function generateGameHTML(projectData, options = {}) {
   <canvas id="game-canvas"></canvas>
   <div id="ui-overlay"></div>
   <div id="debug-console">
-    <div id="debug-header"><span>🐛 Debug</span></div>
+    <div id="debug-header"><span>Debug</span></div>
     <div id="debug-body"></div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+    }
+  }
+  </script>
 
   <script>
     window.__GAME_DATA__ = ${dataStr};
   </script>
 
-  <!-- cameraController embutido para suporte completo a ViewObject (first/third/top/side/none) -->
-  <script>
-    // Pequeno wrapper — extrai apenas as funções necessárias do cameraController.
-    // O código original tem "import * as THREE", que não funciona inline no browser.
-    // Aqui usamos THREE que já está carregado pelo CDN.
-    var resolveActiveView, resolveFollowTarget, updateCamera, updateCameraSerialized, hasCameraTouchZone;
-    (function () {
-      var tmpVec3 = new THREE.Vector3();
-      resolveActiveView = function (conects) {
-        if (!conects || conects.length === 0) return null;
-        var viewConects = conects.filter(function (c) { return c.type === 'ViewObject'; });
-        if (viewConects.length === 0) return null;
-        var followView = viewConects.find(function (c) { return c.followMode && c.followMode !== 'none'; });
-        if (followView) return followView;
-        var playerCam = viewConects.find(function (c) { return c.cameraRole === 'player'; });
-        if (playerCam) return playerCam;
-        var primaryCam = viewConects.find(function (c) { return c.cameraRole === 'primary'; });
-        if (primaryCam) return primaryCam;
-        return viewConects[0];
-      };
-      resolveFollowTarget = function (view, conects) {
-        if (!view) return null;
-        if (view.followTarget) return view.followTarget;
-        if (view.cameraRole === 'player') {
-          var player = (conects || []).find(function (c) { return c.type === 'PersonalObject'; });
-          if (player) return player.instanceId;
-        }
-        return null;
-      };
-      updateCamera = function (camera, view, targetMesh, opts) {
-        opts = opts || {};
-        if (!view) return;
-        var lerpFactor = opts.lerpFactor != null ? opts.lerpFactor : 0.1;
-        var mode = view.followMode || 'none';
-        var dist = view.followDistance != null ? view.followDistance : 6;
-        var height = view.followHeight != null ? view.followHeight : 3;
-        var fov = view.fov;
-        if (fov && camera.fov !== undefined && camera.isPerspectiveCamera) {
-          if (Math.abs(camera.fov - fov) > 0.01) {
-            camera.fov = fov;
-            camera.updateProjectionMatrix();
-          }
-        }
-        if (mode === 'none' || !targetMesh) {
-          var pos = view.position || [5, 4, 6];
-          camera.position.lerp(tmpVec3.set(pos[0], pos[1], pos[2]), lerpFactor);
-          if (view.rotation) {
-            camera.rotation.order = 'YXZ';
-            camera.rotation.x = THREE.MathUtils.lerp(camera.rotation.x, view.rotation[0], lerpFactor);
-            camera.rotation.y = THREE.MathUtils.lerp(camera.rotation.y, view.rotation[1], lerpFactor);
-            camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, view.rotation[2], lerpFactor);
-          } else {
-            camera.lookAt(0, 0, 0);
-          }
-          return;
-        }
-        var tx = targetMesh.position.x, ty = targetMesh.position.y, tz = targetMesh.position.z;
-        if (mode === 'first') {
-          var eyeHeight = height * 0.4;
-          tmpVec3.set(tx, ty + eyeHeight, tz);
-          camera.position.lerp(tmpVec3, Math.min(1, lerpFactor * 2));
-          if (targetMesh.rotation) {
-            camera.rotation.order = 'YXZ';
-            camera.rotation.y = THREE.MathUtils.lerp(camera.rotation.y, targetMesh.rotation.y, lerpFactor);
-            camera.rotation.x = 0;
-            camera.rotation.z = 0;
-          } else {
-            camera.lookAt(tx, ty + eyeHeight, tz - 1);
-          }
-        } else if (mode === 'third') {
-          tmpVec3.set(tx, ty + height, tz + dist);
-          camera.position.lerp(tmpVec3, lerpFactor);
-          camera.lookAt(tx, ty + height * 0.3, tz);
-        } else if (mode === 'top') {
-          tmpVec3.set(tx, ty + dist, tz);
-          camera.position.lerp(tmpVec3, lerpFactor);
-          camera.lookAt(tx, ty, tz);
-        } else if (mode === 'side') {
-          tmpVec3.set(tx + dist, ty + height * 0.5, tz);
-          camera.position.lerp(tmpVec3, lerpFactor);
-          camera.lookAt(tx, ty, tz);
-        } else {
-          var p = view.position || [5, 4, 6];
-          camera.position.lerp(tmpVec3.set(p[0], p[1], p[2]), lerpFactor);
-          camera.lookAt(tx, ty, tz);
-        }
-      };
-      updateCameraSerialized = function (camera, view, targetState, opts) {
-        opts = opts || {};
-        if (!view) return;
-        var lerpFactor = opts.lerpFactor != null ? opts.lerpFactor : 0.1;
-        var mode = view.followMode || 'none';
-        var dist = view.followDistance != null ? view.followDistance : 6;
-        var height = view.followHeight != null ? view.followHeight : 3;
-        if (mode === 'none' || !targetState) {
-          var pos = view.position || [5, 4, 6];
-          camera.position.lerp(tmpVec3.set(pos[0], pos[1], pos[2]), lerpFactor);
-          if (view.rotation) {
-            camera.rotation.order = 'YXZ';
-            camera.rotation.x = THREE.MathUtils.lerp(camera.rotation.x, view.rotation[0], lerpFactor);
-            camera.rotation.y = THREE.MathUtils.lerp(camera.rotation.y, view.rotation[1], lerpFactor);
-            camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, view.rotation[2], lerpFactor);
-          } else {
-            camera.lookAt(0, 0, 0);
-          }
-          return;
-        }
-        var tx = targetState.x, ty = targetState.y, tz = targetState.z;
-        if (mode === 'first') {
-          var eyeHeight = height * 0.4;
-          tmpVec3.set(tx, ty + eyeHeight, tz);
-          camera.position.lerp(tmpVec3, Math.min(1, lerpFactor * 2));
-          if (targetState.rotation) {
-            camera.rotation.order = 'YXZ';
-            camera.rotation.y = THREE.MathUtils.lerp(camera.rotation.y, targetState.rotation.y, lerpFactor);
-            camera.rotation.x = 0;
-            camera.rotation.z = 0;
-          } else {
-            camera.lookAt(tx, ty + eyeHeight, tz - 1);
-          }
-        } else if (mode === 'third') {
-          tmpVec3.set(tx, ty + height, tz + dist);
-          camera.position.lerp(tmpVec3, lerpFactor);
-          camera.lookAt(tx, ty + height * 0.3, tz);
-        } else if (mode === 'top') {
-          tmpVec3.set(tx, ty + dist, tz);
-          camera.position.lerp(tmpVec3, lerpFactor);
-          camera.lookAt(tx, ty, tz);
-        } else if (mode === 'side') {
-          tmpVec3.set(tx + dist, ty + height * 0.5, tz);
-          camera.position.lerp(tmpVec3, lerpFactor);
-          camera.lookAt(tx, ty, tz);
-        } else {
-          var p = view.position || [5, 4, 6];
-          camera.position.lerp(tmpVec3.set(p[0], p[1], p[2]), lerpFactor);
-          camera.lookAt(tx, ty, tz);
-        }
-      };
-      hasCameraTouchZone = function (nx, ny) {
-        return nx > 0.2 && Math.abs(ny) < 0.8;
-      };
-    })();
-  </script>
-
-  <script>
+  <script type="module">
+${CAMERA_CONTROLLER_SOURCE}
 ${gameRuntimeSource}
   </script>
 </body>

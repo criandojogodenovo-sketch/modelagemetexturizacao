@@ -1,62 +1,21 @@
 /**
- * PerformanceStatsOverlay — overlay discreto com FPS, draw calls e objetos visíveis.
+ * PerformanceStatsOverlay — overlay discreto com métricas REAIS de performance.
  *
- * Mostra um pequeno painel no canto superior esquerdo durante o jogo ou
- * pré-visualização. Atualiza a cada 500ms.
+ * Lê dados do store Zustand (perfStats) que são actualizados pelo
+ * usePerformanceTracker dentro do Canvas. Sem RAF próprio, sem estimativas.
  */
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../../store/useStore'
 
 export default function PerformanceStatsOverlay() {
-  const [stats, setStats] = useState({ fps: 0, visibleObjects: 0, totalObjects: 0, drawCalls: 0, triangles: 0 })
-  const [sceneWarnings, setSceneWarnings] = useState([])
-  const frameCountRef = useRef(0)
-  const lastTimeRef = useRef(performance.now())
+  // Selector estreito: só lê perfStats do store
+  const perfStats = useStore((s) => s.perfStats)
   const objects = useStore((s) => s.objects)
   const scenes = useStore((s) => s.scenes)
   const activeSceneId = useStore((s) => s.activeSceneId)
+  const [sceneWarnings, setSceneWarnings] = useState([])
 
-  useEffect(() => {
-    let raf
-    let overlay
-
-    const tick = (now) => {
-      frameCountRef.current++
-      const delta = now - lastTimeRef.current
-      if (delta >= 500) {
-        const fps = Math.round((frameCountRef.current * 1000) / delta)
-        frameCountRef.current = 0
-        lastTimeRef.current = now
-
-        // Contar objetos visíveis na cena ativa
-        const activeScene = scenes.find((s) => s.id === activeSceneId)
-        const totalObjects = (activeScene?.objects || []).length + (activeScene?.conects || []).length
-
-        // Tentar obter draw calls do renderer three.js
-        let drawCalls = 0
-        let triangles = 0
-        const canvas = document.querySelector('canvas')
-        if (canvas) {
-          // Procurar o renderer three.js no canvas
-          const gl = canvas.getContext('webgl2') || canvas.getContext('webgl')
-          if (gl) {
-            // Não há API direta para draw calls sem o renderer three.js
-            // Estimativa baseada em objetos
-            drawCalls = totalObjects
-            triangles = totalObjects * 200 // estimativa
-          }
-        }
-
-        setStats({ fps, visibleObjects: totalObjects, totalObjects, drawCalls, triangles })
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-
-    return () => cancelAnimationFrame(raf)
-  }, [scenes, activeSceneId])
-
-  // Analisar cena para avisos
+  // Analisar cena para avisos (não muda por frame — só quando cena/objetos mudam)
   useEffect(() => {
     const activeScene = scenes.find((s) => s.id === activeSceneId)
     if (!activeScene) return
@@ -65,21 +24,39 @@ export default function PerformanceStatsOverlay() {
     })
   }, [scenes, activeSceneId, objects])
 
-  const fpsColor = stats.fps >= 50 ? '#3fb950' : stats.fps >= 30 ? '#d29922' : '#f85149'
+  // Dados do Performance Core (actualizados a cada 500ms pelo usePerformanceTracker)
+  const fps = perfStats?.fps ?? 0
+  const frameTimeMs = perfStats?.frameTimeMs ?? 0
+  const drawCalls = perfStats?.drawCalls ?? 0
+  const triangles = perfStats?.triangles ?? 0
+  const totalObjects = perfStats?.totalObjects ?? 0
+  const visibleObjects = perfStats?.visibleObjects ?? 0
+  const state = perfStats?.state ?? '—'
+  const geometries = perfStats?.geometries ?? 0
+  const textures = perfStats?.textures ?? 0
+
+  const fpsColor = fps >= 50 ? '#3fb950' : fps >= 30 ? '#d29922' : '#f85149'
+  const stateColor = state === 'HEALTHY' ? '#3fb950' : state === 'WARNING' ? '#d29922' : '#f85149'
 
   return (
     <div className="perf-stats-overlay">
       <div className="perf-stats-line" style={{ color: fpsColor }}>
-        FPS: {stats.fps}
+        FPS: {fps || '—'} {fps > 0 && `(${frameTimeMs.toFixed(1)}ms)`}
       </div>
       <div className="perf-stats-line">
-        Objs: {stats.visibleObjects}
+        Objs: {visibleObjects}/{totalObjects}
       </div>
       <div className="perf-stats-line">
-        Draws: ~{stats.drawCalls}
+        Draws: {drawCalls || '—'}
       </div>
       <div className="perf-stats-line">
-        Tris: ~{stats.triangles.toLocaleString()}
+        Tris: {triangles ? triangles.toLocaleString() : '—'}
+      </div>
+      <div className="perf-stats-line" style={{ color: stateColor }}>
+        State: {state}
+      </div>
+      <div className="perf-stats-line">
+        Geos: {geometries} Tex: {textures}
       </div>
       {sceneWarnings.length > 0 && (
         <div className="perf-stats-warnings">

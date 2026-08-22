@@ -14,6 +14,7 @@
  */
 import * as THREE from 'three'
 import { defaultMaterial } from './primitives'
+import { serializeAnimations } from './animationSerializer'
 
 let workerInstance = null
 
@@ -132,7 +133,11 @@ function reconstructObjectsFromWorkerData(data) {
         bufferGeometry.setAttribute('skinWeight', new THREE.BufferAttribute(new Float32Array(g.skinWeight), 4))
       }
       if (g.indices) {
-        bufferGeometry.setIndex(new THREE.BufferAttribute(new Uint16Array(g.indices) || new Uint32Array(g.indices), 1))
+        // Detectar automaticamente Uint16 vs Uint32 baseado no número de vértices
+        const indexArray = g.positionCount > 65535
+          ? new Uint32Array(g.indices)
+          : new Uint16Array(g.indices)
+        bufferGeometry.setIndex(new THREE.BufferAttribute(indexArray, 1))
       }
       bufferGeometry.computeBoundingBox()
       bufferGeometry.computeBoundingSphere()
@@ -179,12 +184,13 @@ function reconstructObjectsFromWorkerData(data) {
       }
     }
 
-    // Animações (THREE.AnimationClip[] reconstruídos)
+    // Animações — serializar para JSON plain (persistência via localStorage)
     if (threeAnimations && threeAnimations.length > 0) {
-      obj.animations = {}
+      const animDict = {}
       for (const clip of threeAnimations) {
-        obj.animations[clip.name || `anim_${i}`] = clip
+        animDict[clip.name || `anim_${i}`] = clip
       }
+      obj.animations = serializeAnimations(animDict)
     }
 
     return obj

@@ -168,11 +168,11 @@ export default function ConectContextMenu({ conect, sceneId }) {
           <button onClick={() => handleAction('material')}>Material / Propriedades
           </button>
           <button onClick={() => handleAction('child')}>
-            ➕ Criar Conect filho
+Criar Conect filho
           </button>
           {otherConects.length > 0 && (
             <button onClick={() => handleAction('addChild')}>
-              🔗 Adicionar objeto como filho
+Adicionar objeto como filho
               {subMenu === 'addChild' ? ' ▲' : ' ▼'}
             </button>
           )}
@@ -192,7 +192,7 @@ export default function ConectContextMenu({ conect, sceneId }) {
           )}
           {otherConects.length > 0 && (
             <button onClick={() => handleAction('connect')}>
-              🔗 Conectar a outro Conect
+Conectar a outro Conect
               {subMenu === 'connect' ? ' ▲' : ' ▼'}
             </button>
           )}
@@ -233,7 +233,7 @@ export default function ConectContextMenu({ conect, sceneId }) {
           <button onClick={() => handleAction('duplicate')}>Duplicar
           </button>
           <button className="danger" onClick={() => handleAction('delete')}>
-            🗑️ Apagar
+️ Apagar
           </button>
         </div>
       )}

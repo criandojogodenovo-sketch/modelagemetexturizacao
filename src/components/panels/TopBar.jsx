@@ -41,6 +41,7 @@ export default function TopBar() {
   const showHome = useStore((s) => s.showHome)
   const openTerrainEditor = useStore((s) => s.openTerrainEditor)
   const openAnimStudio = useStore((s) => s.openAnimStudio)
+  const openMarketplace = useStore((s) => s.openMarketplace)
 
   const newProject = useStore((s) => s.newProject)
   const undo = useStore((s) => s.undo)
@@ -139,8 +140,17 @@ export default function TopBar() {
   }
 
   const handleFileChange = async (e) => {
-    const file = e.target.files?.[0]
+    const files = e.target.files
+    const file = files?.[0]
     if (!file) return
+
+    // Para GLTF, juntar ficheiros adicionais (.bin, texturas)
+    const additionalFiles = []
+    if (importType === 'gltf' && files.length > 1) {
+      for (let i = 1; i < files.length; i++) {
+        additionalFiles.push(files[i])
+      }
+    }
 
     // Feedback de progresso com mensagens faseadas
     const fileSizeMB = (file.size / 1024 / 1024).toFixed(1)
@@ -174,8 +184,8 @@ export default function TopBar() {
           return await importGLB(file)
         } else if (importType === 'gltf') {
           await new Promise(r => setTimeout(r, 50))
-          setUI({ loading: true, loadingMessage: 'A processar GLTF...' })
-          return await importGLTF(file)
+          setUI({ loading: true, loadingMessage: `A processar GLTF${additionalFiles.length > 0 ? ` + ${additionalFiles.length} ficheiro(s) externo(s)` : ''}...` })
+          return await importGLTF(file, additionalFiles)
         } else if (importType === 'obj') {
           await new Promise(r => setTimeout(r, 50))
           setUI({ loading: true, loadingMessage: 'A processar OBJ...' })
@@ -202,7 +212,12 @@ export default function TopBar() {
 
       importedObjects = result
       importedObjects.forEach((obj) => addImportedObject(obj))
-      toast(`${importedObjects.length} objeto(s) importado(s)`, 'success')
+      toast(
+        importType === 'gltf' && additionalFiles.length > 0
+          ? `${importedObjects.length} objeto(s) importado(s) de GLTF + ${additionalFiles.length} ficheiro(s) externo(s)`
+          : `${importedObjects.length} objeto(s) importado(s)`,
+        'success'
+      )
     } catch (err) {
       toast('Erro ao importar: ' + err.message, 'error')
       console.error('Erro de importação:', err)
@@ -255,6 +270,15 @@ export default function TopBar() {
       >
         <Icon name="film" size={16} />
       </button>
+      <button
+        onClick={openMarketplace}
+        title="Marketplace — assets, jogos e templates"
+        className="icon topbar-hide-mobile"
+        style={{ background: 'var(--accent)', color: 'white' }}
+      >
+        <Icon name="package" size={16} />
+        <span className="hide-mobile">Marketplace</span>
+      </button>
 
       {/* Seletor de modo: Modelagem vs Cena */}
       <AppModeSwitch />
@@ -277,7 +301,7 @@ export default function TopBar() {
         </button>
         <button
           onClick={() => handleImportClick('gltf')}
-          title="Importar GLTF"
+          title="Importar GLTF (selecione .gltf + .bin + texturas em conjunto)"
           className="icon topbar-hide-narrow"
         >
           <span className="hide-mobile">GLTF</span>
@@ -372,6 +396,7 @@ export default function TopBar() {
             showHome,
             openTerrainEditor,
             openAnimStudio,
+            openMarketplace,
           }}
         />
       )}
@@ -395,9 +420,10 @@ export default function TopBar() {
       <input
         ref={fileInputRef}
         type="file"
+        multiple={importType === 'gltf'}
         accept={
           importType === 'glb' ? '.glb,model/gltf-binary' :
-          importType === 'gltf' ? '.gltf,model/gltf+json' :
+          importType === 'gltf' ? '.gltf,.bin,.png,.jpg,.jpeg,.webp,model/gltf+json' :
           importType === 'obj' ? '.obj' :
           importType === 'fbx' ? '.fbx' :
           '.json,application/json'
@@ -445,6 +471,10 @@ function MoreActionsMenu({ onClose, actions }) {
             <span className="mm-icon"><Icon name="film" size={18} /></span>
             <div><div className="mm-label">Estúdio de Animação</div></div>
           </button>
+          <button className="mm-item primary" onClick={() => { actions.openMarketplace(); onClose() }}>
+            <span className="mm-icon"><Icon name="package" size={18} /></span>
+            <div><div className="mm-label">Marketplace</div><div className="mm-desc small muted">Assets, jogos, templates</div></div>
+          </button>
           <div className="mm-divider" />
           <button className="mm-item" onClick={() => { actions.handleSave(); onClose() }}>
             <span className="mm-icon"><Icon name="save" size={18} /></span>
@@ -469,7 +499,10 @@ function MoreActionsMenu({ onClose, actions }) {
           </button>
           <button className="mm-item" onClick={() => { actions.handleImportClick('gltf'); onClose() }}>
             <span className="mm-icon"><Icon name="package" size={18} /></span>
-            <div><div className="mm-label">Importar GLTF</div></div>
+            <div>
+              <div className="mm-label">Importar GLTF</div>
+              <div className="mm-desc small muted">Seleciona .gltf + .bin + texturas em conjunto</div>
+            </div>
           </button>
           <button className="mm-item" onClick={() => { actions.handleImportClick('obj'); onClose() }}>
             <span className="mm-icon"><Icon name="package" size={18} /></span>

@@ -78,6 +78,45 @@ const initialScene = {
     },
     hdri: null, // dataURL do HDRI ou null
   },
+  // Renderização avançada (recursos pesados — off por defeito)
+  renderSettings: {
+    qualityLevel: 'balanced', // performance | balanced | realista | super-realista | hiper-realista
+    flirGI: false,
+    flirAdaptiveMesh: false,
+    shadowOptimizations: true,
+    shadowDistance: 20,
+    shadowMapSize: 1024,
+    vertexAO: false,
+    pom: false,
+    postProcessing: false,
+    waterQuality: 'basic', // basic | professional
+    pixelRatio: 1,
+  },
+  projectName: 'Novo Projeto',
+}
+
+// Níveis de Qualidade Gráfica
+export const QUALITY_PRESETS = {
+  performance: {
+    label: 'Performance (fraco)',
+    settings: { flirGI: false, flirAdaptiveMesh: false, shadowOptimizations: true, shadowDistance: 15, shadowMapSize: 512, vertexAO: false, pom: false, postProcessing: false, waterQuality: 'basic', pixelRatio: 0.75 },
+  },
+  balanced: {
+    label: 'Equilibrado (padrão)',
+    settings: { flirGI: false, flirAdaptiveMesh: false, shadowOptimizations: true, shadowDistance: 20, shadowMapSize: 1024, vertexAO: true, pom: false, postProcessing: false, waterQuality: 'basic', pixelRatio: 1 },
+  },
+  realista: {
+    label: 'Realista',
+    settings: { flirGI: false, flirAdaptiveMesh: true, shadowOptimizations: true, shadowDistance: 30, shadowMapSize: 2048, vertexAO: true, pom: true, postProcessing: false, waterQuality: 'professional', pixelRatio: 1 },
+  },
+  'super-realista': {
+    label: 'Super-Realista',
+    settings: { flirGI: true, flirAdaptiveMesh: true, shadowOptimizations: true, shadowDistance: 40, shadowMapSize: 2048, vertexAO: true, pom: true, postProcessing: true, waterQuality: 'professional', pixelRatio: 1.5 },
+  },
+  'hiper-realista': {
+    label: 'Hiper-Realista',
+    settings: { flirGI: true, flirAdaptiveMesh: true, shadowOptimizations: false, shadowDistance: 60, shadowMapSize: 4096, vertexAO: true, pom: true, postProcessing: true, waterQuality: 'professional', pixelRatio: 2 },
+  },
 }
 
 // Modos da aplicação
@@ -112,6 +151,72 @@ export const MODIFIER_TYPES = {
     defaultParams: { thickness: 0.1 },
     description: 'Dá espessura a uma superfície',
   },
+  bevel: {
+    label: 'Bevel (Chanfro)',
+    icon: 'bevel',
+    defaultParams: { width: 0.05, segments: 2 },
+    description: 'Arredonda arestas e cantos',
+  },
+  displace: {
+    label: 'Displace (Deslocamento)',
+    icon: 'subdivide',
+    defaultParams: { strength: 0.5, scale: 1.0, textureType: 'noise' },
+    description: 'Desloca vértices com base numa textura/noise',
+  },
+  bend: {
+    label: 'Bend (Dobrar)',
+    icon: 'rotate',
+    defaultParams: { angle: 45, axis: 'y' },
+    description: 'Dobra a geometria num ângulo',
+  },
+  twist: {
+    label: 'Twist (Torcer)',
+    icon: 'rotate',
+    defaultParams: { angle: 90, axis: 'y' },
+    description: 'Torce a geometria em torno de um eixo',
+  },
+  taper: {
+    label: 'Taper (Afilar)',
+    icon: 'scale',
+    defaultParams: { amount: 0.5, axis: 'y' },
+    description: 'Afina ou alarga a geometria num eixo',
+  },
+  wireframe: {
+    label: 'Wireframe',
+    icon: 'grid',
+    defaultParams: { thickness: 0.02 },
+    description: 'Converte a malha em wireframe',
+  },
+  remesh: {
+    label: 'Remesh (Voxelizar)',
+    icon: 'cube',
+    defaultParams: { voxelSize: 0.1 },
+    description: 'Reconstrói a malha com voxels uniformes',
+  },
+  smooth: {
+    label: 'Smooth (Suavizar)',
+    icon: 'subdivide',
+    defaultParams: { iterations: 1, factor: 0.5 },
+    description: 'Suaviza a malha por laplaciano',
+  },
+  spherify: {
+    label: 'Spherify (Esferificar)',
+    icon: 'sphere',
+    defaultParams: { factor: 0.5 },
+    description: 'Deforma a malha em direcção a uma esfera',
+  },
+  weld: {
+    label: 'Weld (Fundir Vértices)',
+    icon: 'cube',
+    defaultParams: { threshold: 0.001 },
+    description: 'Fundir vértices próximos (Merge by Distance)',
+  },
+  curve: {
+    label: 'Curve (Deformar em Curva)',
+    icon: 'spline',
+    defaultParams: { curveType: 'sine', amplitude: 0.5, frequency: 1.0 },
+    description: 'Deforma a malha ao longo de uma curva (sine, cosine, twist)',
+  },
 }
 
 // Tipos de operações booleanas
@@ -138,6 +243,8 @@ function newProjectState() {
     uiScreens: [],
     activeUIScreenId: null,
     selectedUIElementId: null,
+    // Bone selecionado (para SkeletonGizmo)
+    selectedBoneId: null,
     // Animation
     animation: {
       playing: false,
@@ -960,6 +1067,9 @@ export const useStore = create(
 
       selectUIElement: (elementId) => set({ selectedUIElementId: elementId }),
 
+      // Selecionar osso (para SkeletonGizmo destacar)
+      selectBone: (boneId) => set({ selectedBoneId: boneId }),
+
       setUIScreenVisible: (screenId, visible) => {
         set((s) => ({
           uiScreens: s.uiScreens.map((sc) =>
@@ -1068,7 +1178,7 @@ export const useStore = create(
             rotation: [0, 0, 0],
             fov: 50,
             near: 0.1,
-            far: 200,
+            far: 2000,
             orthoSize: 5,
           },
           background: null, // null = usar global; otherwise override
@@ -1478,14 +1588,66 @@ export const useStore = create(
 
       perfStatsVisible: false,
       togglePerfStats: () => set((s) => ({ perfStatsVisible: !s.perfStatsVisible })),
+      perfStats: null,
+      setPerfStats: (stats) => set({ perfStats: stats }),
 
       postProcessingOpen: false,
       openPostProcessing: () => set({ postProcessingOpen: true }),
       closePostProcessing: () => set({ postProcessingOpen: false }),
 
+      // Render settings + quality presets
+      setRenderSettings: (patch) => set((s) => ({
+        renderSettings: { ...s.renderSettings, ...patch },
+      })),
+      setQualityLevel: (level) => {
+        const preset = QUALITY_PRESETS[level]
+        if (!preset) return
+        set((s) => ({
+          renderSettings: { ...s.renderSettings, ...preset.settings, qualityLevel: level },
+        }))
+      },
+      setProjectName: (name) => set({ projectName: name }),
+
       animStudioOpen: false,
       openAnimStudio: () => set({ animStudioOpen: true }),
       closeAnimStudio: () => set({ animStudioOpen: false }),
+
+      // Marketplace
+      marketplaceOpen: false,
+      openMarketplace: () => set({ marketplaceOpen: true }),
+      closeMarketplace: () => set({ marketplaceOpen: false }),
+
+      // Hardware Instancing (GPU forests / particles / rocks)
+      instancingPanelOpen: false,
+      openInstancingPanel: () => set({ instancingPanelOpen: true }),
+      closeInstancingPanel: () => set({ instancingPanelOpen: false }),
+
+      // Fase 2 — Construtores Profissionais
+      buildersPanelOpen: false,
+      openBuildersPanel: () => set({ buildersPanelOpen: true }),
+      closeBuildersPanel: () => set({ buildersPanelOpen: false }),
+
+      // Fase 6 — Aba Mecânicas
+      mechanicsPanelOpen: false,
+      openMechanicsPanel: () => set({ mechanicsPanelOpen: true }),
+      closeMechanicsPanel: () => set({ mechanicsPanelOpen: false }),
+
+      // Fase 8 — Gerador de Diálogos
+      dialoguePanelOpen: false,
+      openDialoguePanel: () => set({ dialoguePanelOpen: true }),
+      closeDialoguePanel: () => set({ dialoguePanelOpen: false }),
+
+      // Terrain Sculpt 3D — escultura direta no viewport 3D
+      terrainSculptActive: false,
+      toggleTerrainSculpt: () => set((s) => ({ terrainSculptActive: !s.terrainSculptActive })),
+      setTerrainSculpt: (v) => set({ terrainSculptActive: v }),
+      terrainBrush: { mode: 'raise', size: 8, strength: 0.5, falloff: 'smooth' },
+      setTerrainBrush: (patch) => set((s) => ({ terrainBrush: { ...s.terrainBrush, ...patch } })),
+
+      // Settings
+      settingsPanelOpen: false,
+      openSettingsPanel: () => set({ settingsPanelOpen: true }),
+      closeSettingsPanel: () => set({ settingsPanelOpen: false }),
 
       homeVisible: true,
       showHome: () => set({ homeVisible: true }),
@@ -1563,12 +1725,20 @@ export const useStore = create(
           set({
             objects: scene.objects || [],
             selectedId: null,
-            background: { ...initialScene.background, ...(scene.background || {}) },
-            grid: { ...initialScene.grid, ...(scene.grid || {}) },
-            lights: { ...initialScene.lights, ...(scene.lights || {}) },
+            // Preservar defaults de Modelagem quando o projecto é de Cena
+            // (evita que bg/grid/lights dos demos contaminem o editor de Modelos)
+            background: data.appMode === 'modeling'
+              ? { ...initialScene.background, ...(scene.background || {}) }
+              : initialScene.background,
+            grid: data.appMode === 'modeling'
+              ? { ...initialScene.grid, ...(scene.grid || {}) }
+              : { ...initialScene.grid, visible: true },
+            lights: data.appMode === 'modeling'
+              ? { ...initialScene.lights, ...(scene.lights || {}) }
+              : initialScene.lights,
             scenes: data.scenes || [],
             activeSceneId: data.activeSceneId || (data.scenes && data.scenes[0]?.id) || null,
-            appMode: data.appMode || 'modeling',
+            appMode: data.appMode || (data.scenes && data.scenes.length > 0 ? 'scene' : 'modeling'),
             // P1: limpar state que não é exportado mas deve ser resetado
             selectedConectId: null,
             flirScriptTarget: null,
@@ -1576,6 +1746,9 @@ export const useStore = create(
             // UI screens — só manter se o projeto exportar as suas
             uiScreens: data.uiScreens || [],
             activeUIScreenId: data.uiScreens?.[0]?.id || null,
+            // Render settings + project name (se vierem do projeto)
+            renderSettings: data.renderSettings || get().renderSettings,
+            projectName: data.projectName || get().projectName,
             // History — limpar (não desfazer para o projeto anterior)
             past: [],
             future: [],
@@ -1615,8 +1788,10 @@ export const useStore = create(
         appMode: state.appMode,
         uiScreens: state.uiScreens,
         activeUIScreenId: state.activeUIScreenId,
+        renderSettings: state.renderSettings,
+        projectName: state.projectName,
       }),
-      version: 3,
+      version: 4,
     }
   )
 )

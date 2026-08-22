@@ -12,7 +12,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useStore } from '../../store/useStore'
 import { listProjects, loadProject, deleteProject } from '../../utils/db'
+import { flirQuestArenaJSON } from '../../utils/game/flirQuestArena'
+import { flirQuestSagaJSON } from '../../utils/game/flirQuestSaga'
 import Ebook from './Ebook'
+import { Icon } from '../ui/iconMap'
 
 export default function HomePage({ onOpenProject }) {
   const [projects, setProjects] = useState([])
@@ -83,6 +86,28 @@ export default function HomePage({ onOpenProject }) {
     toast('Projeto apagado', 'info')
   }
 
+  // Carregar jogo demo "FlirQuest Arena" (FPS 3D completo)
+  const handleLoadDemo = () => {
+    try {
+      loadProjectJSON(flirQuestArenaJSON)
+      toast('FlirQuest Arena carregado em modo Cena. Clica em ▶ Play para jogar.', 'success', 5000)
+      onOpenProject?.()
+    } catch (err) {
+      toast('Erro ao carregar demo: ' + err.message, 'error')
+    }
+  }
+
+  // Carregar jogo profissional "FlirQuest Saga" (RPG/FPS completo)
+  const handleLoadSaga = () => {
+    try {
+      loadProjectJSON(flirQuestSagaJSON)
+      toast('FlirQuest Saga carregado em modo Cena. Clica em ▶ Play para jogar.', 'success', 5000)
+      onOpenProject?.()
+    } catch (err) {
+      toast('Erro ao carregar Saga: ' + err.message, 'error')
+    }
+  }
+
   if (showEbook) {
     return <Ebook onClose={() => setShowEbook(false)} />
   }
@@ -97,7 +122,9 @@ export default function HomePage({ onOpenProject }) {
             <p className="muted">Cria jogos 3D mobile no navegador — sem instalar nada</p>
           </div>
         </div>
-        <button className="home-ebook-btn" onClick={() => setShowEbook(true)}>Ebook Interativo
+        <button className="home-ebook-btn" onClick={() => setShowEbook(true)}>
+          <Icon name="book" size={14} />
+          <span>Ebook Interativo</span>
         </button>
       </header>
 
@@ -106,10 +133,21 @@ export default function HomePage({ onOpenProject }) {
           <div className="home-section-header">
             <h2>Os meus projetos</h2>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <button onClick={handleOpenFlirEngine} title="Abrir projeto .flirengine">Abrir
+              <button onClick={handleOpenFlirEngine} title="Abrir projeto .flirengine">
+                <Icon name="folder-open" size={12} />
+                <span>Abrir</span>
+              </button>
+              <button onClick={handleLoadDemo} title="Carregar jogo demo FPS 3D" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                <Icon name="gamepad-2" size={12} />
+                <span>Demo FPS</span>
+              </button>
+              <button onClick={handleLoadSaga} title="Carregar RPG/FPS profissional completo (2 cenas, BOSS, etc.)" style={{ background: '#7c3aed', color: 'white' }}>
+                <Icon name="sword" size={12} />
+                <span>RPG Saga</span>
               </button>
               <button className="primary" onClick={handleNew}>
-                + Novo Projeto
+                <Icon name="plus" size={12} />
+                <span>Novo Projeto</span>
               </button>
             </div>
           </div>
@@ -121,7 +159,10 @@ export default function HomePage({ onOpenProject }) {
               <div className="home-empty-icon"></div>
               <h3>Sem projetos ainda</h3>
               <p className="muted">Cria o teu primeiro jogo 3D mobile.</p>
-              <button className="primary" onClick={handleNew}>Criar agora</button>
+              <button className="primary" onClick={handleNew}>
+                <Icon name="plus" size={12} />
+                <span>Criar agora</span>
+              </button>
             </div>
           ) : (
             <div className="projects-grid">
@@ -142,7 +183,7 @@ export default function HomePage({ onOpenProject }) {
                       onClick={() => handleDelete(p.id)}
                       title="Apagar"
                     >
-                      🗑️
+                      <Icon name="trash" size={12} />
                     </button>
                   </div>
                 </div>
@@ -155,22 +196,22 @@ export default function HomePage({ onOpenProject }) {
           <h2>Começa aqui</h2>
           <div className="home-features">
             <div className="feature-card">
-              <span className="feature-icon">🧊</span>
+              <span className="feature-icon"><Icon name="cube" size={24} /></span>
               <h3>Modelagem</h3>
               <p>Cria formas 3D, edita vértices, aplica texturas e materiais.</p>
             </div>
             <div className="feature-card">
-              <span className="feature-icon"></span>
+              <span className="feature-icon"><Icon name="layers" size={24} /></span>
               <h3>Cenas</h3>
               <p>Monta níveis com objetos, iluminação, física e câmaras.</p>
             </div>
             <div className="feature-card">
-              <span className="feature-icon"></span>
+              <span className="feature-icon"><Icon name="puzzle" size={24} /></span>
               <h3>FlirScript</h3>
               <p>Programa lógica de jogo com nós visuais (estilo Blueprints).</p>
             </div>
             <div className="feature-card">
-              <span className="feature-icon"></span>
+              <span className="feature-icon"><Icon name="gamepad-2" size={24} /></span>
               <h3>Exportar</h3>
               <p>Gera um jogo standalone jogável em qualquer browser ou APK.</p>
             </div>
@@ -180,13 +221,13 @@ export default function HomePage({ onOpenProject }) {
         <section className="home-section">
           <div className="ebook-banner" onClick={() => setShowEbook(true)}>
             <div className="ebook-banner-content">
-              <span className="ebook-banner-icon"></span>
+              <span className="ebook-banner-icon"><Icon name="book" size={28} /></span>
               <div>
                 <h3>Ebook Interativo da Engine</h3>
                 <p className="muted">Aprende tudo sobre a engine com guias visuais e exemplos.</p>
               </div>
             </div>
-            <span className="ebook-banner-cta">Abrir →</span>
+            <span className="ebook-banner-cta">Abrir <Icon name="chevron-right" size={14} /></span>
           </div>
         </section>
       </div>

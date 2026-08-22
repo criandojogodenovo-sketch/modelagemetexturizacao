@@ -185,12 +185,20 @@ function parseSimpleStatement(text, lineNum, errors) {
   let m = text.match(/^var\s+(\w+)\s*=\s*(.+)$/)
   if (m) return { type: 'var', name: m[1], value: parseValue(m[2]), line: lineNum }
 
-  // if (cond) begincode
+  // if (cond) begincode — na mesma linha
   m = text.match(/^if\s*\((.+)\)\s*begincode$/)
+  if (m) return { type: 'if', condition: m[1], line: lineNum }
+
+  // if (cond) — sem begincode (begincode está na linha seguinte)
+  m = text.match(/^if\s*\((.+)\)$/)
   if (m) return { type: 'if', condition: m[1], line: lineNum }
 
   // else if (cond) begincode
   m = text.match(/^else\s+if\s*\((.+)\)\s*begincode$/)
+  if (m) return { type: 'elseif', condition: m[1], line: lineNum }
+
+  // else if (cond) — sem begincode
+  m = text.match(/^else\s+if\s*\((.+)\)$/)
   if (m) return { type: 'elseif', condition: m[1], line: lineNum }
 
   // else begincode
@@ -243,6 +251,26 @@ function parseStatement(lines, idx, errors) {
   if (!stmt) return null
   // Se o statement abre um bloco (if, repeat, etc.), parsear o corpo
   if (['if', 'elseif', 'else', 'repeat_n', 'repeat_inc', 'repeat_dec', 'switch', 'case', 'default'].includes(stmt.type)) {
+    // Se a linha atual não termina com 'begincode', procurar na linha seguinte
+    let bodyStartIdx = idx + 1
+    if (!lines[idx].text.endsWith('begincode')) {
+      // Procurar 'begincode' nas linhas seguintes (skip vazias/comentários já removidas)
+      while (bodyStartIdx < lines.length && lines[bodyStartIdx].text !== 'begincode') {
+        bodyStartIdx++
+      }
+      if (bodyStartIdx >= lines.length) {
+        errors.push({ line: lines[idx].line, message: 'begincode não encontrado após ' + stmt.type })
+        return { ...stmt, body: [], nextIdx: idx + 1 }
+      }
+      // bodyStartIdx aponta para 'begincode' — parseBlock começa em bodyStartIdx + 1
+      const body = parseBlock(lines, bodyStartIdx + 1, errors)
+      if (body.error) {
+        errors.push({ line: lines[idx].line, message: body.error })
+        return { ...stmt, body: [], nextIdx: body.nextIdx }
+      }
+      return { ...stmt, body: body.statements, nextIdx: body.nextIdx }
+    }
+    // Linha termina com begincode — parseBlock começa em idx + 1
     const body = parseBlock(lines, idx + 1, errors)
     if (body.error) {
       errors.push({ line: lines[idx].line, message: body.error })
@@ -259,6 +287,37 @@ function parseValue(text) {
   // String
   if (text.startsWith('"') && text.endsWith('"')) {
     return { type: 'string', value: text.slice(1, -1) }
+  }
+  // Expressão aritmética: 5+3, 10-2, 4*2, 8/2, 10%3
+  // Detecta operadores aritméticos com números ou variáveis
+  const arithMatch = text.match(/^(-?\d+(?:\.\d+)?)\s*([+\-*/%])\s*(-?\d+(?:\.\d+)?)$/)
+  if (arithMatch) {
+    return {
+      type: 'arith',
+      left: { type: 'number', value: parseFloat(arithMatch[1]) },
+      op: arithMatch[2],
+      right: { type: 'number', value: parseFloat(arithMatch[3]) },
+    }
+  }
+  // Aritmética com variável: var+5, var-2, var*3, etc.
+  const arithVarMatch = text.match(/^(\w+)\s*([+\-*/%])\s*(-?\d+(?:\.\d+)?)$/)
+  if (arithVarMatch && !arithVarMatch[1].startsWith('"')) {
+    return {
+      type: 'arith',
+      left: { type: 'var', name: arithVarMatch[1] },
+      op: arithVarMatch[2],
+      right: { type: 'number', value: parseFloat(arithVarMatch[3]) },
+    }
+  }
+  // Aritmética com número à direita: 5+var, 10-var
+  const arithVarMatch2 = text.match(/^(-?\d+(?:\.\d+)?)\s*([+\-*/%])\s*(\w+)$/)
+  if (arithVarMatch2 && !arithVarMatch2[3].startsWith('"')) {
+    return {
+      type: 'arith',
+      left: { type: 'number', value: parseFloat(arithVarMatch2[1]) },
+      op: arithVarMatch2[2],
+      right: { type: 'var', name: arithVarMatch2[3] },
+    }
   }
   // Expressão com concatenação (+) — suporta "string" + var + "string" + ...
   // Não divide dentro de strings (respeita aspas)
@@ -277,7 +336,6 @@ function parseValue(text) {
   // Sistema 2: 'this' refere-se ao próprio objeto (instanceId)
   if (text === 'this') return { type: 'this' }
   // Chamada de função embutida como valor: identifier(args)
-  // Ex: getVar("teste"), distanceTo("Cubo"), collidingWith("tipo"), isTouching(), getUIValue("nome")
   const callMatch = text.match(/^(\w+)\s*\(([^)]*)\)$/)
   if (callMatch) {
     const funcName = callMatch[1]
@@ -388,17 +446,27 @@ export function createFlirCodeRuntime(source, gameContext) {
       case 'number': return val.value
       case 'string': return val.value
       case 'boolean': return val.value
-      case 'this': return gameContext._instanceId // Sistema 2: this = próprio objeto
+      case 'this': return gameContext._instanceId
       case 'concat': return val.parts.map((p) => {
         const v = evalValue(p)
         return v === null || v === undefined ? '' : String(v)
       }).join('')
+      case 'arith': {
+        const l = Number(evalValue(val.left))
+        const r = Number(evalValue(val.right))
+        switch (val.op) {
+          case '+': return l + r
+          case '-': return l - r
+          case '*': return l * r
+          case '/': return r !== 0 ? l / r : 0
+          case '%': return r !== 0 ? l % r : 0
+          default: return 0
+        }
+      }
       case 'call_value': {
-        // Avaliar a função embutida e retornar o resultado
         return execBuiltin(val.funcName, val.args, {})
       }
       case 'var': {
-        // Primeiro procura em localVars, depois em globalVars (via getVar)
         if (val.name in localVars) return localVars[val.name]
         const gv = gameContext.getVar?.(val.name)
         return gv ?? 0
@@ -429,11 +497,27 @@ export function createFlirCodeRuntime(source, gameContext) {
   // Executar uma lista de statements
   function execStatements(statements, params = {}) {
     for (const stmt of statements) {
+      // wait() — se _waitUntil está no futuro, as linhas seguintes são adiadas
+      if (gameContext._waitUntil && Date.now() < gameContext._waitUntil) {
+        // Adiar as statements restantes via setTimeout
+        const remaining = statements.slice(statements.indexOf(stmt) + 1)
+        if (remaining.length > 0) {
+          const delay = gameContext._waitUntil - Date.now()
+          gameContext._waitUntil = 0 // reset
+          setTimeout(() => {
+            execStatements(remaining, params)
+          }, delay)
+        }
+        return // parar execução síncrona aqui
+      }
+      // Resetar _waitUntil se já passou
+      if (gameContext._waitUntil && Date.now() >= gameContext._waitUntil) {
+        gameContext._waitUntil = 0
+      }
       try {
         execStatement(stmt, params)
       } catch (err) {
         debugLog(`Erro ao executar (linha ${stmt.line}): ${err.message}`, 'error', 'FlirCode')
-        // Não travar — continuar
       }
     }
   }
@@ -587,16 +671,13 @@ export function createFlirCodeRuntime(source, gameContext) {
         gameContext.changeScene?.(evaluatedArgs[0])
         break
       case 'wait': {
-        // wait(seconds) — implementa um delay real via setTimeout
-        // Como FlirCode é síncrono, o wait só afeta a chamada atual:
-        // regista o delay e o runtime processa ações pendentes após o tempo
+        // wait(seconds) — atrasa a execução das linhas seguintes
+        // Implementação: marca o timestamp de próxima execução
+        // O runtime verifica _waitUntil antes de executar a próxima linha
         const delayMs = (evaluatedArgs[0] || 0) * 1000
         debugLog('wait(' + evaluatedArgs[0] + 's) — aguardando', 'log', 'FlirCode')
-        // Usar Atomics.wait para um sleep síncrono não-bloqueante em worker
-        // Como não estamos em worker, usar setTimeout com flag
-        if (gameContext._waitQueue) {
-          gameContext._waitQueue.push(delayMs)
-        }
+        if (gameContext._waitUntil === undefined) gameContext._waitUntil = 0
+        gameContext._waitUntil = Date.now() + delayMs
         break
       }
       case 'setVar':
