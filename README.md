@@ -4,6 +4,72 @@ Engine web de modelagem, texturização, animação e edição de cenas 3D — f
 
 > Todo o código corre 100% no browser (client-side). Não há backend obrigatório. Instalável como app no telemóvel/desktop.
 
+## 🚀 Sessão de Auditoria + Melhorias Maiores (Nov 2025)
+
+Esta sessão realizou uma auditoria exaustiva (4 subagentes em paralelo) cobrindo **todos os ficheiros** em `src/`, `api/` e `public/`. Relatório completo em `worklog.md` (Task IDs: AUDIT-1, AUDIT-2, AUDIT-3, AUDIT-4). Identificados **~280 issues** (38 P0, 49 P1, 64 P2, 19+ P3) e implementadas as seguintes correções prioritárias:
+
+### ✅ Bug Crítico: Câmara do ViewObject Corrigida
+- Criado `src/utils/cameraController.js` (centralizado, ~270 linhas) com:
+  - `resolveActiveView(conects)` — prioriza ViewObject com `followMode !== 'none'`, depois `cameraRole='player'`, `primary`, qualquer
+  - `resolveFollowTarget(view, conects)` — resolve alvo de follow (PersonalObject automático)
+  - `updateCamera(camera, view, targetMesh, opts)` — aplica transform com todos os modos
+  - `updateCameraSerialized(...)` — versão para runtime exportado
+  - **Modos suportados**: `none` | `first` (NEW!) | `third` | `top` | `side`
+- `SceneLevel3D.jsx` agora usa o controller (em vez de inline)
+- `gameRuntime.js` + `gameExporter.js` embutido o controller inline no HTML exportado — resolve a divergência editor vs runtime
+- **First-person mode** agora funciona: câmara nos olhos do jogador, com yaw herdado do mesh
+
+### ✅ Aba de Construtores Restaurada
+- `buildersPanelOpen` / `openBuildersPanel` / `closeBuildersPanel` / `toggleBuildersPanel` adicionados ao store
+- `BuildersPanel` importado e renderizado em `App.jsx`
+- Botão "Construtores" adicionado ao `MoreToolsGrid` (categoria Painéis)
+- Painel abre como drawer lateral esquerdo
+
+### ✅ UI/UX (Parte C — estilo Unreal/Godot/ItsMagic)
+- **Snapping** (Blender/Unreal): `SnappingControls.jsx` no TopBar, com seletor de grade (0.1/0.25/0.5/1/2/5). Ações `snapValue(v, type)` no store.
+- **Autosave inteligente** (ItsMagic): `useAutosave` hook + `AutosaveIndicator.jsx` no TopBar. Dirty flag + save a cada 5s no IndexedDB. Toast "💾 Guardado automaticamente".
+- **Debug Overlay** (Godot): `DebugOverlay.jsx` mostra FPS, frame time, scene info, conects, physics bodies, player position, view ativo. Toggle com **F3**.
+- **Layers** (Godot): `activeLayer` state + `setActiveLayer(layer)` no store.
+- **Hotkey Toolbar flutuante** (Blender): `HotkeyToolbar.jsx` no viewport com [Mover] [Rodar] [Escalar] | [Extrude] [Inset] [Bevel] | [Snap] [Grid].
+
+### ✅ Modelagem Profissional (Parte D)
+- **Escultura Avançada** (`src/utils/sculptBrush.js`, 348 linhas): 9 pincéis ZBrush-style — Grab, Clay, Smooth, Flatten, Inflate, Pinch, Mask, Crease, Symmetry (mirror X configurável). Falloff quadrático `(1-d/r)^2`. Mask persistente. Vizinhança topológica para smooth laplaciano.
+- **Retopologia** (`src/utils/retopo.js`, 558 linhas): Decimate (vertex clustering), Remesh (Marching Cubes implementado via three/addons), Quad Remesh (merge triangle pairs), Fill Holes (open edge loop detection + fan triangulation), Clean Up (remove duplicates/degenerate).
+- **Soft Selection** (`src/utils/softSelect.js`, 184 linhas): `computeSoftSelection` (linear/smooth/sharp falloff), `applySoftTransform` (translate/rotate/scale weighted).
+- **Loop Tools** (`src/utils/loopTools.js`, 581 linhas): `findEdgeLoop`, `findFaceLoop`, `bridgeLoops`, `fillHole`, `gridFill`, `edgeLoopSubdivide`, `connectVertices`, `dissolveEdges`, `edgeCollapse`.
+- **UV Editor** (`src/components/panels/UVEditor.jsx`, 357 linhas): viewport 2D canvas 512x512, ferramentas Select/Move/Rotate/Scale/Pan, unwrap Planar/Box/Spherical/Cylindrical (este último adicionado a `meshOperations.unwrapUV`), islands via Union-Find.
+
+### ✅ Construtores Realistas (Parte E)
+Substituição dos construtores "caixas+cores" por modelos detalhados com PBR real:
+
+| Builder | Função | Detalhes |
+|---|---|---|
+| **Casa** | `generateHouse({ style, floors, width, depth, floorHeight, wallColor, roofColor })` | Fundação, 4 paredes, janelas recuadas com molduras, porta com maçaneta, telhado (flat/gabled/pitched), chaminé (classic/cottage). Materiais PBR: vidro transmission=1.0 ior=1.45, madeira roughness=0.4 |
+| **Carro** | `generateCar({ type, color, wheelSize })` | Chassis + cabine (sedan/suv/sports/truck), 4 rodas com jantes cromadas, faróis emissivos brancos, luzes traseiras emissivas vermelhas, vidros com transmission, bumpers. Car paint: clearcoat=1.0, metalness=0.8, roughness=0.15 |
+| **Árvore** | `generateTree({ type, height, trunkRadius, foliageColor })` | Tronco cônico com jitter (casca), folhagem: oak=5 esferas, pine=4 cones, palm=esferas achatadas. Sheen=0.3 |
+| **Mobiliário** | `generateFurniture({ type, color })` | chair/table/sofa/bed com peças modulares. Madeira roughness=0.6, tecido roughness=0.8 sheen=0.5 |
+| **Cidade** | `generateCity({ blocks, buildingsPerBlock, streetWidth })` | Gera array de casas + postes de luz emissivos em esquinas |
+| **Interior** | `generateInterior({ roomWidth, roomDepth, roomHeight, style })` | Paredes com abertura de porta, piso, teto, rodapés, cama+mesa+cadeira+tapete |
+
+`BuildersPanel.jsx` totalmente reescrito com 6 secções e controles paramétricos.
+
+### 📊 Resumo de Ficheiros
+- **Novos utilitários** (8): cameraController, sculptBrush, retopo, softSelect, loopTools, proceduralBuilders/{_helpers, houseBuilder, carBuilder, treeBuilder, furnitureBuilder, cityBuilder, interiorBuilder}
+- **Novos componentes** (5): UVEditor, SnappingControls, AutosaveIndicator, DebugOverlay, HotkeyToolbar
+- **Novo hook** (1): useAutosave
+- **Modificados** (9): App.jsx, SceneLevel3D.jsx, TopBar.jsx, MoreToolsGrid.jsx, BuildersPanel.jsx, useStore.js, gameRuntime.js, gameExporter.js, meshOperations.js
+
+### 🚨 Auditoria — Problemas Conhecidos (não resolvidos nesta sessão)
+- **gameRuntime.js** exportado tem FlirCode parser broken para `if/else/switch/repeat_*` — scripts complexos podem falhar silenciosamente no export
+- **NPC AI** não funcional no editor (movePersonal rejeita NpcObject)
+- **24+ conects do taxonomy** não têm runtime effect no export (SunObject, ParticleObject, TriggerObject, JointObject, etc.)
+- **Memory leaks** em `poseCache` (animationPlayer) e `paintTextures` Map (texturePaint) sem eviction
+- **Security**: db.js (marketplace) tem Neon connection string hardcoded + sha256 sem salt em auth/login.js + 3 innerHTML em gameRuntime.js
+
+Detalhes completos em `worklog.md` (Task IDs: AUDIT-1/2/3/4).
+
+---
+
 ## 🆕 Fase 1 — PWA + Editor de Cenas
 
 ### PWA instalável e offline

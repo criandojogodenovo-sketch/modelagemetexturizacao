@@ -25,6 +25,7 @@ import { createFlirCodeRuntime } from '../../utils/flirscript/flircode'
 import { createAnimationPlayer } from '../../utils/animationPlayer'
 import { createNPCAI } from '../../utils/conects/npcAI'
 import { debugLog } from '../../utils/debug/debugStore'
+import { resolveActiveView, resolveFollowTarget, updateCamera } from '../../utils/cameraController'
 
 function PlayerMarker({ position }) {
   return (
@@ -497,39 +498,22 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       }
     }
 
-    // Câmara: ViewObject ativa
-    const viewConects = (activeScene.conects || []).filter((c) => c.type === 'ViewObject')
-    const activeView = viewConects.find((c) => c.cameraRole === 'player') || viewConects.find((c) => c.cameraRole === 'primary') || viewConects[0]
+    // Câmara: ViewObject ativa — via cameraController centralizado
+    const conects = activeScene.conects || []
+    const activeView = resolveActiveView(conects)
     if (activeView) {
-      // Se cameraRole='player' e não tem followTarget, seguir PersonalObject
-      let targetId = activeView.followTarget
-      if (!targetId && activeView.cameraRole === 'player') {
-        const player = (activeScene.conects || []).find((c) => c.type === 'PersonalObject')
-        if (player) targetId = player.instanceId
-      }
-      if (targetId && activeView.followMode && activeView.followMode !== 'none') {
-        const targetMesh = meshRefs.current.get(targetId) || conectMeshRefs.current.get(targetId)
-        if (targetMesh) {
-          const mode = activeView.followMode
-          const dist = activeView.followDistance || 6
-          const height = activeView.followHeight || 3
-          if (mode === 'third') {
-            camera.position.lerp(new THREE.Vector3(targetMesh.position.x, targetMesh.position.y + height, targetMesh.position.z + dist), 0.1)
-            camera.lookAt(targetMesh.position)
-          } else if (mode === 'top') {
-            camera.position.lerp(new THREE.Vector3(targetMesh.position.x, targetMesh.position.y + dist, targetMesh.position.z), 0.1)
-            camera.lookAt(targetMesh.position)
-          } else if (mode === 'side') {
-            camera.position.lerp(new THREE.Vector3(targetMesh.position.x + dist, targetMesh.position.y + height / 2, targetMesh.position.z), 0.1)
-            camera.lookAt(targetMesh.position)
-          }
+      const targetId = resolveFollowTarget(activeView, conects)
+      const targetMesh = targetId
+        ? (meshRefs.current.get(targetId) || conectMeshRefs.current.get(targetId))
+        : null
+      // Aplicar FOV do ViewObject (se definido e diferente)
+      if (activeView.fov && camera.fov !== undefined && camera.isPerspectiveCamera) {
+        if (Math.abs(camera.fov - activeView.fov) > 0.01) {
+          camera.fov = activeView.fov
+          camera.updateProjectionMatrix()
         }
-      } else {
-        // Câmara estática na posição da ViewObject
-        camera.position.set(...(activeView.position || [5, 4, 6]))
-        if (activeView.rotation) camera.rotation.set(...activeView.rotation)
-        else camera.lookAt(0, 0, 0)
       }
+      updateCamera(camera, activeView, targetMesh, { lerpFactor: 0.1 })
     }
   })
 

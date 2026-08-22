@@ -1371,6 +1371,106 @@ export const useStore = create(
       openTerrainEditor: () => set({ terrainEditorOpen: true }),
       closeTerrainEditor: () => set({ terrainEditorOpen: false }),
 
+      // Construtores procedurais (edifícios, veículos, etc.)
+      buildersPanelOpen: false,
+      openBuildersPanel: () => set({ buildersPanelOpen: true }),
+      closeBuildersPanel: () => set({ buildersPanelOpen: false }),
+      toggleBuildersPanel: () => set((s) => ({ buildersPanelOpen: !s.buildersPanelOpen })),
+
+      // UV Editor (D5) — abre o editor de UVs para o objeto selecionado
+      uvEditorOpen: false,
+      openUVEditor: () => set({ uvEditorOpen: true }),
+      closeUVEditor: () => set({ uvEditorOpen: false }),
+
+      // Substitui as UVs de um objeto — usado pelo UVEditor para guardar transformações
+      // Se o objeto tem customGeometry, atualiza uvs; caso contrário cria customGeometry
+      // a partir da geometria atual (primitiva ou importada).
+      setObjectUVs: (id, uvs) => {
+        const obj = get().objects.find((o) => o.id === id)
+        if (!obj) return
+        get()._pushHistory()
+
+        // Se já tem customGeometry, só substituir uvs
+        if (obj.customGeometry) {
+          set((s) => ({
+            objects: s.objects.map((o) =>
+              o.id === id
+                ? { ...o, customGeometry: { ...o.customGeometry, uvs: Array.from(uvs) } }
+                : o
+            ),
+          }))
+          return
+        }
+
+        // Caso contrário: construir geometria atual e serializar tudo
+        let geometry
+        if (obj.imported && obj.bufferGeometry) {
+          geometry = obj.bufferGeometry.clone()
+        } else {
+          const def = PRIMITIVES[obj.type]
+          geometry = def ? def.build(THREE, obj.args) : new THREE.BoxGeometry(1, 1, 1)
+        }
+        if (!geometry.getAttribute('normal')) geometry.computeVertexNormals()
+        const positions = Array.from(geometry.getAttribute('position').array)
+        const normals = geometry.getAttribute('normal')
+          ? Array.from(geometry.getAttribute('normal').array)
+          : null
+        set((s) => ({
+          objects: s.objects.map((o) =>
+            o.id === id
+              ? {
+                  ...o,
+                  customGeometry: {
+                    positions,
+                    normals,
+                    uvs: Array.from(uvs),
+                  },
+                }
+              : o
+          ),
+        }))
+      },
+
+      // ===== Snapping (Part C — Blender/Unreal-style) =====
+      snapEnabled: false,
+      snapSize: 0.5, // 0.1 | 0.25 | 0.5 | 1 | 2 | 5
+      snapRotationStep: 15, // graus
+      toggleSnap: () => set((s) => ({ snapEnabled: !s.snapEnabled })),
+      setSnapSize: (size) => set({ snapSize: size }),
+      setSnapRotationStep: (deg) => set({ snapRotationStep: deg }),
+      // Aplica snapping a um valor (genérico)
+      snapValue: (v, type = 'translate') => {
+        const { snapEnabled, snapSize, snapRotationStep } = get()
+        if (!snapEnabled) return v
+        if (type === 'rotate') {
+          const step = snapRotationStep * Math.PI / 180
+          return Math.round(v / step) * step
+        }
+        if (type === 'scale') {
+          return Math.max(0.01, Math.round(v / snapSize) * snapSize)
+        }
+        return Math.round(v / snapSize) * snapSize
+      },
+
+      // ===== Autosave inteligente (Part C — ItsMagic-style) =====
+      autosave: {
+        dirty: false,           // true quando há alterações não guardadas
+        saving: false,          // true durante o save
+        lastSavedAt: null,      // timestamp do último save
+      },
+      markDirty: () => set((s) => ({ autosave: { ...s.autosave, dirty: true } })),
+      markSaving: () => set((s) => ({ autosave: { ...s.autosave, saving: true } })),
+      markSaved: () => set((s) => ({ autosave: { ...s.autosave, dirty: false, saving: false, lastSavedAt: Date.now() } })),
+
+      // ===== Debug Overlay no Play Mode (Part C — Godot-style) =====
+      debugOverlayVisible: false,
+      toggleDebugOverlay: () => set((s) => ({ debugOverlayVisible: !s.debugOverlayVisible })),
+
+      // ===== Layers (Part C — Godot-style) =====
+      // Layers permitem organizar conects/objetos por categoria
+      activeLayer: 'all', // 'all' | 'world' | 'gameplay' | 'ui' | 'effects' | 'audio'
+      setActiveLayer: (layer) => set({ activeLayer: layer }),
+
       // Fase 5: Multiplayer + Performance + Post-processing
       multiplayerPanelOpen: false,
       openMultiplayerPanel: () => set({ multiplayerPanelOpen: true }),

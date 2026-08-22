@@ -832,3 +832,1873 @@ Stage Summary:
 - Material Editor com 13 sliders PBR (anisotropy, IOR, transmission, clearcoat, sheen, specular, etc.)
 - Guia de fluxo PBR completo no editor
 - Push: NÃO realizado (próximo passo)
+
+---
+Task ID: AUDIT-1
+Agent: audit-ui
+Task: Auditar componentes React e UI (panels, 3d, ui, home, App.jsx, main.jsx, hooks/) — identificar dead code, bugs lógicos, memory leaks, divergências editor↔runtime, problemas de performance, segurança, placeholders e responsividade.
+
+Work Log:
+- Lido /home/z/my-project/worklog.md (835 linhas, contexto P1..P7) e mapeada a estrutura do projeto
+- Verificada a existência de todos os ficheiros em /home/z/my-project/src/components/{panels,3d,ui,home}/, /home/z/my-project/src/App.jsx, /home/z/my-project/src/main.jsx, /home/z/my-project/src/hooks/
+- Auditados individualmente os 30+ componentes e os 3 hooks via Read e Grep
+- Verificadas referências de imports (quem importa quem) e funções do store (openClassesPanel, openTexturingPanel, openSettingsPanel, buildersPanelOpen, setBuildersPanelOpen — todas inexistentes)
+- Cruzadas as dependências de estado do store em useStore.js com os painéis que as consomem
+- Verificadas chamadas a addEventListener/setTimeout/setInterval e respectivos cleanups
+- Verificadas disposições de geometria/material/texture em SceneObject.jsx, ConectRenderer.jsx
+- Verificadas violações de regras de hooks em ConectRenderer.jsx (useEffect condicional)
+- Verificado o uso correto de dangerouslySetInnerHTML com escape HTML em FlirCodeEditor.jsx
+
+Stage Summary:
+- 38 issues identificados (4 P0, 9 P1, 17 P2, 8 P3)
+- Bugs críticos: MainMenu chama 3 store actions que NÃO existem (openClassesPanel/openTexturingPanel/openSettingsPanel); 3 painéis (ClassesPanel/TexturingPanel/SettingsPanel) estão definidos mas NÃO são importados em App.jsx; VerticalRail.jsx não existe no projeto principal; BuildersPanel.jsx está definido mas nunca importado; UIEditor recebem `onClose` que ignoram (utilizador fica preso no modal); ConectRenderer viola regras de hooks (useEffect condicional); MultiplayerPanel nunca remove os listeners do singleton (memory leak); SceneObject tem textureCache module-level sem eviction.
+- Dead code confirmado: SkeletonEditor.jsx, WeightPaintPanel.jsx, BuildersPanel.jsx, ColliderGizmo.jsx, SkeletonGizmo.jsx nunca são importados em lado nenhum
+- Imports não usados: useState em MainMenu.jsx; useState em RightPanel.jsx; useState/useRef/useEffect em MainMenu.jsx; useMemo e THREE em ColliderGizmo.jsx; THREE em SkeletonGizmo.jsx; setObjects em TopBar.jsx; IconHidden em MoreToolsGrid.jsx; IconBottomBar em Icons.jsx exportado mas sem uso; IconClose em UIEditor.jsx importado mas sem uso
+- Placeholders confirmados: PerformanceStatsOverlay.jsx (drawCalls e triangles são FAKE = totalObjects * 200); botões vazios em SceneEditorPanel (marcar como jogador, FlirScript); botão vazio em ScenePreview (debug-toggle); spans vazios em HomePage; div vazio em GameSplash
+- Editor vs runtime divergences: SettingsPanel lê localStorage 'me3d.project.v1' mas gravar com saveSettings lê-o/modifica-o/escreve-o (race condition com Zustand persist); WeightPaintPanel cria THREE geometrias sem dispose em autoWeight; PostProcessingPanel muta pp[effect.id] diretamente no objeto da cena (bypass da imutabilidade Zustand)
+- Security: nenhum eval(), nenhum new Function(); FlirCodeEditor usa dangerouslySetInnerHTML mas flircodeHighlight.js faz escapeHtml correto; gameRuntime.js usa innerHTML mas é código exportado e os valores vêm de elementos do próprio projeto (não de user input externo)
+- Responsiveness: confirmado suporte landscape (data-landscape="hide" no TopBar, media queries em global.css); nenhum problema crítico novo encontrado
+
+# Relatório Detalhado de Auditoria
+
+## 1. src/main.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L15-38 | P3 | Service Worker registado sem verificação de `import.meta.env.PROD`; em dev lança warning silencioso mas em runtime o ficheiro `/sw.js` pode não existir causando 404. | Adicionar `if (import.meta.env.PROD && 'serviceWorker' in navigator)` guard antes de register. |
+
+## 2. src/App.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L101-123 | P2 | useFrame-like loop de animação: o useEffect depende de `animation.currentTime` que muda a cada tick — o efeito é recriado a cada frame, criando novo raf e cancelando anterior. Funciona mas é ineficiente (60 cancel/recreate por segundo). | Mover `currentTime` para um ref e remover da deps; usar ref dentro do tick. |
+| L183 | P0 | `<UIEditor onClose={closeUIEditor} />` é passado mas UIEditor.jsx NÃO destructure `onClose` (assinatura é `export default function UIEditor()`). O modal não tem botão de fechar — utilizador fica preso. | Adicionar `onClose` à assinatura de UIEditor e renderizar um botão X no header. |
+
+## 3. src/hooks/useHotkeys.js
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L10 (buildCombo) | P3 | `buildCombo` é exportado mas só usado internamente (1 chamada em useHotkeys); não é importado por nenhum outro ficheiro. Export desnecessário. | Manter só uso interno ou remover export. |
+| L24-37 (useHotkeys) | P3 | Hook `useHotkeys` é exportado mas nunca usado (apenas `HOTKEYS` é importado por TopBar e Viewport). Dead export. | Remover `useHotkeys` se não há planos de uso. |
+
+## 4. src/hooks/useIndexedDBSync.js
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L30-43 | P3 | `loadProject(PROJECT_ID)` corre mas o `.then` apenas faz console.log — não restaura o estado. Comentário L33 diz "Para simplicidade, não substituímos automaticamente o estado atual". Funcionalidade "restore on startup" está parcialmente implementada (stub). | Decidir política: ou restaurar automaticamente via `useStore.setState` ou remover a chamada. |
+| L101-122 (saveCurrentProjectToIndexedDB, loadProjectFromIndexedDB) | P3 | Duas funções utilitárias exportadas mas nunca usadas fora do módulo. | Remover ou usar nalgum botão de "Guardar/Carregar" manual. |
+
+## 5. src/hooks/useOnlineStatus.js
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. Listeners bem removidos no cleanup. | — |
+
+## 6. src/components/ui/VerticalRail.jsx (NÃO EXISTE)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | P0 | O ficheiro `src/components/ui/VerticalRail.jsx` NÃO EXISTE em `/home/z/my-project/src/components/ui/`. Só existe em `/home/z/my-project/modelagemetexturizacao/src/components/ui/VerticalRail.jsx` (projeto sibling de comparência). Logo: nenhum botão "Construtores" está acessível no projeto principal. | Importar VerticalRail.jsx do projeto modelagemetexturizacao OU criar um wrapper no LeftPanel/MainMenu que abra BuildersPanel. |
+
+## 7. src/components/ui/iconMap.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | P0 | Não existe mapeamento para o ícone `'builders'` em ICON_MAP. Os únicos relacionados são `car`, `truck`, `ship` (veículos). Qualquer chamada `<Icon name="builders" />` cairia no fallback `HelpCircle`. | Adicionar `builders: Boxes` (ou `Building2` se importado do lucide-react). |
+
+## 8. src/components/panels/BuildersPanel.jsx (definido mas JAMAIS IMPORTADO)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L14 | P0 | `BuildersPanel` é exportado mas nenhum ficheiro em `/home/z/my-project/src` o importa (confirmado via grep). O painel existe (203 linhas, com construtores de Edifício e Veículo) mas nunca é renderizado. | Importar em App.jsx e adicionar estado `buildersPanelOpen`+`openBuildersPanel`/`closeBuildersPanel` ao store, exatamente como os outros painéis (Multiplayer/PostProcessing/etc). |
+| L37, 53, 59 | P2 | Chamadas a `useStore.getState().addImportedObject(obj)` em vez de usar o hook `addImportedObject` já obtido em L15. Inconsistência (funciona mas bypassa o selector). | Usar a variável `addImportedObject` já obtida. |
+
+## 9. src/components/ui/MainMenu.jsx (BOTÕES QUE CRASHAM)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L29-31 | P0 | `useStore((s) => s.openClassesPanel)`, `s.openTexturingPanel`, `s.openSettingsPanel` — ESTAS FUNÇÕES NÃO EXISTEM em useStore.js (confirmado via grep). Devolvem `undefined`. | Adicionar `classesPanelOpen`/`openClassesPanel`/`closeClassesPanel` (e análogos para Texturing e Settings) ao store E renderizar `<ClassesPanel>`/`<TexturingPanel>`/`<SettingsPanel>` em App.jsx. |
+| L109, 116, 123 (handle(openClassesPanel) etc) | P0 | `handle(fn)()` chama `fn()` que é `undefined` → throws `TypeError: fn is not a function` ao clicar no botão. | Mesma correção que L29-31. |
+| L14 (imports) | P3 | `useState`, `useRef`, `useEffect` importados de 'react' mas nenhum é usado no componente. Dead imports. | Remover `import { useState, useRef, useEffect }`. |
+
+## 10. src/components/ui/AppModeSwitch.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. Sem issues. | — |
+
+## 11. src/components/ui/BottomBar.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. | — |
+
+## 12. src/components/ui/Icons.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L382-388 (IconBottomBar) | P3 | Exportado mas nunca importado por nenhum ficheiro. Dead export. | Remover. |
+| L233-238 (IconEdit), etc | — | Restantes ícones usados em EditModePanel, LeftPanel, MoreToolsGrid — OK. | — |
+
+## 13. src/components/ui/MoreToolsGrid.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L20 (IconHidden) | P3 | Importado mas nunca usado no JSX. Dead import. | Remover `IconHidden` do import. |
+| L173 | P3 | Botão "Bevel" usa `<IconMirror>` como ícone — enganoso (Mirror icon para Bevel). | Adicionar `IconBevel` ou usar outro ícone apropriado. |
+
+## 14. src/components/ui/MainMenu.jsx (já em #9)
+
+## 15. src/components/ui/JoystickControl.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. Listeners mousemove/mouseup removidos no `up`. Resize listener removido. | — |
+
+## 16. src/components/ui/LoadingOverlay.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. | — |
+
+## 17. src/components/ui/Toasts.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. | — |
+
+## 18. src/components/ui/PerformanceStatsOverlay.jsx (PLACEHOLDERS)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L36-48 | P2 | `drawCalls = totalObjects` e `triangles = totalObjects * 200` — valores FAKES apresentados como dados reais. O comentário diz "Estimativa baseada em objetos" mas a UI mostra "Draws: ~X" sem qualquer indicador de que é placeholder. | Obter `gl.renderer.info.render.calls` via `useThree()` exposto pelo r3f (Canvas). Para isso o componente teria de ser filho do Canvas — atualmente é irmão. Solução: expor renderer via state ou mover para dentro do Canvas. |
+| L41 | P2 | `canvas.getContext('webgl2')` chamado sobre o canvas do r3f — pode interferir com o contexto WebGL do r3f (chamadas getContext múltiplas sobre o mesmo canvas não devolvem contextos diferentes). | Não chamar getContext em canvas gerido por r3f; usar `useThree` para obter `gl.info`. |
+
+## 19. src/components/ui/FlirEngineLogo.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. SVG estático. | — |
+
+## 20. src/components/ui/GameSplash.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L38 | P3 | `<div style={{ fontSize: 64, animation: ... }}></div>` — div vazia com grande font-size. Provavelmente pretendia um emoji/ícone. Placeholder visual. | Adicionar `<FlirEngineLogo size={64} showText={false} />` ou emoji 🎮. |
+
+## 21. src/components/ui/OfflineIndicator.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. | — |
+
+## 22. src/components/ui/ConectContextMenu.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L66-77 (case 'child') | P3 | Declaração `const child = addConectToScene(...)` dentro de `switch` sem bloco `{}`. Funciona porque há `break` mas é code smell — pode causar "Cannot access 'child' before initialization" se algum dia houver fallthrough. | Envolvê-lo em `{ ... }` ou extrair para função. |
+| L36-46 | — | mousedown listener bem limpo no cleanup. | — |
+
+## 23. src/components/3d/Scene3D.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L53, L114 (pointer) | P3 | `const { gl, camera, pointer } = useThree()` — `pointer` é desestruturado mas nunca usado em SculptRaycaster nem TexturePaintRaycaster. Dead variable. | Remover `pointer` da desestruturação. |
+| L247-254 | — | setTimeout fallback com cleanup apropriado (clearTimeout). OK. | — |
+
+## 24. src/components/3d/SceneLevel3D.jsx (useFrame)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L81 (camera) | P1 | **NÃO EXISTE `cameraController` em useFrame.** A câmara é manipulada diretamente via `const { camera } = useThree()` (L81) e usada dentro de useFrame (L440) com `camera.position.lerp(...)` e `camera.lookAt(...)`. A pergunta do utilizador sobre "cameraController" não se aplica — não existe tal objeto. | Documentar que a câmara é manipulada diretamente via `useThree().camera`. |
+| L104 (setupScene = activeSceneRef.current) | P1 | `setupScene` é uma snapshot tirada no render do `activeSceneRef.current` (ref não reativo). A deps array `[isGameMode, setupScene]` no useEffect L165 engana: `setupScene` só muda quando o componente re-renderiza mas o ref pode ter sido mutado entretanto. Resultado: se o jogo começa, o setup dispara uma vez; se `activeScene` muda depois, `activeSceneRef.current` é atualizado (L155-157) MAS o `setupScene` que o useEffect viu continua a ser o snapshot antigo (a menos que outro render aconteça). | Passar `activeSceneRef.current` diretamente para o efeito ou ler dentro do efeito. Idealmente separar "setup inicial" (deps `[isGameMode]`) de "scene change" (deps `[activeScene?.id]`). |
+| L300-311 (setTimeout 50ms para física) | P2 | Setup de physics com setTimeout 50ms — race condition: se o componente desmontar antes dos 50ms, `physicsRef.current` pode já ser null (cleanup L428-429) mas o timeout ainda corre e chama `physicsRef.current.addConect`. Há guarda `if (!physicsRef.current) return` no início, mas o cleanup não cancela o setTimeout. | Guardar o timeout id e fazer `clearTimeout` no cleanup. |
+| L93-104 (activeSceneRef, objectsRef) | P2 | Padrão de refs mutados fora de useEffect (L155-162) para evitar re-disparo do setup. Funciona mas é frágil — qualquer consumidor que leia `activeSceneRef.current` antes do efeito L152 correr pode ver valor stale. | Migrar para um único useEffect com deps mais finas ou usar um custom hook. |
+| L197-201 (playSound, playSoundByName) | P3 | `new Audio(url).play()` cria elemento Audio que nunca é disposed. Pequeno leak por som tocado. | Guardar ref e chamar `.pause()` + set `src = ''` quando o jogo termina. |
+| L440-534 (useFrame) | P2 | Dentro do loop, `activeScene` (state fechada sobre) é usada em vez de `activeSceneRef.current`. Se a cena mudar durante o jogo (changeScene), a closure do useFrame ainda referencia a cena antiga. Ver L483, L501 — iteram `activeScene.conects`. | Ler `activeSceneRef.current` dentro do useFrame. |
+
+## 25. src/components/3d/SceneObject.jsx (MEMORY LEAKS)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L32 (textureCache = new Map()) | P1 | Cache module-level de THREE.Texture. Cada textura carregada via `loadTexture(dataURL)` é guardada para sempre — NUNCA é removida do Map. Em sessões longas com imports múltiplos, o Map cresce indefinidamente (cada dataURL é uma string enorme). | Adicionar LRU eviction (max 64 entradas) ou WeakRef, ou expor `clearTextureCache()` chamado em newProject/loadProject. |
+| L322-328 (cleanup) | P2 | Dispose é feito ao unmount mas SÓ descarta `geometry` se `!obj.imported` (L324). Geometrias imported (obj.bufferGeometry) NÃO são dispostas — leak se o objeto importado for removido (cada imported tem a sua própria BufferGeometry não partilhada). | Mover o `if (!obj.imported)` para fora — toda a geometria deve ser disposta no unmount (a menos que seja gerida pelo catálogo global). |
+| L342-346 (ref callback) | P3 | O branch `else if (meshRef) meshRef.current = node` é "morto" porque SceneLevel3D e Scene3D passam sempre callback refs `setMeshRef(id, node)`. Não causa bug mas o ramo nunca executa. | Remover ou documentar. |
+| L19 (useState import) | P3 | `useState` é importado mas nunca chamado neste ficheiro. | Remover. |
+| L298-305 (getPaintTexture com dataURL: undefined) | P2 | Efeito L290 chama `getPaintTexture(obj.id, 'color', { dataURL: m.map })` quando `m.map` pode ser undefined. Comportamento ambíguo: cria CanvasTexture com dataURL undefined? Provavelmente noop mas é frágil. | Adicionar `if (m.map)` antes de chamar. |
+
+## 26. src/components/3d/ColliderGizmo.jsx (DEAD CODE)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L10 (useMemo) | P3 | Importado mas nunca usado. | Remover. |
+| L11 (THREE) | P3 | Importado mas nenhuma referência `THREE.` existe no ficheiro. | Remover. |
+| (todo o ficheiro) | P1 | Nenhum ficheiro em `/home/z/my-project/src` importa `ColliderGizmo`. Componente inteiro é dead code. | Importar em ConectRenderer.jsx para mostrar colliders no editor, ou eliminar o ficheiro. |
+
+## 27. src/components/3d/SkeletonGizmo.jsx (DEAD CODE)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L9 (THREE) | P3 | Importado mas nenhuma referência `THREE.` no ficheiro. | Remover. |
+| (todo o ficheiro) | P1 | Nenhum ficheiro importa `SkeletonGizmo`. Dead code. | Importar em Scene3D.jsx para mostrar esqueleto sobre o modelo quando skeleton existe, ou eliminar. |
+
+## 28. src/components/panels/ConectRenderer.jsx (HOOKS VIOLATION)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L66-70 (useEffect condicional) | P0 | `if (!def?.hasVisual && conect.type !== 'VisualObject') { useEffect(...); return null }` — VIOLAÇÃO das Regras dos Hooks. O `useEffect` é chamado condicionalmente após vários `if (conect.type === 'X') return <...>` (L27-64). Para conects do tipo Luminous/Terrain/Water/etc., o useEffect nunca é chamado; para outros, é. Em React isto pode causar erro "Rendered fewer hooks than expected". | Mover o `setMeshRef(null)` para dentro de cada branch ou usar um `useEffect(() => { if (!def?.hasVisual && conect.type !== 'VisualObject') setMeshRef(null) }, [def, conect.type, setMeshRef])` incondicional no topo do componente. |
+| L404-411 (TrailMesh useMemo) | P3 | `useMemo` para pontos do trail depende apenas de `conect.length` (L411), não de `conect.position`. Se o trail for movido, os pontos não atualizam. | Adicionar `conect.position` às deps. |
+
+## 29. src/components/panels/ScenePreview.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L55-60 | P3 | `<button className="preview-debug-toggle" ...></button>` — botão sem conteúdo (sem icon, sem texto). Inacessível a screen readers e visualmente vazio. | Adicionar `<Icon name="bug" />` ou texto "Debug". |
+
+## 30. src/components/panels/GameUIOverlay.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L27-50 (handleEvent, handleJoystickMove, handleJoystickEnd) | P3 | Funções definidas dentro do componente — recriadas a cada render. Performance impact mínimo mas existente. | Envolver em `useCallback`. |
+
+## 31. src/components/panels/GameExportModal.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L39-57 | — | OK. Loading state, error handling, progress bar funcionais. | — |
+
+## 32. src/components/panels/MultiplayerPanel.jsx (MEMORY LEAK)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L51-60 (useEffect cleanup) | P0 | Os 5 listeners (`connect`, `disconnect`, `playerJoin`, `playerLeave`, `latencyUpdate`) são registados em `multiplayer` (singleton) mas o cleanup retorna sem os remover. Comentário L58: "Não é possível remover callbacks individuais facilmente com a API atual". Resultado: cada mount/dismount do painel acumula listeners. Após várias aberturas, há 5×N callbacks a disparar em simultâneo, e os closures antigos chamam `setMode`, `setPlayers` em componentes desmontados (warnings React "setState on unmounted component"). | Adicionar `multiplayer.off(eventName, handler)` à API do multiplayerManager.js OU usar um único ID por subscrição e retorná-lo para depois remover. |
+
+## 33. src/components/panels/TopBar.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L53 (setObjects) | P3 | `setObjects` obtido do store mas nunca chamado. Dead variable. | Remover. |
+| L81 (fileInputRef.current.setAttribute) | P3 | `fileInputRef.current.setAttribute(...)` sem `?.` — se chamado antes do mount, crash. Praticamente impossível (botão só aparece após mount) mas defensivamente deveria usar `?.`. | Usar `fileInputRef.current?.setAttribute(...)`. |
+| L231 (drawer-toggle hidden) | P3 | `<span className="drawer-toggle" style={{ display: 'none' }}> </span>` — span invisível. Sem efeito visual. | Remover. |
+| L230 (logo "M") | P3 | `<span className="logo">M</span>` — letra hardcoded "M" em vez do FlirEngineLogo. Inconsistente com a marca. | Usar `<FlirEngineLogo size={24} showText={false} />`. |
+
+## 34. src/components/panels/LeftPanel.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. Todos os imports usados. | — |
+
+## 35. src/components/panels/RightPanel.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L12 (useState) | P3 | Importado mas nunca usado. | Remover. |
+
+## 36. src/components/panels/Outliner.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. | — |
+
+## 37. src/components/panels/SceneEditorPanel.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L197 | P3 | `<button ... ></button>` — botão "Marcar como Jogador" sem texto nem ícone. Inacessível. | Adicionar `<Icon name="user" size={11} />` ou texto "★". |
+| L209 | P3 | Botão FlirScript mostra `✓` se tem script mas vazio caso contrário. Visualmente confuso (parece botão desativado). | Adicionar `<Icon name="puzzle" />` sempre + `✓` overlay quando tem script. |
+| L400 | P3 | Outro botão FlirScript vazio (sem texto nem ícone). | Adicionar `<Icon name="puzzle" />` ou texto `</>`. |
+
+## 38. src/components/panels/ConectPropertiesPanel.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L17-20 (IconClose import) | P3 | Importado mas não usado (o header tem duplicar/apagar mas nenhum "fechar" — o close é gerido pelo RightPanel externo). | Remover `IconClose`. |
+
+## 39. src/components/panels/MaterialEditor.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Lidos primeiras 100 linhas. Sem issues óbvios. | — |
+
+## 40. src/components/panels/ModifiersPanel.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. | — |
+
+## 41. src/components/panels/BooleansPanel.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo (81 linhas). | — |
+
+## 42. src/components/panels/SculptPanel.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L14 (IconSculpt, IconBrush) | P3 | Importados mas uso apenas em 2 sítios — verificar se ambos. Via grep, contagem=2 (import + 1 uso?). Necessário verificar se `IconBrush` é usado no JSX restante. | Confirmar uso ou remover `IconBrush`. |
+
+## 43. src/components/panels/EditModePanel.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Imports todos usados. OK. | — |
+
+## 44. src/components/panels/MaterialLibraryPanel.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. | — |
+
+## 45. src/components/panels/AnimationPanel.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. | — |
+
+## 46. src/components/panels/Timeline.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. | — |
+
+## 47. src/components/panels/AnimationStudio.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L21-35 (parseFBX) | P2 | `parseFBX` faz `loader.parse(arrayBuffer, '')` com path vazia. FBXLoader pode tentar resolver texturas com path relativo e falhar silenciosamente. Não é bem um bug mas é frágil. | Passar um path base ou dummy `onload/url`. |
+| L87 (new THREE.Euler/Quaternion) | P3 | Cria Euler/Quaternion dentro do loop de tracks sem reutilização — pequeno GC pressure para FBX grandes. | Reutilizar instâncias. |
+
+## 48. src/components/panels/AnimationControllerEditor.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. | — |
+
+## 49. src/components/panels/SkeletonEditor.jsx (DEAD CODE)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| (todo o ficheiro) | P1 | Nenhum ficheiro importa `SkeletonEditor`. Definido mas nunca usado. | Importar em LeftPanel.jsx como nova tab "Esqueleto" ou remover. |
+
+## 50. src/components/panels/WeightPaintPanel.jsx (DEAD CODE + LEAKS)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| (todo o ficheiro) | P1 | Nenhum ficheiro importa `WeightPaintPanel`. Dead code. | Importar em LeftPanel como tab ou remover. |
+| L31-35 (window globals) | P2 | `window._weightPaintActiveBone`, `_weightPaintBrushSize`, `_weightPaintBrushStrength` são setados mas o useEffect NÃO tem cleanup para os limpar. Após unmount do painel, ficam com valores stale. | Adicionar `return () => { delete window._weightPaintActiveBone; ... }`. |
+| L70-77 (PRIMITIVES BoxGeometry/etc) | P2 | `new THREE.BoxGeometry(1,1,1)` etc. criados em autoWeight mas nunca dispostos. Leak de geometria. | Dispor após gerar positions: `geo.dispose()`. |
+
+## 51. src/components/panels/ClassesPanel.jsx (DEAD CODE — DEFINED, NOT IMPORTED)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L16 | P0 | Componente definido mas NÃO importado em App.jsx. MainMenu tenta abrir via `openClassesPanel` (store action que não existe). Resultado: botão no MainMenu crasha quando clicado. | Adicionar estado ao store (`classesPanelOpen` + `openClassesPanel`/`closeClassesPanel`) e renderizar `{classesPanelOpen && <ClassesPanel onClose={closeClassesPanel} />}` em App.jsx. |
+
+## 52. src/components/panels/SettingsPanel.jsx (DEAD CODE + RACE)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L24 | P0 | Componente definido mas NÃO importado em App.jsx. MainMenu tenta abrir via `openSettingsPanel` (store action inexistente). Botão crasha. | Mesma correção que ClassesPanel. |
+| L30-35, L42-52 | P2 | `localStorage.getItem('me3d.project.v1')` lido/escrito diretamente. RACE CONDITION com Zustand persist (que também escreve a mesma chave). Se guardar enquanto Zustand está a persistir, perde-se dados. | Usar o estado do store como única fonte de verdade; não aceder a localStorage diretamente. |
+| L37 (gravity useState) | P3 | `gravity` inicializado a -9.82 hardcoded mas NÃO sincronizado com `state.renderSettings.gravity` ou scene physics. Mudar gravity aqui não tem efeito na cena. | Sincronizar via `useStore((s) => s.renderSettings.gravity)` e `setRenderSettings`. |
+| L13-22 (HOTKEYS) | P3 | Duplicado do `HOTKEYS` em useHotkeys.js. | Reutilizar import. |
+
+## 53. src/components/panels/TexturingPanel.jsx (DEAD CODE)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L61 | P0 | Componente definido mas NÃO importado em App.jsx. MainMenu tenta abrir via `openTexturingPanel` (store action inexistente). Botão crasha. | Mesma correção que ClassesPanel. |
+
+## 54. src/components/panels/ProjectBrowser.jsx (subpasta)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L21-29 (FOLDERS) | P3 | Strings de ícones ('package', 'palette', 'sparkles', 'film', 'puzzle', 'volume-2', 'smartphone', 'palette') — se passadas a `<Icon name={...}>`, 'volume-2' existe no iconMap mas 'palette' está duplicado para textures e shaders. Confirmar uso. | Verificar e usar nomes distintos para cada pasta. |
+
+## 55. src/components/panels/PostProcessingPanel.jsx (IMUTABILIDADE)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L62-69 | P1 | `for (const effect of EFFECTS) { if (!pp[effect.id]) { pp[effect.id] = {...} } }` — MUTA o objeto `activeScene.postProcessing` diretamente (não via `updateScene`). Isto bypassa Zustand immutability; o componente pode não re-renderizar quando `pp` muda pois a referência não muda. | Calcular `const newPp = { ...defaults, ...pp }` localmente e usar `updateScene(activeScene.id, { postProcessing: newPp })` uma vez. |
+
+## 56. src/components/panels/debug/DebugConsole.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. `debugSubscribe` retorna unsubscribe no cleanup. | — |
+
+## 57. src/components/panels/conects/ConectsWindow.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. | — |
+
+## 58. src/components/panels/conects/ConectPropertiesPanel.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L17-20 (IconClose) | P3 | Importado mas não usado (header tem duplicar/apagar mas não fechar). | Remover `IconClose`. |
+
+## 59. src/components/panels/ui-editor/UIEditor.jsx (MODAL TRAP)
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L37 | P0 | `export default function UIEditor()` — assinatura sem `onClose`. App.jsx L183 passa `<UIEditor onClose={closeUIEditor} />` mas UIEditor ignora a prop. Em modo modal (`uiEditorOpen=true`), NÃO há botão para fechar — utilizador fica preso no editor de UI. | Adicionar `onClose` à assinatura: `function UIEditor({ onClose })` e renderizar header com botão `X` quando onClose existe. |
+| L17 (IconClose) | P3 | Importado mas nunca usado (1 ocorrência = o import). | Remover após corrigir o problema onClose (vai ser usado no botão). |
+
+## 60. src/components/panels/shader-editor/ShaderEditor.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L263-282 (ResizeObserver) | — | Bem limpo no cleanup (disconnect + null refs). OK. | — |
+| L228-282 (useEffect deps `[mode]`) | P2 | Recria o grafo LGraph cada vez que `mode` muda entre 'visual' e 'code'. Se houver alterações não guardadas no grafo visual, perdem-se ao trocar para código e voltar. | Persistir o grafo num ref que sobreviva ao `mode`, ou avisar o utilizador. |
+
+## 61. src/components/panels/flirscript/FlirScriptEditor.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | LiteGraph setup com cleanup. OK (primeiras 80 linhas). | — |
+
+## 62. src/components/panels/flirscript/FlirCodeEditor.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L50 (let saveTimeout) | P1 | Variável `let saveTimeout = null` declarada no scope do componente — é re-inicializada a cada render. O cleanup `clearTimeout(saveTimeout)` (L83) só limpa o timeout do render atual, NÃO os anteriores. Se o utilizador escrever rápido, múltiplos timeouts podem estar pendentes sem serem limpos. | Migrar para `useRef`: `const saveTimeoutRef = useRef(null)` e usar `saveTimeoutRef.current`. |
+| L214 (dangerouslySetInnerHTML) | — | `highlightFlirCode(code)` é seguro porque flircodeHighlight.js chama `escapeHtml()` (L36-41) que escapa `&`, `<`, `>`. Sem risco de XSS. | — |
+
+## 63. src/components/panels/terrain/TerrainEditor.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Componente reescrito em P7. Imports limpos. Sem issues óbvios nas primeiras 80 linhas. | — |
+
+## 64. src/components/panels/terrain/HeightmapPreview.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo (80 linhas iniciais). | — |
+
+## 65. src/components/home/HomePage.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| L80 (confirm) | P3 | `confirm('Apagar este projeto?')` — blocking, não estilo consistente com a app. | Substituir por modal custom. |
+| L94, L121, L131, L163, L168, L173, L183 (spans vazios) | P3 | Múltiplos `<span>` vazios (`home-logo-icon`, `home-empty-icon`, `project-card-icon`, `feature-icon`, `ebook-banner-icon`). Provavelmente pretendiam emojis/ícones que foram removidos. Placeholders visuais. | Adicionar `<Icon name="home" />` ou SVG inline. |
+
+## 66. src/components/home/Ebook.jsx
+
+| Linha | Severity | Descrição | Fix sugerido |
+|---|---|---|---|
+| — | — | Limpo. IconClose e IconSave ambos usados. | — |
+
+---
+
+# Tabela Resumo Prioritária
+
+| # | Severity | Ficheiro | Linha | Issue |
+|---|---|---|---|---|
+| 1 | **P0** | src/components/ui/MainMenu.jsx | 29-31, 109, 116, 123 | `openClassesPanel`/`openTexturingPanel`/`openSettingsPanel` não existem no store. Botões crasham com TypeError ao clicar. |
+| 2 | **P0** | src/components/panels/ClassesPanel.jsx | (todo) | Componente definido mas nunca importado em App.jsx. Inacessível. |
+| 3 | **P0** | src/components/panels/TexturingPanel.jsx | (todo) | Idem. |
+| 4 | **P0** | src/components/panels/SettingsPanel.jsx | (todo) | Idem. |
+| 5 | **P0** | src/components/ui/VerticalRail.jsx | — | FICHEIRO NÃO EXISTE no projeto principal. Só existe no projeto sibling `modelagemetexturizacao`. Logo nenhum botão "Construtores" existe. |
+| 6 | **P0** | src/components/panels/BuildersPanel.jsx | (todo) | Componente definido mas nunca importado. `buildersPanelOpen`/`setBuildersPanelOpen` não existem no store. `builders` icon não mapeado em iconMap. |
+| 7 | **P0** | src/components/panels/ui-editor/UIEditor.jsx | 37 | `onClose` prop passada por App.jsx é ignorada. Utilizador fica preso no modal sem botão fechar. |
+| 8 | **P0** | src/components/panels/ConectRenderer.jsx | 66-70 | `useEffect` chamado condicionalmente após vários `if(...) return <X>`. Violação das Regras dos Hooks. |
+| 9 | **P0** | src/components/panels/MultiplayerPanel.jsx | 51-60 | Listeners `multiplayer.on(...)` nunca removidos no cleanup. Memory leak + setState em componentes desmontados. |
+| 10 | **P1** | src/components/3d/SceneLevel3D.jsx | 104, 165, 437 | `setupScene = activeSceneRef.current` no corpo do componente + deps array `[isGameMode, setupScene]` enganadora. Setup não reage corretamente a changeScene durante o jogo. |
+| 11 | **P1** | src/components/3d/SceneLevel3D.jsx | 440-534 | useFrame usa `activeScene` (closure) em vez de `activeSceneRef.current` — comportamento stale após changeScene. |
+| 12 | **P1** | src/components/3d/SceneObject.jsx | 32 | `textureCache` module-level Map sem eviction — grow indefinido em sessões longas com imports múltiplos. |
+| 13 | **P1** | src/components/3d/ColliderGizmo.jsx | (todo) | Dead code — nunca importado. |
+| 14 | **P1** | src/components/3d/SkeletonGizmo.jsx | (todo) | Dead code — nunca importado. |
+| 15 | **P1** | src/components/panels/SkeletonEditor.jsx | (todo) | Dead code — nunca importado. |
+| 16 | **P1** | src/components/panels/WeightPaintPanel.jsx | (todo) | Dead code — nunca importado. |
+| 17 | **P1** | src/components/panels/PostProcessingPanel.jsx | 62-69 | Mutação direta de `activeScene.postProcessing` bypassando Zustand. |
+| 18 | **P1** | src/components/panels/flirscript/FlirCodeEditor.jsx | 50 | `let saveTimeout = null` em scope de componente — re-inicializado a cada render, clearTimeout não limpa timeouts anteriores. |
+| 19 | **P1** | src/components/3d/SceneLevel3D.jsx | 81 | **NÃO EXISTE `cameraController`** — câmara é manipulada diretamente via `useThree().camera` em useFrame. |
+| 20 | **P2** | src/App.jsx | 101-123 | useEffect de animação recriado a cada `currentTime` change — 60 cancel/recreate de raf por segundo. |
+| 21 | **P2** | src/components/3d/SceneLevel3D.jsx | 300-311 | setTimeout 50ms para física sem guardar ID — não é cancelado no cleanup. Race condition se desmontar rápido. |
+| 22 | **P2** | src/components/3d/SceneLevel3D.jsx | 197-201 | `new Audio(url).play()` sem disposal — pequeno leak por som. |
+| 23 | **P2** | src/components/3d/SceneObject.jsx | 322-328 | Geometrias imported (obj.bufferGeometry) não são dispostas no unmount. |
+| 24 | **P2** | src/components/3d/SceneObject.jsx | 298-305 | `getPaintTexture(obj.id, 'color', { dataURL: m.map })` com `m.map` undefined — comportamento ambíguo. |
+| 25 | **P2** | src/components/ui/PerformanceStatsOverlay.jsx | 36-48 | drawCalls e triangles são FAKE (estimativa = totalObjects * 200). Apresentados como dados reais. |
+| 26 | **P2** | src/components/ui/PerformanceStatsOverlay.jsx | 41 | `canvas.getContext('webgl2')` sobre canvas do r3f — pode interferir com contexto WebGL. |
+| 27 | **P2** | src/components/panels/SettingsPanel.jsx | 30-52 | Race condition: escreve em 'me3d.project.v1' localStorage enquanto Zustand persist também escreve. |
+| 28 | **P2** | src/components/panels/WeightPaintPanel.jsx | 31-35 | window._weightPaint* globals não limpos no unmount. |
+| 29 | **P2** | src/components/panels/WeightPaintPanel.jsx | 70-77 | THREE geometrias criadas em autoWeight sem dispose. |
+| 30 | **P2** | src/components/panels/AnimationStudio.jsx | 21-35 | parseFBX usa path vazia — FBXLoader pode falhar a resolver texturas. |
+| 31 | **P2** | src/components/panels/shader-editor/ShaderEditor.jsx | 228-282 | Trocar 'visual'↔'code' recria LGraph — perde-se alterações não guardadas. |
+| 32 | **P2** | src/components/panels/ConectRenderer.jsx | 404-411 | TrailMesh useMemo só depende de `conect.length` — não atualiza ao mover trail. |
+| 33 | **P3** | src/components/ui/MainMenu.jsx | 14 | `useState`/`useRef`/`useEffect` importados mas não usados. |
+| 34 | **P3** | src/components/panels/RightPanel.jsx | 12 | `useState` importado mas não usado. |
+| 35 | **P3** | src/components/panels/TopBar.jsx | 53 | `setObjects` obtido do store mas nunca chamado. |
+| 36 | **P3** | src/components/ui/MoreToolsGrid.jsx | 20 | `IconHidden` importado mas não usado. |
+| 37 | **P3** | src/components/ui/MoreToolsGrid.jsx | 173 | Botão "Bevel" usa `IconMirror` (icon errado). |
+| 38 | **P3** | src/components/3d/ColliderGizmo.jsx | 10-11 | `useMemo` e `THREE` importados mas não usados. |
+| 39 | **P3** | src/components/3d/SkeletonGizmo.jsx | 9 | `THREE` importado mas não usado. |
+| 40 | **P3** | src/components/3d/Scene3D.jsx | 53, 114 | `pointer` desestruturado mas não usado. |
+| 41 | **P3** | src/components/3d/SceneObject.jsx | 19 | `useState` importado mas não usado. |
+| 42 | **P3** | src/components/ui/Icons.jsx | 382-388 | `IconBottomBar` exportado mas nunca importado. |
+| 43 | **P3** | src/components/panels/SceneEditorPanel.jsx | 197, 209, 400 | Botões vazios (sem texto/ícone). |
+| 44 | **P3** | src/components/panels/ScenePreview.jsx | 55-60 | Botão debug-toggle sem conteúdo. |
+| 45 | **P3** | src/components/ui/GameSplash.jsx | 38 | div vazia com fontSize 64. |
+| 46 | **P3** | src/components/home/HomePage.jsx | 80, 94, 121, 131, 163, 168, 173, 183 | `confirm()` blocking + múltiplos spans vazios. |
+| 47 | **P3** | src/components/panels/SettingsPanel.jsx | 13-22 | HOTKEYS duplicado do useHotkeys.js. |
+| 48 | **P3** | src/components/panels/SettingsPanel.jsx | 37 | `gravity` não sincronizado com store — slider não tem efeito. |
+| 49 | **P3** | src/components/panels/ConectPropertiesPanel.jsx | 17-20 | `IconClose` importado mas não usado. |
+| 50 | **P3** | src/components/panels/ConectContextMenu.jsx | 66-77 | `const child = ...` dentro de `switch` sem bloco `{}`. |
+| 51 | **P3** | src/components/3d/SceneLevel3D.jsx | 197-201 | `new Audio(url).play()` sem dispose. |
+| 52 | **P3** | src/hooks/useHotkeys.js | 10, 24 | `buildCombo` e `useHotkeys` exports não usados fora do módulo. |
+| 53 | **P3** | src/hooks/useIndexedDBSync.js | 30-43, 101-122 | `loadProject` corre mas não restaura; `saveCurrentProjectToIndexedDB`/`loadProjectFromIndexedDB` exports não usados. |
+| 54 | **P3** | src/main.jsx | 15-38 | Service Worker registado sem `import.meta.env.PROD` guard. |
+| 55 | **P3** | src/components/panels/AnimationStudio.jsx | 87 | Euler/Quaternion criados dentro do loop sem reutilização. |
+| 56 | **P3** | src/components/panels/MaterialEditor.jsx | 29 | `_pushHistory` prefix underscore indica "privado" mas é usado — naming inconsistency. |
+| 57 | **P3** | src/components/3d/SceneObject.jsx | 342-346 | Branch `else if (meshRef) meshRef.current = node` nunca executado (callers sempre passam callback ref). |
+| 58 | **P3** | src/components/ui/TopBar.jsx | 81, 231, 230 | `setAttribute` sem `?.`; span invisível; "M" hardcoded em vez do logo. |
+| 59 | **P3** | src/components/panels/BuildersPanel.jsx | 37, 53, 59 | `useStore.getState().addImportedObject` em vez do hook obtido. |
+| 60 | **P3** | src/components/panels/SculptPanel.jsx | 14 | `IconBrush` importado — verificar se usado. |
+
+---
+
+# Respostas Diretas às Perguntas Específicas
+
+1. **VerticalRail.jsx — existe o botão "Construtores"? Chama setBuildersPanelOpen?**
+   - VerticalRail.jsx **NÃO EXISTE** em `/home/z/my-project/src/components/ui/`. Só existe no projeto sibling `/home/z/my-project/modelagemetexturizacao/src/components/ui/VerticalRail.jsx`.
+   - Logo: nenhum botão "Construtores" existe no projeto principal, e `setBuildersPanelOpen` não é chamado em lado nenhum.
+
+2. **App.jsx — BuildersPanel é renderizado quando buildersPanelOpen === true?**
+   - **NÃO.** App.jsx não importa nem renderiza BuildersPanel. `buildersPanelOpen` não existe no store.
+
+3. **useStore.js — buildersPanelOpen/setBuildersPanelOpen existem?**
+   - **NÃO.** Grep por `buildersPanel|setBuildersPanelOpen|builders` no store retornou ZERO matches.
+
+4. **iconMap.jsx — ícone 'builders' mapeado?**
+   - **NÃO.** Não há entrada `builders` em ICON_MAP. O fallback seria `HelpCircle`.
+
+5. **SceneLevel3D.jsx — como é que cameraController é usado em useFrame?**
+   - **NÃO EXISTE `cameraController` em todo o código fonte.** A câmara é obtida via `const { camera } = useThree()` (L81) no componente `GameMode` interno e usada diretamente dentro de useFrame (L440-534) com `camera.position.lerp(new THREE.Vector3(...))` e `camera.lookAt(targetMesh.position)`. Os modos suportados são 'third', 'top', 'side' (L516-525) e fallback estático (L527-532).
+
+6. **SceneObject.jsx — memory leaks (dispose de geometry/material)?**
+   - **SIM, há leaks:**
+     - `textureCache` module-level (L32) — Map cresce indefinidamente, texturas nunca dispostas/evictas.
+     - Geometrias imported (`obj.bufferGeometry`) não são dispostas no unmount (L324: `if (geometry && !obj.imported) geometry.dispose?.()`).
+     - Material é disposto (L325) — OK.
+     - Geometria não-imported é disposta — OK.
+   - **Recomendação:** adicionar LRU no textureCache e remover a condição `!obj.imported` no dispose.
+
+7. **BuildersPanel.jsx — o que mostra atualmente?**
+   - BuildersPanel.jsx (203 linhas, **definido mas nunca importado**) mostra:
+     - **Construtor de Edifícios**: sliders para Pisos (1-6), Telhado (flat/pitched/gabled), Largura (3-15m), Profundidade (3-12m), Altura de piso (2-5m), Cor das paredes. Botões "Gerar Edifício" e "Variar" (gera variações aleatórias).
+     - **Construtor de Veículos**: select para Tipo (sedan/sport/truck), Tamanho das rodas (0.2-0.8), Cor. Botão "Gerar Veículo".
+     - **Secção Dicas**: 4 pontos explicando o fluxo.
+   - Os objetos gerados chamam `createBuildingObject`/`createVehicleObject` de `buildingGenerator.js` e adicionam via `useStore.getState().addImportedObject(obj)`.
+   - **Como não é renderizado em lado nenhum, este painel é totalmente inacessível ao utilizador.**
+
+---
+
+# Conclusão e Próximos Passos Recomendados (Prioridade)
+
+1. **P0 — Corrigir MainMenu crash (3 botões):** adicionar `classesPanelOpen`/`texturingPanelOpen`/`settingsPanelOpen` + open/close ao store e renderizar os 3 painéis em App.jsx.
+2. **P0 — Importar e tornar acessível BuildersPanel:** copiar `VerticalRail.jsx` do projeto sibling OU adicionar botão "Construtores" no MainMenu/LeftPanel com estado `buildersPanelOpen` no store. Adicionar icon `builders` ao iconMap.
+3. **P0 — Corrigir UIEditor modal trap:** adicionar `onClose` à assinatura e renderizar botão X no header.
+4. **P0 — Corrigir ConectRenderer hooks violation:** mover `setMeshRef(null)` para useEffect incondicional.
+5. **P0 — Corrigir MultiplayerPanel memory leak:** adicionar `multiplayer.off(...)` no cleanup ou refatorar multiplayerManager para suportar unsubscribe.
+6. **P1 — Remover dead code:** eliminar ColliderGizmo, SkeletonGizmo, SkeletonEditor, WeightPaintPanel se não há planos de uso, OU importá-los onde fazem sentido.
+7. **P1 — Corrigir FlirCodeEditor saveTimeout:** migrar para `useRef`.
+8. **P1 — Corrigir PostProcessingPanel immutability:** não mutar `pp[effect.id]` diretamente.
+9. **P1 — Adicionar LRU ao textureCache em SceneObject.**
+10. **P1 — Revisar useFrame em SceneLevel3D:** usar `activeSceneRef.current` em vez de `activeScene` closure.
+11. **P2/P3 — Limpar imports não usados** em todos os ficheiros identificados (15+ casos).
+12. **P2/P3 — Substituir placeholders** (botões vazios em SceneEditorPanel, GameSplash div vazia, spans vazios em HomePage, PerformanceStatsOverlay fake data).
+
+---
+Task ID: AUDIT-2
+Agent: audit-utils
+Task: Auditoria de src/store/, src/utils/ (excl. conects/ e flirscript/), src/workers/
+
+Work Log:
+- Lidos integralmente: useStore.js (1585 linhas), meshOperations.js (995), texturePaint.js (635), buildingGenerator.js (469), materialLibrary.js (706), exporters.js (322), db.js (182), helpers.js (84), fbxImportWorker.js (221), fbxImportWorkerClient.js (339), animationPlayer.js (205), sharedAnimationCache.js (150), performanceOptimizer.js (289), flirGI.js (49), instancedRenderer.js (129), hardwareInstancing.js (301), gpuMeshModifiers.js (334), vertexAO.js (147), parallaxOcclusionMapping.js (76), parallaxOcclusionMappingPro.js (216), waterShader.js (196), waterShaderPro.js (361), skyShaderPro.js (220), flirSkyShader.js (229), terrainMath.js (549), terrainPresets.js (102), terrainNoise.js (504), terrainAdvanced.js (475), primitives.js (124), textureCompositor.js (130)
+- Verificada existência de cameraController.js e streamingManager.js (CRÍTICOS): NÃO existem em /home/z/my-project/src/utils/. cameraController.js existe no projeto SIBLING /home/z/my-project/modelagemetexturizacao/src/utils/ (430 linhas, com resolveActiveView/updateCamera/resolveFollowTarget corretos).
+- Verificado git log: commits PERF-3.x (StreamingManager, SpatialPartitionSystem, RaycastSystem, AdaptiveQuality) mencionados no worklog NÃO existem no histórico git. Apenas o commit "Texture Paint 3D pipeline" (a0c66d5) e commits UUID aparecem.
+- Cross-checkado imports/exports e callers em todos os ficheiros via grep.
+
+Stage Summary:
+
+# AUDIT-2 — Report Final (Store + Utils + Workers)
+
+## 1. CRITICAL: Ficheiro esperado NÃO EXISTE
+
+### `src/utils/cameraController.js` — **MISSING ENTIRELY** (P0)
+- O worklog de AUDIT-2 lista este ficheiro como "CRITICAL — for ViewObject bug" mas o ficheiro **não existe** em `/home/z/my-project/src/utils/`.
+- Existe no projeto sibling `modelagemetexturizacao/src/utils/cameraController.js` (430 linhas, com `resolveActiveView()`, `updateCamera()` em 5 modos: none/first/third/top/side, `resolveFollowTarget()`, `hasCameraTouchZone()`, `CAMERA_CONTROLLER_SOURCE` serializado para export).
+- **Consequência**: a lógica de câmara está duplicada e divergente em dois sítios no projeto atual:
+  - `SceneLevel3D.jsx:500-533` (editor R3F) — trata apenas 3 modos (`third`/`top`/`side`); **sem `first` person**; `resolveActiveView` omite prioridade `isActive !== false`; `rotation.set(...)` sem order `'YXZ'`.
+  - `gameRuntime.js:215-226` + `:474-479` (jogo exportado) — sempre segue o PersonalObject quando `cameraRole='player'`, **IGNORANDO `followMode='none'`**; sem suporte a `first`/`top`/`side`; sem `CameraTouchZone`; sem yaw/pitch smoothing.
+- **Fix sugerido**: copiar `cameraController.js` do projeto sibling e refatorar SceneLevel3D e gameRuntime para o usarem.
+
+### `src/utils/streamingManager.js` — **MISSING ENTIRELY** (P0)
+- Worklog PERF-3.7 afirma commit `eeaa81a` implementou este ficheiro. **Não existe**.
+- `StreamingManager`, `useStreaming`, `StreamingManagerComponent`, `SpatialPartitionSystem`, `RaycastSystem`, `AdaptiveQuality` — **todos ausentes** do codebase.
+- Git log confirma: nenhum commit com "Streaming", "PERF-3", "spatial", "raycast", "adaptive".
+- **Fix sugerido**: re-implementar ou remover referências do worklog.
+
+---
+
+## 2. src/store/useStore.js (1585 linhas)
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| S1 | 226-231 | **P0** | `_pushHistory` snapshot só captura `objects` — `scenes`, `conects`, `uiScreens`, `lights`, `background` não são restaurados. 47 ações chamam `_pushHistory` mas undo só funciona para 7 delas (addObject, deleteObject, renameObject, duplicateObject, toggleVisibility, extrudeObject, setParent). Undo de `createScene`, `addConectToScene`, `setBackground`, `addUIElement`, etc. **não restaura o estado anterior**. | Estender snapshot para incluir `scenes`, `conects`, `uiScreens`, `lights`, `background`, ou criar `_pushHistoryScenes()` separado. |
+| S2 | 16 (comentário) | **P1** | `applyModifierStack(id)` documentado no header mas **não implementado** — sem função no corpo. Modificadores em `obj.modifiers` são aplicados em runtime pelo SceneObject, mas o store nunca calcula a geometria final. Edit mode/sculpt sobre geometria com modificadores não vê o resultado. | Implementar `applyModifierStack` ou remover do comentário. |
+| S3 | 847-848 | **P1** | `playAnimation()`/`pauseAnimation()` apenas setam flag `animation.playing`. **Nada realmente reproduz keyframes**. O SceneLevel3D.jsx:354 cria `createAnimationPlayer` em runtime que tem o seu próprio `currentTime` — **desconectado** do store.animation. AnimationPanel/Timeline/AnimationStudio usam o store action, mas ele não dispara playback real. | Conectar store.animation ao SceneLevel3D via subscrição, ou documentar que é só UI state. |
+| S4 | 695, 711, 728 | P2 | `addTextureLayer`, `updateTextureLayer`, `removeTextureLayer` — DEAD CODE (zero callers externos). | Remover ou implementar UI que os use. |
+| S5 | 1317-1334 | P2 | `setConectFlirScript` — DEAD CODE (substituído por `setInstanceFlirScript:1000`). | Remover. |
+| S6 | 1337-1346 | P2 | `setScenePhysics` — DEAD CODE (zero callers externos). | Remover ou ligar a SceneSettings. |
+| S7 | 269-270 | P3 | `toggleBottomBar` — DEAD CODE (zero callers). | Remover. |
+| S8 | 843-844 | P3 | `setAnimationTime` — DEAD CODE (Timeline usa `setAnimation({currentTime})`). | Remover. |
+| S9 | 1496-1502 | P3 | `resetAll` — DEAD CODE (só `newProject` é usado). | Remover. |
+| S10 | 1035-1044 | P3 | `getInstanceFlirScript` — DEAD CODE (FlirScriptEditor usa `useStore.getState()` inline). | Remover. |
+| S11 | 1404-1407 | P3 | `setConectAnimationController` — DEAD CODE. | Remover. |
+| S12 | 407-419 | P3 | `extrudeObject` é um STUB — apenas escala o eixo Y. Não usa `meshOps.extrudeFaces`. Chamado em LeftPanel.jsx e MoreToolsGrid.jsx. | Substituir por `applyMeshOp(id, 'extrude', ...)`. |
+| S13 | 41 | P3 | Import `findMaterial` (materialLibrary) usado só em `applyMaterialPreset` — OK. | - |
+| S14 | 1233 | P3 | `conectsWindowOpen` declarado em `ui` mas toggle action (line 1235) seta fora do objeto `ui`. Inconsistência: `toggleConectsWindow` faz `ui: { ...s.ui, conectsWindowOpen: !... }`, mas `conectsWindowOpen` também é declarado como campo top-level em line 1233. Leitura em App.jsx:59 lê `s.toggleConectsWindow` (ação, OK). | Centralizar em `ui`. |
+
+---
+
+## 3. src/utils/meshOperations.js (995 linhas)
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| M1 | 46-48 | **P1** | `getNormals(geometry)` retorna `geometry.getAttribute('normal').arrays` — **typo** (deveria ser `.array`). Função exported mas nunca chamada externamente; se chamada lança `undefined is not a function`. | Corrigir para `.array` ou remover. |
+| M2 | 51-57 | P3 | `triangleCenter` helper interno definido mas **nunca chamado** neste ficheiro. DEAD CODE. | Remover. |
+| M3 | 287-292 | **P1** | `loopCut(geometry, axis, position)` é um STUB: ignora `axis` e `position`, apenas chama `subdivide(geometry, 1)`. Chamado por EditModePanel e MoreToolsGrid. Usador acha que está a fazer loop cut mas só subdividir. | Implementar loop cut real ou renomear. |
+| M4 | 199-222 | **P1** | `bevelGeometry` é um STUB: ignora `segments`, apenas escala vértices para o centro (`scale = 1 - radius`). Não chanfra arestas. Chamado por EditModePanel e MoreToolsGrid. | Implementar bevel real ou renomear. |
+| M5 | 435-446 | **P1** | `unwrapUV` planar: `useY` calculado mas **nunca usado** — ambas branches do `v` fazem `(pos.getY(i) - bbox.min.y) / size.y`. Bug lógico. | Corrigir para usar Z quando `!useY`. |
+| M6 | 251-275 | P2 | `extrudeFaces` é STUB: move todos os vértices ao longo da normal da face. Não cria as faces laterais. Não é extrude real. | Implementar extrude com side faces. |
+| M7 | 226-247 | P2 | `insetFaces` é STUB: move vértices para o centróide mas não cria o anel de quads. Não é inset real. | Implementar inset com ring. |
+| M8 | 300-365 | P2 | `booleanOp`: union apenas merge (interiores sobrepostos ficam); intersect/subtract usam bbox containsPoint (muito grosseiro). Aproximação crua. | Documentar ou usar three-bvh-csg. |
+| M9 | 398-405 | P2 | `sculptStroke` mode='smooth' é STUB: comenta "não temos topologia" e move vértices no sentido oposto à normal — idêntico a 'lower' com 0.3x força. Não suaviza. | Implementar smooth real com topologia. |
+| M10 | 653-691 | P2 | `bendGeometry` tem erro matemático: `newPerp = cos(arcAngle) * radius + perp * cos(arcAngle)` — aplica cos duas vezes. Deveria ser `cos(arcAngle) * radius + perp`. | Corrigir. |
+| M11 | 488-530, 535-573, 578-605, 609-648, 653-691, 696-760, 766-810, 815-828, 834-869, 891-995 | **P1** | **DEAD CODE em massa** (~500 linhas): `elevationDisplace`, `displaceGeometry`, `taperGeometry`, `twistGeometry`, `bendGeometry`, `smoothGeometry`, `decimateGeometry`, `createLinePathGeometry`, `contactIllumination`, `curveDeform`, `findClosestFace`, `getNormals` — zero callers externos. Apenas `subdivide`, `mirrorGeometry`, `arrayGeometry`, `solidifyGeometry` são usados por SceneObject.jsx. | Remover ou wire-up a UI. |
+| M12 | 696-760 | P3 | `smoothGeometry` usa `Map<number, Set<number>>` e recria vizinhança em cada iteração — O(n²) por iteração. Para 10k vértices em 3 iterações: ~300M ops. | Pré-computar vizinhança fora do loop. |
+| M13 | 891-995 | P3 | `curveDeform` aloca `new THREE.Vector3()` + `new THREE.Quaternion()` por vértice — para 10k verts: 40k allocations. | Reutilizar objetos temporários. |
+
+---
+
+## 4. src/utils/texturePaint.js (635 linhas)
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| T1 | 40, 125-132 | **P1** | `disposePaintTextures(objectId)` defined mas **NUNCA chamado externamente**. `paintTextures` Map retém CanvasTexture para sempre — quando objeto é removido da cena, GPU memory leak. | Chamar em SceneObject unmount ou store.deleteObject. |
+| T2 | 105-109 | P2 | `markPaintTextureDirty` — DEAD CODE. | Remover. |
+| T3 | 114-119 | P2 | `exportPaintTexture` — DEAD CODE. | Remover. |
+| T4 | 137-147 | P2 | `clearPaintTextures` — DEAD CODE. | Remover. |
+| T5 | 542-569 | P2 | `applyColorRamp` exported mas só usado internamente. | Tornar não-exported. |
+| T6 | 449-475 | P3 | `boxBlur` O(w·h·radius²) — para pincel soft com radius 30: 60×60×31×31 = 3.5M ops por stroke. | Usar separable blur (2 passos). |
+| T7 | 433-447 | P3 | `floodFill` cria `visited: Set<string>` com string keys `${x},${y}`. Para 1024×1024 canvas worst case: 1M entries com string keys = ~100MB. | Usar Uint8Array de `w*h` para visited. |
+| T8 | 218 | P3 | `hexToLuminance` valida apenas `hex[0] !== '#'` — não valida comprimento. Se hex=`'#abc'` (curto), `parseInt(hex.slice(5,7), 16)` retorna NaN. | Validar comprimento 7. |
+| T9 | 626-627 | P3 | `voronoiNoise` formula padrão OK, mas `fract(cx * 127.1 + cy * 311.7)` e `fract(cy * 269.5 + cx * 183.3)` geram valores em [0,1] — adicionar a `cx`/`cy` offset na ordem errada para descorrelacionar X e Y. Não-ideal mas funciona. | - |
+
+---
+
+## 5. src/utils/textureCompositor.js (130 linhas)
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| C1 | 18, 20-34 | **P1** | `imageCache: Map<dataURL, Image>` — keyed por dataURLs que podem ser MB cada. **Nunca limpo**. Cada layer.map distinto acumula para sempre. Para projeto com 10 texturas de 2MB cada: 20MB de strings + 20MB de Image objects. | Adicionar LRU com limite (ex: 20 entries) ou `clearImageCache()`. |
+| C2 | 108-118 | P2 | `compositeTextureLayersSync` é um STUB: retorna sempre `null`. Comentário diz "indicar que precisa de versão async". | Remover ou implementar sync real. |
+| C3 | 123-130 | P2 | `preloadLayerImages` — DEAD CODE. | Remover. |
+| C4 | 45-57 | P3 | `applyBlend` mask: `globalAlpha = opacity` ainda aplicado durante `destination-in` drawImage(maskCanvas) — afeta alpha da máscara reduzindo o que é mantido. Bug lógico menor. | Reset `globalAlpha = 1` antes do destination-in. |
+| C5 | 278 (caller) | P3 | SceneObject.jsx:278 `compositeTextureLayers(m.layers, 512).then(...)` não cancela em unmount — seta state em componente desmontado. | Adicionar `cancelled` flag no cleanup. |
+
+---
+
+## 6. src/utils/materialLibrary.js (706 linhas)
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| ML1 | 27-256 | P2 | 8 funções de textura procedural (`woodTexture`, `marbleTexture`, `graniteTexture`, `fabricTexture`, `leatherTexture`, `leatherNormalMap`, `concreteTexture`, `brickTexture`, `waterNormalMap`, `flatNormalMap`) chamadas **na carga do módulo** para gerar dataURLs e preencher `MATERIAL_LIBRARY`. Cada uma cria canvas 256×256 e devolve dataURL ~50KB. Total ~500KB de strings retidos permanentemente mesmo que material nunca seja usado. | Lazy-load: só gerar quando `findMaterial(id)` é chamado. |
+| ML2 | 704-706 | P3 | `findMaterial` usa `.find()` linear. Para 24 materiais OK, mas para escalabilidade devia ser Map O(1). | `const MATERIAL_MAP = new Map(MATERIAL_LIBRARY.map(m => [m.id, m]))`. |
+| ML3 | 572 | P3 | `hexToRgbArray` retorna 4 elementos mas só usa 3 (RGB). Nome diz "RGB" mas retorna RGBA. | Renomear ou usar 3. |
+
+---
+
+## 7. src/utils/exporters.js (322 linhas)
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| E1 | 160, 190 | **P1** | `meshToStoreObject` guarda `bufferGeometry` (THREE.BufferGeometry) diretamente no objeto do store. **Não serializável** — quebra o `persist` middleware (localStorage/IndexedDB). Bug P1 confirmado por crash em projetos com modelos importados guardados. | Serializar para `customGeometry: { positions, normals, uvs }` ou marcar `bufferGeometry` como não-persistido. |
+| E2 | 312-316 | **P1** | `importFBX` guarda `obj.animations[clip.name] = clip` onde `clip` é `THREE.AnimationClip`. Objeto THREE não serializável, quebra persist. | Serializar tracks para plain objects. |
+| E3 | 264 | P2 | `importFBX` linha 264: `const THREE = await import('three')` — shadows o import estático da linha 18. Dynamic import desnecessário. | Usar `THREE` já importado. |
+| E4 | 222-239 | P2 | `importGLTF` usa `file.path || ''` como resource path — `file.path` é **não-standard** em browser File API, sempre `''`. GLTFs com binários externos (.bin) ou texturas externas não carregam. | Usar `URL.createObjectURL(file)` e passar como path. |
+| E5 | 287-307 | P3 | `importFBX` resolve parentId via `find(b => b.name === parentName)` em loop O(n²). Para 100 ossos: 10k ops. | Pré-construir Map<name, id>. |
+| E6 | 29-77 | P2 | `buildMeshFromObject` não aplica `obj.modifiers` (subdivision/mirror/array/solidify) — apenas `PRIMITIVES[obj.type].build`. Export GLB/OBJ não reflete modificadores. | Aplicar modifier stack via `applyModifiers()` de SceneObject. |
+| E7 | 51-67 | P3 | `buildMeshFromObject` cria `new THREE.TextureLoader().load(dataURL)` — TextureLoader é global e reusado por instância. Texturas criadas em export nunca disposed. | Reusar TextureLoader singleton; dispose após export. |
+| E8 | 270 | P3 | `await new Promise(r => setTimeout(r, 50))` em importFBX — yield artificial à UI. OK como workaround mas não escala para FBX grandes. | Mover para Web Worker (já existe fbxImportWorkerClient). |
+
+---
+
+## 8. src/utils/db.js (182 linhas)
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| D1 | 115-145 | P2 | `saveScene`, `loadScene`, `listScenes`, `deleteScene` — DEAD CODE (store gere cenas em memória, nunca persiste individualmente em IndexedDB). | Remover ou wire-up a auto-save. |
+| D2 | 149-156 | P2 | `saveAsset`, `loadAsset` — DEAD CODE (asset store nunca usado). | Remover. |
+| D3 | 160-164 | P2 | `clearAll` — DEAD CODE. | Remover. |
+| D4 | 167-177 | P2 | `estimateStorage` — DEAD CODE. | Remover. |
+| D5 | 70-78 | P3 | `tx` helper: se `fn(store)` throws sync, promise não rejeita (tx.onerror não dispara). | Wrapping try-catch em fn. |
+
+---
+
+## 9. src/utils/helpers.js (84 linhas)
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| H1 | 6-11 | P2 | `uid` — DEAD CODE (store usa `Math.random().toString(36).slice(2,10)` inline). | Remover ou adotar no store. |
+| H2 | 14-16 | P2 | `clamp` — DEAD CODE (apenas referenciado em strings GLSL de shaders). | Remover. |
+| H3 | 25-27 | P2 | `roundVec3` — DEAD CODE. | Remover. |
+| H4 | 34-38 | P2 | `formatBytes` — DEAD CODE. | Remover. |
+
+---
+
+## 10. src/utils/terrain/terrainMath.js (549 linhas)
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| TM1 | 79 | P2 | `perlin2` multiplica por 0.4 "para normalizar [-1,1]" — Perlin native range já ~[-1,1]; multiplicar por 0.4 dá [-0.4, 0.4]. `fbm` e `generateHeightmap` compensam por re-normalização, mas chamadas diretas a `perlin2` dão range errado. | Remover `* 0.4` ou ajustar docs. |
+| TM2 | 169-171 | P3 | `falloff` 'sharp' comment diz "1 - t^2*2 + t^4" mas código é `1 - t*t`. Não corresponde ao comentário. | Corrigir fórmula ou comentário. |
+| TM3 | 516 | P2 | `pngToHeightmap`: `URL.createObjectURL(file)` criado mas **nunca revogado** — object URL leak por import. | `URL.revokeObjectURL()` no onload/onerror. |
+| TM4 | 215 | P3 | `applyBrush` smooth mode cria `new Float32Array(hm)` por stroke — para 256² = 256KB alocados por frame em drag. | Reutilizar buffer. |
+
+---
+
+## 11. src/utils/terrain/terrainNoise.js (504 linhas) — **DEAD CODE INTEIRO** (P1)
+
+- Nenhum caller externo. Apenas imports internos de `mulberry32, perlin2, buildPermutation`.
+- `simplex2`, `simplexFBM`, voronoi, terracing, domain warp, thermal erosion — tudo unused.
+- ~500 linhas mortas.
+
+---
+
+## 12. src/utils/terrain/terrainAdvanced.js (475 linhas) — **DEAD CODE INTEIRO** (P1)
+
+- Nenhum caller externo.
+- `calcTileLOD`, `buildTileGeometry`, `splitIntoTiles`, `updateTileLODs`, `carvePathOnTerrain`, `buildRoadGeometry`, `autoSplatCombinedRules`, `TERRAIN_UE5_FEATURES` — tudo unused.
+- ~475 linhas mortas.
+
+---
+
+## 13. src/utils/terrain/terrainPresets.js (102 linhas) — OK
+
+- Usado por TerrainEditor.jsx. Sem bugs.
+
+---
+
+## 14. src/utils/waterShader.js (196), waterShaderPro.js (361), skyShaderPro.js (220), flirSkyShader.js (229) — **TODOS DEAD CODE** (P1)
+
+- Nenhum caller externo em src/.
+- `createWaterMaterial`, `createWaterProMaterial`, `createSkyProMaterial`, `createFlirSkyMaterial` — nunca instanciados.
+- ~1000 linhas de shaders mortos.
+
+---
+
+## 15. src/utils/flirGI.js (49 linhas) — **DEAD CODE INTEIRO** (P2)
+
+- `applyFlirGI`, `removeFlirGI` — zero callers.
+
+---
+
+## 16. src/utils/performanceOptimizer.js (289 linhas) — **PARCIALMENTE MORTO** (P1)
+
+- `analyzeScene` (186-251) — usado via dynamic import em PerformanceStatsOverlay.jsx:63. ✓
+- `generateLOD`, `createLODObject`, `isInFrustum`, `PerformanceStats` class, `LODManager` class — todos DEAD CODE (~200 linhas).
+- `analyzeScene:199` — O(n²): para cada instância, `objects.find(o => o.id === inst.objectId)`. Para 100 instâncias: 10k finds. (P3)
+- `analyzeScene:201-205` — triCount hardcoded por tipo (cube=12, sphere=480...) — não reflete segmentos custom. (P3 stub)
+
+---
+
+## 17. src/utils/instancedRenderer.js (129), hardwareInstancing.js (301), gpuMeshModifiers.js (334) — **TODOS DEAD CODE** (P1)
+
+- ~760 linhas mortas combinadas.
+
+---
+
+## 18. src/utils/vertexAO.js (147), parallaxOcclusionMapping.js (76), parallaxOcclusionMappingPro.js (216) — **TODOS DEAD CODE** (P1)
+
+- ~440 linhas mortas combinadas.
+
+---
+
+## 19. src/utils/animationPlayer.js (205 linhas) — ALIVE com bugs
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| AP1 | 23, 144, 160 | **P0 (memória)** | `clearPoseCache` importado de sharedAnimationCache mas **NUNCA chamado**. `poseCache` Map cresce unbounded — cada `(clipName, time.toFixed(4))` único gera uma entry permanente. Em jogo 60fps durante 10 min: 36k entries por clip × N clips = memory leak grave. | Chamar `clearPoseCache()` no início de cada useFrame em SceneLevel3D. |
+| AP2 | 125 | P3 | `Math.max(...keyframes.map(k => k.time))` — spread de array em args. Para 1000+ keyframes: stack overflow risk. | Usar loop `for` ou `reduce`. |
+| AP3 | 165, 123 (sharedAnimationCache) | P3 | `bones.find(b => b.id === boneId || b.name === boneId || b.userData?.boneId === boneId)` — O(n) por bone por frame. Para 50 bones × 10 NPCs × 60fps: 30k finds/sec. | Pré-construir `Map<boneId, bone>` por instância. |
+| AP4 | 144, 160 | P3 | `getCachedPose` retorna o mesmo Map object a todos os NPCs — se um NPC mutar o Map (não deveria), afeta todos. Atualmente OK (apenas leitura) mas frágil. | Documentar ou freeze. |
+
+---
+
+## 20. src/utils/sharedAnimationCache.js (150 linhas) — ALIVE com bugs
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| SAC1 | 137-139 | **P0** | `clearPoseCache` — definido e exportado mas **nunca chamado** (importado em animationPlayer.js mas não invocado). Memory leak — ver AP1. | Chamar em useFrame. |
+| SAC2 | 144-150 | P2 | `clearClipCache` — DEAD CODE. | Remover. |
+| SAC3 | 82 | P3 | `cacheKey = clipName + '_' + time.toFixed(4)` — concatenação de strings por frame. Para 60fps × 10 NPCs: 600 string allocations/sec. | Usar number key ou reusar string. |
+
+---
+
+## 21. src/utils/buildingGenerator.js (469 linhas)
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| BG1 | 269 | P3 | `uvs = geo.attributes.uv ? Array.from(...) : []` — merged geometry NÃO tem uv attr (mergeGeometriesWithColors só seta position/normal/color), então `uvs = []`. SceneObject.jsx:103 checa `if (obj.customGeometry.uvs)` — **empty array é truthy**, vai para linha 104 e cria `Float32BufferAttribute([], 2)` (0-length UV attribute). Latent bug. | Mudar SceneObject check para `if (obj.customGeometry.uvs && obj.customGeometry.uvs.length > 0)`. |
+| BG2 | 466 | P3 | `createVehicleObject` mesmo issue: `uvs: []`. | Mesmo fix. |
+| BG3 | 42-81 | P3 | `mergeGeometriesWithColors` não chama `.dispose()` nos geometries intermédios — JV GC handle, mas para 100+ partes pode pressão memoria. | Loop dispose no fim. |
+
+**NOTA POSITIVA**: buildingGenerator NÃO é apenas caixas. Gera edifícios detalhados com: chão, 4 paredes, teto, telhado (flat/pitched/gabled), janelas com moldura+vidro em cada piso, porta com moldura+folha+maçaneta, varandas com guarda-corpo+postes para estilo residencial/moderno, entrada térrea com vidro. Veículos (sedan/sport/truck) com carroçaria, capô, vidros, 4 rodas (pneu+jante), para-choques, faróis, luzes traseiras. Sport tem splitter, diffuser, spoiler, rearDeck. Boa qualidade.
+
+---
+
+## 22. src/utils/primitives.js (124 linhas) — OK com minors
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| PR1 | 18 | P3 | `Math.max(8, args.segments / 2)` — `segments / 2` pode ser float (ex: 33/2 = 16.5). SphereGeometry heightSegments deve ser inteiro. Three.js faz floor internamente mas inconsistente. | `Math.max(8, Math.floor(args.segments / 2))`. |
+
+---
+
+## 23. src/workers/fbxImportWorker.js (221 linhas) — OK com minors
+
+- Lógica correta, transferência zero-copy de ArrayBuffers bem feita.
+- Apenas 1 issue: comment diz "texturas embedadas funcionam" mas FBXLoader usa ImageLoader internamente que falha em worker (sem document). Já documentado honestamente no header.
+
+---
+
+## 24. src/utils/fbxImportWorkerClient.js (339 linhas)
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| FW1 | 135 | **P1** | `bufferGeometry.setIndex(new THREE.BufferAttribute(new Uint16Array(g.indices) || new Uint32Array(g.indices), 1))` — **BUG**: `new Uint16Array(g.indices)` retorna sempre truthy object (mesmo vazio). `|| new Uint32Array(g.indices)` **nunca executa**. Para FBX com >65535 vértices, indices overflow silencioso (Uint16 trunca). | Verificar `g.positionCount > 65535` para decidir Uint16 vs Uint32. |
+| FW2 | 175, 245 | P3 | `mesh.skeleton.bones.find(b => b.name === parentName)` em loop — O(n²). | Pré-construir Map<name, bone>. |
+| FW3 | 156 | P3 | `id: \`obj_fbx_${Date.now()}_${i}\`` — colisão em import simultâneo. | Adicionar `Math.random()`. |
+| FW4 | 173-174, 243-244 | P3 | `delete bone.parentName` muta o objeto durante `map()` — OK em JS mas anti-pattern. | Criar novo objeto em vez de mutar. |
+
+---
+
+## 25. components/ui/PerformanceStatsOverlay.jsx (anexo, usa performanceOptimizer)
+
+| # | Linha | Severidade | Descrição | Fix |
+|---|---|---|---|---|
+| PSO1 | 45-46 | P3 | `drawCalls = totalObjects; triangles = totalObjects * 200` — STUB, não são draw calls reais. Mostra "Draws: ~N" onde N = número de objetos. Misleading. | Ler `renderer.info.render.calls` real ou remover a linha. |
+| PSO2 | 38 | P3 | `document.querySelector('canvas')` — frágil, pega qualquer canvas da página. | Passar canvas via prop. |
+
+---
+
+# RESUMO PRIORIZADO
+
+## P0 — Críticos (5)
+1. **`cameraController.js` MISSING** — divergência editor/runtime no ViewObject follow (sem first person, sem CameraTouchZone, sem smoothing em runtime)
+2. **`streamingManager.js` MISSING** + SpatialPartition/Raycast/AdaptiveQuality — worklog afirma implementado mas git log não tem commits
+3. **`useStore._pushHistory` S1** — undo só restaura `objects`, 40 ações ficam sem undo funcional
+4. **`animationPlayer.clearPoseCache` SAC1/AP1** — poseCache Map cresce unbounded, memory leak em runtime
+5. **`exporters.meshToStoreObject` E1/E2** — BufferGeometry + AnimationClip THREE guardados no store quebram persist middleware
+
+## P1 — Altos (12)
+- S2 `applyModifierStack` documentado mas não implementado
+- S3 `playAnimation` store action não dispara playback real (desconectado do SceneLevel3D)
+- M1 `getNormals` typo `.arrays` → crash se chamada
+- M3 `loopCut` STUB (ignora axis/position)
+- M4 `bevelGeometry` STUB (ignora segments)
+- M5 `unwrapUV` planar bug (useY calculado mas não usado)
+- M11 ~500 linhas DEAD CODE em meshOperations (elevationDisplace, taperGeometry, etc.)
+- T1 `disposePaintTextures` nunca chamado — GPU memory leak
+- terrainNoise.js DEAD CODE inteiro (504 linhas)
+- terrainAdvanced.js DEAD CODE inteiro (475 linhas)
+- waterShader + waterShaderPro + skyShaderPro + flirSkyShader — todos DEAD CODE (~1000 linhas)
+- instancedRenderer + hardwareInstancing + gpuMeshModifiers + vertexAO + parallaxOcclusionMapping + parallaxOcclusionMappingPro — todos DEAD CODE (~1200 linhas)
+- performanceOptimizer.js parcialmente morto (PerformanceStats, LODManager, generateLOD, etc.)
+- FW1 fbxImportWorkerClient: `new Uint16Array(...) || new Uint32Array(...)` nunca usa Uint32 — overflow silencioso em FBX grandes
+
+## P2 — Médios (15)
+- C1 textureCompositor imageCache unbounded
+- D1-D4 db.js: scenes/assets store inteiro unused
+- H1-H4 helpers.js: uid/clamp/roundVec3/formatBytes DEAD CODE
+- ML1 materialLibrary: 8 texturas procedurais geradas em module-load (~500KB strings retidos)
+- E4 importGLTF `file.path` não-standard
+- E6 exporters não aplicam modifiers no export GLB/OBJ
+- TM3 pngToHeightmap URL.createObjectURL leak
+- Diversos actions do store não usadas
+
+## P3 — Baixos (25+)
+- Stubs (extrudeObject, insetFaces, etc.)
+- Math errors (bendGeometry, falloff sharp)
+- Perf O(n²) (smoothGeometry, FBX bone resolution, bones.find)
+- String allocation em hot paths (cacheKey)
+- Minor typos
+
+---
+
+# TOTAL DEAD CODE: ~3900 linhas (em scope)
+
+| Ficheiro | Linhas | Status |
+|---|---|---|
+| terrainNoise.js | 504 | DEAD |
+| terrainAdvanced.js | 475 | DEAD |
+| waterShader.js | 196 | DEAD |
+| waterShaderPro.js | 361 | DEAD |
+| skyShaderPro.js | 220 | DEAD |
+| flirSkyShader.js | 229 | DEAD |
+| flirGI.js | 49 | DEAD |
+| instancedRenderer.js | 129 | DEAD |
+| hardwareInstancing.js | 301 | DEAD |
+| gpuMeshModifiers.js | 334 | DEAD |
+| vertexAO.js | 147 | DEAD |
+| parallaxOcclusionMapping.js | 76 | DEAD |
+| parallaxOcclusionMappingPro.js | 216 | DEAD |
+| meshOperations (10 funcs) | ~500 | DEAD |
+| db.js (scenes/assets) | ~60 | DEAD |
+| helpers.js | ~25 | DEAD |
+| useStore.js (8 actions) | ~80 | DEAD |
+| texturePaint (4 funcs) | ~30 | DEAD |
+| **TOTAL** | **~3900** | **DEAD CODE** |
+
+---
+
+# Honestidade sobre o worklog
+
+O worklog (PERF-3.2 a 3.8, POST-AUDIT-4.0) descreve implementação de 6 sistemas (AdaptiveQuality, Culling, LOD, Raycast, Spatial, Streaming) com commits hash `ede8998`, `a4a48ac`, `eeaa81a`, `c3232e4`, `6153d6d`. **Nenhum destes commits existe no `git log`**. Os ficheiros referenciados (`streamingManager.js`, `useStreaming.js`, `StreamingManagerComponent.jsx`, `spatialPartitionSystem.js`, `RaycastSystem.js`, `AdaptiveQuality.js`, `WebGLContextLossHandler.jsx`) **não existem** em `src/`. Único commit real é `a0c66d5` "Texture Paint 3D pipeline completo".
+
+Stage Summary:
+- **5 P0 críticos** identificados (2 missing files, 3 bugs críticos em store/animation/export)
+- **~3900 linhas de DEAD CODE** em scope (40% do total audited)
+- **`cameraController.js` ausente** — divergência editor/runtimegrave no ViewObject follow (sem first person, sem CameraTouchZone, sem smoothing em runtime)
+- **Undo/Redo parcialmente quebrado** (40 ações sem undo real)
+- **Memory leaks identificados**: poseCache (animationPlayer), paintTextures Map (texturePaint), imageCache (textureCompositor), URL.createObjectURL (pngToHeightmap)
+- **Performance Core 3.2-3.8 do worklog é FICTÍCIO** — commits não existem em git
+- **Editor vs runtime divergências**: cameraController (SceneLevel3D vs gameRuntime), animation state (store vs SceneLevel3D), export (não aplica modifiers)
+- **Stubs disfarçados**: loopCut, bevelGeometry, extrudeFaces, insetFaces, sculptStroke 'smooth', applyModifierStack, compositeTextureLayersSync, extrudeObject
+- **Próximos passos recomendados**: (1) portar cameraController.js do sibling project; (2) implementar ou remover referências a StreamingManager/SpatialPartition/Raycast; (3) estender _pushHistory para scenes/conects/uiScreens; (4) chamar clearPoseCache em useFrame; (5) serializar BufferGeometry em exporters; (6) purge de 3900 linhas DEAD CODE.
+
+---
+Task ID: AUDIT-3
+Agent: audit-runtime
+Task: Auditoria completa de Conects, FlirScript e Game Runtime
+
+Work Log:
+- AUDIT SCOPE: 12 ficheiros em src/utils/conects/, src/utils/flirscript/, src/utils/game/, mais api/marketplace/ (modelagemetexturizacao/api/marketplace/). Cruzamento com SceneLevel3D.jsx (editor) e ConectRenderer.jsx.
+- METODOLOGIA: Read de cada ficheiro completo + Grep de referências cruzadas (createPhysicsSystem, createAnimationController, createNPCAI, createFlirScriptRuntime, createFlirCodeRuntime, exportGame, innerHTML, eval, cameraController, etc.). Verificação de imports/usos por file. Verificação de divergências editor vs runtime.
+
+# AUDIT-3 — Relatório de Auditoria Completa (Conects / FlirScript / Game Runtime)
+
+## 1. src/utils/conects/taxonomy.js (1146 linhas)
+
+### Conects definidos (32 tipos)
+- Física: RigidObject, StaticObject, StopObject, PersonalObject, NpcObject, TriggerObject, JointObject
+- Visual: VisualObject, LuminousObject, SunObject, PointObject, SpotObject, AreaObject, AmbientObject, ReflectObject, ParticleObject, TrailObject
+- Câmara/Áudio: ViewObject, CameraTouchZone, SoundObject
+- Ambiente: SkyObject, TerrainObject, WaterObject, FogObject
+- UI: ButtonObject, JoystickObject, TextObject, ImageObject, PanelObject
+- Gameplay: SpawnObject, NavigatorObject, CheckpointObject, TimerObject, PathObject, WeaponObject, ItemObject, AnimationBoostObject, GameStateObject
+- Organização: PrefabObject, RoguelikeGenerator, GroupObject, ReferenceObject
+
+### ViewObject (crítico para auditoria) — linhas 477-511
+Propriedades definidas: cameraType ('perspective'|'orthographic'), fov (20-120), orthoSize, near, far, followTarget (objectRef), followMode ('none'|'third'|'top'|'side'), followDistance, followHeight, isActive, **cameraRole ('primary'|'secondary'|'player')**.
+
+### Issues
+- **[P3, l.1101] `conectsByCategory` exportada mas nunca importada** em nenhum ficheiro do projeto. Dead code. Fix: remover ou usar em ConectsWindow para agrupar por categoria.
+- **[P3, l.1075] `GroupObject.properties[0]` usa `type:'text'`** para `children` que deveria ser array de instanceIds — o usuário não consegue editar este campo de forma útil. Fix: criar tipo 'instanceList'.
+- **[P2, l.661, l.663] `foamEnabled` e `depthGradient` usam `type:'select'` com options `['true','false']`** em vez de `type:'boolean'` — inconsistência com outros booleanos (e.g. castShadow). Fix: trocar para `type:'boolean'`.
+- **[P3, l.1144] `createConectInstance` faz spread `...def.defaults` depois de `...defaults`** — se um default em `def.defaults` tem o mesmo nome que um em `properties`, o de `def.defaults` vence, podendo ocultar overrides do usuário. Comportamento corrente parece OK porque os defaults são idênticos, mas é frágil.
+
+## 2. src/utils/conects/physicsSystem.js (415 linhas) — USADO no editor
+
+### Issues
+- **[P0, l.237-245] `movePersonal` rejeita NpcObject** — `if (!entry || entry.type !== 'PersonalObject') return`. NPC AI (npcAI.js) chama `physicsMove(instanceId, dir, speed)` → cai aqui → retorna early. NPCs NUNCA se movem no editor. Fix: aceitar PersonalObject E NpcObject, ou criar `moveCharacter` que aceita ambos.
+- **[P1, l.200] Busca O(n) do otherBody por colisão** — `[...bodies.entries()].find(([, v]) => v.body === otherBody)` roda para CADA evento `collide`. Com 50 bodies e 10 colisões/frame = 500 lookups/frame. Fix: manter Map<Body, instanceId> para O(1).
+- **[P2, l.207] `setTimeout(() => collisionPairs.delete(pairKey), 100)` não é limpo no `dispose()`** — se o jogo for parado com colisões recentes, os setTimeouts continuam a disparar sobre um `collisionPairs` Set já limpo (sem efeito prático, mas é um code smell). Fix: guardar IDs e clearTimeout no dispose.
+- **[P2, l.292] `world.step(1/60, deltaTime, 3)` chamado com fixed timestep mas sem accumulator** — quando deltaTime > 1/30 (lag), faz step com substeps=3 mas sem re-incrementar o tempo acumulado. Causa "slow motion" em dispositivos lentos. Fix: usar accumulator pattern.
+- **[P3, l.227-229] `setGravity` aceita array de 3 elementos mas só usa Y** — `world.gravity.set(gravity[0], gravity[1], gravity[2])` é correto, mas a API nunca é chamada (grep `setGravity` em src/ retorna 0 usos externos). Dead code exportado.
+- **[P3, l.359-365] `getStats` exportado mas nunca chamado externamente**. Dead code.
+- **[P3, l.272-287] `updatePersonalState` exportado mas nunca chamado externamente** — lógica de coyote time e reset de saltos duplos existe mas não corre no useFrame do GameMode. Bugs: coyote time e salto duplo (definidos em PersonalObject taxonomy l.152-166) NÃO funcionam.
+- **[P2, l.308] `collisionFilterMask: -1`** — Cannon-es interpreta -1 como 0xFFFFFFFF (todos os grupos) APENAS se for passado como unsigned. Em algumas versões pode falhar silenciosamente. Fix: usar `0xFFFFFFFF` ou `0xFFFF` explicitamente.
+- **[P1, l.367-397] `addJoint` cria constraint mas não a retorna num Map** — se o JointObject for removido da cena, a constraint fica no mundo. Não há `removeJoint`. Memory leak.
+
+## 3. src/utils/conects/physicsSystem.rapier.js (288 linhas) — DEAD CODE
+
+### Issues
+- **[P0, TODO] Ficheiro inteiro é DEAD CODE** — `grep physicsSystem.rapier` em /home/z/my-project/src retorna 0 matches. Nenhum ficheiro importa este módulo. É mantido como "alternativa WASM" mas nunca é usado. Fix: remover o ficheiro ou implementar um switch no SceneLevel3D para escolher entre cannon-es e Rapier.
+- **[P1, l.131-144] Mesmo ficheiro tem bug de lógica** — setRotation é chamado DUAS vezes: primeiro com Euler-to-quat manual (l.132, mas isto passa `{x: rx, y: ry, z: rz, w: 1}` que NÃO é um quaternion válido), depois com o cálculo correto. A primeira chamada é desnecessária e bugada.
+- **[P1, l.239-241] `drainContactForceEvents` callback é vazio** — não emite eventos de trigger. Triggers Rapier não funcionam.
+- **[P1, l.254-258] `addJoint` é stub** — apenas faz `debugLog('Juntas Rapier: ainda não implementado', 'warning', 'Physics')`. Retorna undefined.
+- **[P1, l.260-264] `dispose` não chama `world.free()`** — Rapier WASM requer `world.free()` para libertar memória WASM. Memory leak.
+- **[P1, l.209-214] `jumpPersonal` ignora `jumpForce` do conect** — hard-coded para 8. PersonalObject com `jumpForce: 12` não funciona.
+- **[P2, l.27] `async createPhysicsSystem`** — assinatura é async mas SceneLevel3D espera sync. Se este módulo fosse activado, iria quebrar.
+- **[P2, l.76-77] `conect._inferredSize` muta o conect** — adiciona propriedade `_inferredSize` ao objeto conect original. Side-effect indesejado que persiste entre saves.
+- **[P2, l.188] `setGravity(g)` aceita apenas escalar g** — diverge da API cannon-es que aceita array [x,y,z]. Inconsistência.
+
+## 4. src/utils/conects/npcAI.js (96 linhas) — USADO no editor
+
+### Issues
+- **[P0, l.30] `const npcPos = npc.position`** — usa `npc.position` (posição INICIAL do conect data) em vez da posição ATUAL do body. O NPC nunca atualiza a sua posição mental, levando a decisões de IA erradas (persegue jogador a partir da posição original, não da atual). Fix: ler `meshRef.position` via helper `getNpcPos()`.
+- **[P0, l.73/81/87] `physicsMove` chama `physicsRef.current.movePersonal` que rejeita NpcObject** (ver physicsSystem.js l.239). NPCs são completamente incapazes de se mover. O comportamento `idle` funciona (não faz nada), `patrol`/`chase`/`flee` estão todos quebrados.
+- **[P1, l.48-56] Bloco "Decidir comportamento efetivo" é morto** — as condições `if (hasSight)` apenas adicionam comentários (`// ativar`, `// continua a patrulhar`) sem alterar `effectiveBehavior`. `hasSight` NÃO influencia o comportamento efetivo. O NPC sempre executa `npc.behavior` independentemente de ver o jogador.
+- **[P2, l.42, l.45] `emitEvent?.('OnSeePlayer', ...)`** — emitEvent é chamado mas o `helpers` parameter não garante que existe. O caller em SceneLevel3D.jsx (l.379) passa `emitEvent` corretamente. OK.
+- **[P3, l.91-93] `dispose` é vazio** — nada a limpar, mas para consistência com outras APIs deveria pelo menos null-out refs.
+
+## 5. src/utils/conects/animationController.js (129 linhas) — parcialmente usado
+
+### Issues
+- **[P0, dead-code] `createAnimationController` (l.24-106) NUNCA é importado** — grep `createAnimationController` em src/ retorna apenas a definição. Só `defaultAnimationController` (l.109) é importado em AnimationControllerEditor.jsx. A máquina de estados inteira (states, transitions, blending, evaluateCondition) está morta.
+- **[P0, l.87-95] `getBlendWeights` retorna pesos de blend** mas ninguém os lê — não há conexão entre animationController e o createAnimationPlayer em animationPlayer.js. O controller calcula estados mas ninguém aplica os pesos ao AnimationMixer.
+- **[P1, l.69] `blendDuration = t.duration || 0.2` muta variável externa** — se duas transições disparam no mesmo frame, a segunda usa o duration da primeira. Bug sutil.
+- **[P2, l.57] `String(ctx[m[1]])` não trata undefined/null** — se `ctx[varName]` é undefined, retorna "undefined" (string) que pode comparar falsamente com "value". Comportamento OK mas frágil.
+- **[P3, l.45, l.50, l.56] Regex em quente** — `condition.match(...)` recompila a regex em cada chamada. Com 5-10 transições por frame, é negligenciável mas poderiam ser pré-compiladas.
+
+## 6. src/utils/flirscript/executor.js (425 linhas) — USADO no editor
+
+### Issues
+- **[P0, l.169-403] `executeFromNode` é definida DEPOIS de `return runtime` (l.424)** — funciona por hoisting, mas impede closures corretas e torna o código difícil de manter. Fix: mover executeFromNode para antes do return runtime.
+- **[P0, sem ciclo detection] `propagateExec` (l.407-422) chama `executeFromNode` recursivamente sem tracking de visitados** — se o usuário criar um ciclo (A→B→A), o executor recursa até stack overflow. P2 robustness. Fix: Set<nodeId> passed via payload, retornar se já visitado neste tick.
+- **[P1, l.201-247] Ações leem `node._instanceId` mas este só é setado em SceneLevel3D l.342** — se o runtime for criado por outro caminho (e.g. testes, export), `node._instanceId` é undefined e `gameContext.moveObject?.(undefined, ...)` é no-op silencioso.
+- **[P1, l.355-371] `const/number`, `const/string`, `const/boolean`, `const/vec3` leem `node.properties.value` mas register.js (l.83-88) para vec3 usa `properties.value_x/_y/_z` em vez de `properties.value`** — `const/vec3` SEMPRE retorna [0,0,0]. Bug confirmado. Fix: ler `[_x, _y, _z]`.
+- **[P1, l.176-184] `readInput` retorna `inputDef?.default` (do NODE_DEFINITIONS) se input não tem valor conectado** — MAS se o usuário editou o widget (que seta `node.properties[input.name]`), o valor editado é IGNORADO. O executor só lê valor conectado ou default estático. Todos os widgets de inputs são inúteis. Fix: ler `node.properties[input.name] ?? inputDef.default`.
+- **[P2, l.187-198] Switch cases redundantes** — todos os casos `event/*` fazem exatamente `propagateExec(node, 0, payload)` (igual ao default). Morto por ser redundante.
+- **[P2, l.288] `Math.min(MAX_LOOP_ITERATIONS, readInput(1) ?? 5)`** — se readInput(1) retornar 0.5 (float), o loop itera 0 vezes. Se retornar negativo, comportamento indefinido. Fix: `Math.max(0, Math.min(MAX, Math.floor(readInput(1) ?? 5)))`.
+- **[P3, l.377, l.385, l.393] `import('../debug/debugStore.js').then(...)` dinâmico** — em cada chamada de debug/print/warning/error, faz dynamic import. Poderia ser estático (top of file). Já existe debugLog em flircode.js como import estático.
+- **[P3, l.148-160] `update(deltaTime)` recebe deltaTime mas não o usa** — só usa `performance.now()`. Parameter desnecessário.
+- **[P2, l.86] `new LiteGraph.LGraph()` + `graph.configure(graphData)`** — sem validação de erros do configure. Se graphData for inválido, configure pode lançar exceção não tratada.
+
+## 7. src/utils/flirscript/nodes.js (484 linhas) — USADO no editor
+
+### Issues
+- **[P3, l.482-484] `nodesByCategory` exportado mas nunca importado**. Dead code.
+- **[P1, NODE_DEFINITIONS tem `event/onSeePlayer`, `event/onLoseSight`, `event/onTimer` (l.99-125)** mas executor.js (l.107-119) mapeia-os corretamente no triggerEvent. Porém executor.js l.187-198 NÃO tem case para estes tipos — caem no default que só propaga exec. Funcionalmente OK mas indica que o switch precisa de limpeza.
+- **[P2, l.41, l.48, l.60, l.81, l.93, l.369, l.381, l.394] `outputs: [{ name: 'exec', type: 'exec' }]`** — todos os events têm apenas 1 output exec. Para `event/onCollision`, `event/onEnterZone`, `event/onExitZone` etc. o payload (other instanceId) está disponível no executor (l.130 `node.setOutputData(1, payload.other)`) MAS não há output slot definido para o expor. Bug silencioso: dados do evento não chegam ao usuário. Fix: adicionar `{ name: 'other', type: 'object' }` aos outputs.
+- **[P3, l.400] `input/virtualButton` tem 3 outputs mas não é referenciado em executor.js switch** — cai no default, OK.
+
+## 8. src/utils/flirscript/flircode.js (772 linhas) — USADO no editor e no export (cópia)
+
+### Issues
+- **[P0, l.567] `gameContext.playSoundByName?.(evaluatedArgs[0]) ?? gameContext.playSound?.(evaluatedArgs[0])`** — `playSoundByName` retorna undefined (não tem return statement), então `??` avalia o lado direito. Resultado: se existir SoundObject com aquele nome, toca; MAS como o lado direito também avalia, `playSound(name)` também toca (tratando name como URL). **Som toca duas vezes**. Fix: usar `if (sc && sc.url) { ... } else { gameContext.playSound?.(evaluatedArgs[0]) }` dentro de playSoundByName, ou usar `||` (não `??`).
+- **[P0, l.538-542, l.544-549] `repeat_inc` / `repeat_dec`** — `let v = 0; while (v <= stmt.until)` incrementa `v += stmt.step`. Mas se `stmt.step` é 0 ou negativo (mal-formado), loop infinito. Sem guarda. Fix: validar step > 0 em parseValue.
+- **[P0, l.528-533] `repeat_n`** — `for (let i = 0; i < stmt.count; i++)` com `stmt.count` sendo `parseInt(m[1])` do regex `(\d+)`. Regex garante dígitos, mas `parseInt("99999999999999999")` não falha, gera loop massivo. Fix: cap em MAX_LOOP.
+- **[P1, l.536-541] `repeat_inc` tem `let v = 0` inicial** — ignora o valor atual de `stmt.until` start. Se o utilizador quer "de 5 até 10 com step 1", o loop começa em 0 (não em 5). Semântica estranha. Fix: parse explícito de `from` e `to`.
+- **[P1, l.459-466] `if` não propagar `_ifChainMatched` entre statements irmãos** — o comment diz que elseif/else usam `params._ifChainMatched`, mas `params` é o objeto de parâmetros passado à função. Se o if está num sub-bloco, o params é diferente do params do pai. elseif/else IRMÃOS do if (no mesmo bloco) compartilham params. OK, mas pode falhar se o if tiver um begincode...endcode com elseif/else DENTRO (que vira statements do body do if, não irmãos).
+- **[P1, l.593-601] `wait(seconds)`** — comment diz "Como não estamos em worker, usar setTimeout com flag" mas o código faz `gameContext._waitQueue.push(delayMs)`. **`_waitQueue` não existe em nenhum gameContext** (nem editor nem export). `wait()` é um no-op silencioso. Fix: implementar fila de waitQueue e processar no tick, ou usar async/await.
+- **[P1, l.691] `case 'linkTo'`** — `gameContext.linkTo?.(evaluatedArgs[0], evaluatedArgs[1])`. No editor, `gameContext.linkTo` NÃO EXISTE (grep em SceneLevel3D.jsx não encontra linkTo). Só funciona no export. Editor é silenciosamente no-op.
+- **[P1, l.693-695] `setGameState` / `getGameState`** — `gameContext.setGameState` não existe no editor (só no export). Editor é no-op.
+- **[P1, l.699-703] `saveProgress` / `loadProgress`** — `gameContext.saveProgress` não existe no editor (só no export). Editor é no-op.
+- **[P1, l.705-706] `playSequence`** — `gameContext.playSequence` não existe no editor (só no export). Editor é no-op.
+- **[P1, l.709-716] `setLightIntensity`, `setLightColor`, `setLightVisible`** — `gameContext.setLightIntensity/Color/Visible` não existe em NENHUM dos dois (nem editor nem export). Dead branches no switch. Fix: implementar ou remover.
+- **[P1, l.718-720] `getDataAsset`** — `gameContext.getDataAsset` não existe em nenhum lado. Dead branch.
+- **[P1, l.721-723] `getAutoload`** — `gameContext.getAutoload` não existe em nenhum lado. Dead branch.
+- **[P2, l.460] `evalCondition` chama `parseValue(m[1].trim())` em cada call** — recompila expressão. Para tick events a 60fps com múltiplos ifs, overhead. P3.
+- **[P2, l.423-424] `case '==': return left == right` (com `==` loose equality)** — comparação 1 == "1" retorna true. Pode ser desejado ou não. Para consistência usar `===`.
+- **[P2, l.731-770] `triggerEvent` não faz try/catch em volta de `execStatements`** — se um statement lançar, o triggerEvent inteiro falha e os próximos runtimes não recebem o evento. Apenas `execStatements` tem try/catch per-statement, mas `triggerEvent` chama execStatements(fn.body, params) — se fn.body não for array, `.length` lança.
+- **[P3, l.768-770] `dispose()` é vazio** — localVars e functions continuam em memória.
+
+## 9. src/utils/flirscript/flircodeHighlight.js (120 linhas) — USADO
+
+### Issues
+- **[P0, sem relação] Highlighting não cobre keywords `class`, `extends`, `this`, `in`, `number`, `until`** — `this` (l.278 de flircode.js) e `class/extends` (l.61-62) não estão no KEYWORDS set. Fix: adicionar.
+- **[P0, sem relação] Não cobre funções `takeDamage`, `getHealth`, `getAmmo`, `emitSignal`, `linkTo`, `setGameState`, `getGameState`, `saveProgress`, `loadProgress`, `playSequence`, `setLightIntensity`, `setLightColor`, `setLightVisible`, `getDataAsset`, `getAutoload`, `addToInventory`, `removeFromInventory`, `getInventoryCount`, `hasItem`, `equipWeapon`, `shoot`, `reload`, `sendMessage`, `getPlayers`, `getPlayerState`** — todas definidas em flircode.js mas não em BUILTIN_FUNCS. Fix: adicionar.
+- **[P0, sem relação] Não cobre eventos `onPlayerJoin`, `onPlayerLeave`, `onMessage`, `onSignal`, `onDamage`, `onPickup`, `onGameStateChange`** — definidos em flircode.js eventMap (l.371-381) mas não em EVENTS. Fix: adicionar.
+- **[P2, l.62] String tokenizer não escapa `\"`** — `while (end < line.length && line[end] !== '"') end++` — se a string contiver `\"`, o loop para cedo. Fix: aceitar escape `\"`.
+- **[P2, l.86-88] `const afterWord = line.slice(end).trimStart(); const isCall = afterWord.startsWith('(')`** — identifica função vs variável pelo parêntesis seguinte, mas ignora whitespace + comentários. Se houver `foo  (  )` ainda funciona (trimStart), mas `foo $$ comment\n ( )` falha. P3.
+
+## 10. src/utils/flirscript/register.js (112 linhas) — USADO
+
+### Issues
+- **[P1, l.83-88] Vec3 widget cria `properties[`${key}_x`]`, `_y`, `_z` em vez de `properties[key]`** — bug confirmado: o executor.js `const/vec3` case (l.367-370) lê `node.properties.value` que nunca foi setado para vec3. Resultado: const/vec3 retorna [0,0,0]. Fix: criar `properties[key] = [value[0], value[1], value[2]]` ou mudar executor para ler os 3 sub-widgets.
+- **[P2, l.85-87] `addWidget('number', '${key}.x', value[0], ...)`** — o callback faz `this.properties[`${key}_x`] = v` mas não atualiza `this.properties[key]` (o array). Mesmo se o executor lesse `properties[key]`, estaria desatualizado. Fix: callback deveria atualizar o array também.
+- **[P2, l.93] `this.size = [180, Math.max(60, ...)]`** — calculado uma vez no constructor. Se widgets forem adicionados depois (dynamic), o size não ajusta.
+- **[P3, l.71-76] `options` para `key === 'operator'`** assume apenas `logic/compare` (6 operadores) e outros (`+ - * /`). Não distingue entre `logic/math` e outros. Pode dar opções erradas se houver mais selects no futuro.
+
+## 11. src/utils/game/gameRuntime.js (506 linhas) — USADO no export
+
+### Issues
+- **[P0, l.43-50] `evalVal` não implementa `concat`, `call_value`, `this`** — flircode.js tem estes casos (l.391-398) mas o runtime exportado só trata string/number/boolean/var. Strings concatenadas (`"x" + y`), `getVar("nome")`, e `this` são todos inválidos no export. Scripts que usam estas features funcionam no editor mas não no export. P1 divergência crítica.
+- **[P0, l.80-89] `execS` não implementa `if/else if/else` blocks, `repeat_*`, `switch`, `case`, `default`** — flircode.js tem 11 statement types (l.442-555) mas o export só faz `var`, `assign`, `if (cond)` (sem begincode!), `call`. Todos os outros statements são silently ignorados. Scripts com loops/switchs NO EXPORT = no-op.
+- **[P0, l.84] `if (m = s.t.match(/^if\s*\((.+)\)$/))`** — requer que o if seja inline sem `begincode`. Mas flircode.js parser (l.189) requer `if (cond) begincode`. **O regex do export nunca faz match** com input válido. if/else é completamente broken no export.
+- **[P0, l.107] `case 'changeScene': dbg('changeScene: ' + args[0], 'log'); break`** — log only, não muda de cena. MAS l.152-154 define `case 'changeScene'` DE NOVO que chama `gc.changeScene(args[0])`. Como o switch avalia o primeiro match, a versão funcional (l.152) nunca é executada. Bug: changeScene é log-only no export. Fix: remover l.107 ou movê-lo para depois.
+- **[P0, l.116] `case 'playAnim': dbg('playAnim: ' + args[0], 'log'); break`** — log only. Nenhuma animação toca no export. Fix: implementar AnimationMixer no export ou usar createAnimationPlayer.
+- **[P0, l.250] `shoot: function () { dbg('shoot() — sem implementação no export', 'log', 'Weapon') }`** — stub. WeaponObject não funciona no export.
+- **[P0, l.251-252] `reload`, `equipWeapon`** — stubs (apenas log).
+- **[P0, l.318-336] `setupMesh` só suporta 6 tipos primitivos (cube/sphere/cylinder/cone/plane/torus)** — não carrega GLB/GLTF. Qualquer objeto do catálogo que não seja primitivo é fallback para BoxGeometry. Fix: carregar GLTFLoader via CDN.
+- **[P0, l.366] `var shape = new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5))`** — HARDCODED 1x1x1 box para todos os physics bodies, IGNORA `colliderShape`, `colliderSize`, `colliderOffset`, `colliderRadius`, `colliderHeight` do conect. Divergência massiva: no editor, physicsSystem.js usa createShape() que respeita estas props; no export, todas as colisões são 1x1x1 box.
+- **[P0, l.366] Sem suporte a TriggerObject** — o export não cria `body.isTrigger = true` para triggers. TriggerObject é tratado como RigidObject comum. onEnterZone/onExitZone nunca disparam no export.
+- **[P0, l.435, l.436, l.437] innerHTML com valores do usuário** — `el.label`, `el.value`, `el.url` são concatenados em innerHTML sem escape. XSS se o projeto for malicioso (e.g. label=`<img src=x onerror=alert(1)>`). NOTA: worklog POST-AUDIT-4.0 afirma ter corrigido isto, mas o ficheiro atual AINDA tem innerHTML nestas linhas. Regressão ou correção nunca aplicada.
+- **[P0, SEM NPC AI no export] `createNPCAI` NÃO é chamado no export** — NPCs no export ficam parados para sempre. Behavior chase/patrol/flee totalmente ausente.
+- **[P0, SEM Timers no export] Não há loop de TimerObject no animate()** — `TimerObject` no export é ignorado. Evento onTimer nunca dispara.
+- **[P0, SEM Animation Players no export] `createAnimationPlayer` NÃO é chamado no export** — animações de objeto/npc não tocam. `playAnim` é log-only.
+- **[P0, SEM JointObject no export]** — JointObject é ignorado. Sem constraints no mundo.
+- **[P0, SEM conects UI no export]** — ButtonObject, JoystickObject, TextObject, ImageObject, PanelObject como CONECTS são ignorados. Apenas uiScreens (do UIEditor) são renderizadas.
+- **[P0, SEM FlirScript (graph) no export]** — export só aceita `flirScript.startsWith('FLIRCODE:')` (text-based). Scripts em grafo (objeto serializado) são ignorados. P1 divergência: editor suporta ambos, export só um.
+- **[P0, SEM SunObject, PointObject, SpotObject, AreaObject, AmbientObject, ReflectObject, ParticleObject, TrailObject, TerrainObject, WaterObject, SpawnObject, NavigatorObject, CheckpointObject, PathObject, WeaponObject, ItemObject, AnimationBoostObject, GameStateObject, PrefabObject, RoguelikeGenerator, GroupObject, ReferenceObject, CameraTouchZone no export]** — apenas 8 conects são tratados (RigidObject, StaticObject, StopObject, PersonalObject, NpcObject, LuminousObject, SkyObject-apenas-gradient, FogObject, SoundObject-apenas-autoplay). 24+ conects do taxonomy NÃO funcionam no export.
+- **[P1, l.474-479] Camera follow no export é HARDCODED para third-person** — ignora `followMode` ('top', 'side', 'none'). Apenas `followHeight` e `followDistance` são aplicados. Divergência: editor respeita followMode (SceneLevel3D l.510-525).
+- **[P1, l.459-472] Player movement no export DIRECTLY seta body.velocity** em vez de usar `movePersonal` — bypassa a lógica de coyote time / double jump. E como `updatePersonalState` não é chamado, estas features estão ausentes no export.
+- **[P1, l.347, l.403] `Object.assign(gc, { _instanceId: ..., mesh: ... })`** — MUTA o gc global, não cria cópia. Cada call substitui `_instanceId` e `mesh`. Se dois FlirCode runtimes são criados em loop, ambos partilham o mesmo gc — o último criado vence. Scripts com `gc.mesh` referenciam o mesh do ÚLTIMO runtime criado, não o seu próprio. Bug massivo. Fix: criar contexto por-instância `var ctx = Object.create(gc); ctx._instanceId = ...; ctx.mesh = ...`.
+- **[P1, l.166] `gc._instanceId = gc._instanceId`** — assignment self-referencial no-op. Provavelmente bug: devia ser `gc._instanceId = payload._instanceId` ou similar. Morto.
+- **[P1, l.398] `var audio = new Audio(conect.url)` sem guardar referência** — se o jogo for parado, o áudio continua a tocar. Memory leak / áudio zombie. Fix: guardar `audio.pause()` no cleanup.
+- **[P2, l.411-413] Touch events sem `passive: false`** — `canvas.addEventListener('touchstart', ...)` sem `{ passive: false }`. Em alguns browsers, `e.touches[0].clientX` pode ser undefined se passive=true (default). Para além disso, não chama `e.preventDefault()` — scroll da página interfere com joystick.
+- **[P2, l.493-498] Resize listener não é removido** — se startGame for chamado múltiplas vezes (e.g. SPA navigation), listeners acumulam.
+- **[P2, l.478] `camera.lookAt(pm.position)` em cada frame** — lookAt muta a quaternion da câmara, conflitando com `camera.rotation.set` do setup inicial (l.225). OK se a câmara sempre segue o player.
+- **[P2, l.190] `splash.innerHTML = '<div style="color:#f85149">Sem cenas</div>'`** — sem XSS (literal fixo) mas estilo inline. Preferir CSS class.
+- **[P2, l.446] `requestAnimationFrame(animate)` chamado dentro de animate sem guard de isRunning** — se startGame for chamado 2x, dois loops rodam em paralelo. P1 em SPAs.
+- **[P3, l.229] `new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) })`** — hardcoded gravity -9.82. Editor usa `setupScene.physics.gravity` (SceneLevel3D l.296). Divergência: se o usuário customiza gravity, export ignora.
+- **[P3, l.211-213] `scene3d.add(new THREE.AmbientLight(...))` + `DirectionalLight`** — hardcoded. Editor respeita `lights.ambient/directional` do store. Divergência.
+- **[P3, l.457] `for (var rid in runtimes) { runtimes[rid].triggerEvent('tick', { deltaTime: delta }) }`** — não chama `rt.update(delta)` (que existe no export return l.169 mas é `function () {}` vazio). OK por ser vazio, mas significa que delays/wait não funcionam no export.
+
+## 12. src/utils/game/gameExporter.js (152 linhas) — USADO
+
+### Issues
+- **[P0, l.16] `import gameRuntimeSource from './gameRuntime.js?raw'`** — embute o gameRuntime.js inteiro como string no HTML exportado. Mas o gameRuntime.js tem os bugs listados acima (P0: NPCs não se movem, Timers não disparam, Animations não tocam, if/else/loops não funcionam, 24+ conects não suportados). O exportado é fundamentalmente incomplete.
+- **[P0, l.111] CDN `cannon-es@0.20.0`** — versão antiga. cannon-es v0.20.0 foi lançada em 2023. Versão atual (Jan 2025) é 0.21.0. Pode ter bugs de compatibilidade com três.js 0.169.0 (l.110).
+- **[P1, l.110] `three@0.169.0/build/three.min.js`** — three.min.js foi REMOVIDO em three.js r150+ (apenas three.module.js disponível). CDN pode servir um stub vazio. Bug confirmado: export usa API deprecated.
+- **[P2, l.18-20] `optimizeProject` é JSON.parse(JSON.stringify(projectData))** — deep clone inútil (não otimiza nada). Apenas duplica o projectData. Morto por ser no-op.
+- **[P2, l.124-135] `generateCapacitorConfig`** — gera capacitor.config.json mas não cria estrutura de diretórios. Para além disso, `webDir: 'dist'` mas o export é um único ficheiro HTML sem diretório dist. Inconsistência.
+- **[P3, l.137-140] `generateShareUrl`** — hard-coded `https://flir-engine.vercel.app`. Não funciona em dev/local.
+
+## 13. modelagemetexturizacao/api/marketplace/ — Serverless functions
+
+### db.js (98 linhas)
+- **[P0, SECURITY, l.11-12] Connection string hardcoded com password `npg_Yr7nld2jTpSW`** — credenciais de produção commitadas no source. Fix: remover hardcoded fallback, exigir `process.env.NEON_DATABASE_URL`.
+- **[P0, SECURITY, l.16] `ssl: { rejectUnauthorized: false }`** — desativa verificação de certificado SSL. Vulnerável a MITM. Fix: `ssl: true` ou usar CA cert.
+- **[P1, l.81-90] `initDB()` corre SCHEMA_SQL em cada cold start** — 5 CREATE TABLE IF NOT EXISTS por cold start. OK em Neon (serverless) mas latency +1s no primeiro request após idle. Fix: separar init script de migração.
+- **[P1, l.79] `let initialized = false`** — flag global não é thread-safe em serverless com múltiplos workers. Se dois requests chegam em paralelo, ambos correm SCHEMA_SQL. Race condition.
+- **[P2, l.93-95] `query` chama `await initDB()` em cada call** — overhead. Fix: chamar initDB uma vez no module load.
+- **[P3, l.97] Exporta `pool`** — não deveria ser necessário expor o pool. Apenas `query`.
+
+### auth/login.js (49 linhas)
+- **[P0, SECURITY, l.22] `crypto.createHash('sha256').update(password).digest('hex')`** — sha256 SEM SALT é trivialmente quebrável via rainbow tables. Fix: usar bcrypt ou argon2 (Node 18+ tem `scrypt` built-in: `crypto.scryptSync(password, salt, 64)`).
+- **[P1, l.36-37] Token de sessão = `crypto.randomBytes(32).toString('hex')`** — OK em entropia, mas guardado em DB sem hash. Se DB vazar, tokens são reutilizáveis. Fix: hash do token com sha256 antes de guardar.
+- **[P2, l.27] `WHERE email = $1 AND password_hash = $2`** — leak de timing: email inexistente retorna mais rápido que password errada. Fix: sempre fazer hash + compare.
+- **[P3, l.37] Token expira em 30 dias** — longo demais para sessões sensíveis. Fix: 7 dias + refresh token.
+
+### auth/register.js (52 linhas)
+- **[P0, SECURITY, l.23] sha256 sem salt** — mesmo bug do login.
+- **[P1, l.22] Comment `// Hash simples (em produção: bcrypt/argon2)`** — reconhecido mas nunca corrigido. P1 tech debt.
+- **[P2, l.15] Sem validação de email/username/password** — aceita `email="x"`, `password="1"`. Fix: regex + min length.
+
+### games/index.js (44 linhas)
+- **[P0, SECURITY, l.33] `JSON.stringify(project_data)` guardado como JSONB** — se project_data contém scripts maliciosos (e.g. FlirCode com `window.open('evil.com')`), qualquer um que jogue o jogo executa. P1 se o runtime isola; P0 se não isola.
+- **[P1, l.27] `auth.replace('Bearer ', '')`** — se header não tem "Bearer ", pega no token inteiro. OK. Mas sem validação de formato.
+- **[P1, l.13-16] `ORDER BY downloads DESC`** — sem índice em `downloads`, scan completo. Para 1000+ jogos, lento. Fix: `CREATE INDEX idx_games_downloads ON games(downloads DESC) WHERE is_published = true`.
+- **[P2, l.9-10] `parseInt(req.query.page)`** — sem validação. `?page=-5` gera `offset = -120`, postgres erro. Fix: `Math.max(1, parseInt(...) || 1)`.
+
+### assets/index.js (61 linhas)
+- **[P1, l.23] `LIMIT $N OFFSET $M`** com parâmetros posicionais construídos dinamicamente** — funciona mas frágil. SQL injection impossível (parameterized) mas difícil de ler.
+- **[P1, l.49] `tags || []`** — se `tags` é string em vez de array, postgres erro. Fix: validar `Array.isArray(tags)`.
+- **[P2, l.17] `SELECT * FROM assets`** — expõe todas as colunas incluindo author_id (UUID interno). Fix: SELECT explícito.
+
+### templates/index.js (51 linhas)
+- Mesmas issues que games/index.js (paginação, auth).
+
+### health.js (46 linhas)
+- **[P0, SECURITY, l.34] `query(`SELECT COUNT(*) as count FROM ${t}`)`** — table name interpolado em SQL. Embora `t` venha de array fixo (l.31), pattern perigoso se array crescer.
+- **[P1, l.34] Sem rate limiting** — endpoint exposto sem auth, DDOS vector.
+- **[P2, l.11] `import { query, pool } from './db.js'`** — `pool` importado mas não usado neste file.
+
+### package.json (5 linhas)
+- **[P2, l.1] `"type": "commonjs"`** — OK mas sem dependências declaradas. `pg` e `crypto` são Node built-in ou necessitam `npm install`. Fix: declarar `pg` em dependencies.
+
+## 14. Cross-reference: Editor (SceneLevel3D.jsx) vs Runtime (gameRuntime.js)
+
+### Divergências críticas (P0)
+1. **Física**: Editor usa createPhysicsSystem (respeita colliderShape/Size/Offset/Radius/Height, trigger sensors, joints, coyote time). Export usa inline CANNON.World com Box(0.5,0.5,0.5) hardcoded para todos. Triggers, Joints, colliders personalizados: NÃO funcionam no export.
+2. **NPC AI**: Editor instancia createNPCAI por NpcObject (mas movePersonal rejeita NPC, então NPCs não se movem no editor). Export NÃO instancia NPC AI. Resultado: NPCs parados em ambos.
+3. **Animation Players**: Editor cria createAnimationPlayer por objeto com animações. Export não cria nada. `playAnim` é log-only no export.
+4. **Timers**: Editor processa TimerObject no useFrame. Export não tem loop de TimerObject. onTimer nunca dispara no export.
+5. **FlirScript (graph) vs FlirCode (text)**: Editor suporta ambos. Export só aceita FlirCode (string `FLIRCODE:`). Scripts em grafo são silently ignorados no export.
+6. **CameraController**: Não existe `cameraController` em nenhum dos dois (grep confirma 0 matches). A "câmara" é controlada inline no useFrame (editor) e no animate() (export). Divergem em: editor respeita followMode 'none/third/top/side'; export só faz third-person hardcoded.
+7. **24+ conects do taxonomy não suportados no export**: SunObject, PointObject, SpotObject, AreaObject, AmbientObject, ReflectObject, ParticleObject, TrailObject, TerrainObject, WaterObject, SpawnObject, NavigatorObject, CheckpointObject, PathObject, WeaponObject, ItemObject, AnimationBoostObject, GameStateObject, PrefabObject, RoguelikeGenerator, GroupObject, ReferenceObject, CameraTouchZone, ButtonObject, JoystickObject, TextObject, ImageObject, PanelObject — todos ignorados no export.
+8. **FlirCode no export é crippleware**: parser não implementa `if/else if/else blocks`, `repeat_*`, `switch`, `case`, `default`, `concat`, `call_value`, `this`. Scripts que usam estas features funcionam no editor mas falham silenciosamente no export.
+9. **Combat/Inventory/GameState APIs no gameContext**: Existem no export (gc.shoot, gc.takeDamage, gc.setGameState, etc.) mas NÃO no editor (SceneLevel3D.jsx gameContext). Scripts que usam shoot/takeDamage/etc funcionam no export (como stubs log) mas são no-op no editor.
+
+### Divergências P1
+10. **Luzes hardcoded no export**: AmbientLight + DirectionalLight fixos (l.211-213). Editor respeita `lights.ambient/directional` do store. Se usuário customiza intensidade/cor, export ignora.
+11. **Background hardcoded no export**: Export usa `data.scene.background` (l.199). Mas SkyObject conect é processado separadamente (l.387). Conflito: se ambos existirem, SkyObject ganha mas a background inicial é do scene.background.
+12. **Gravidade hardcoded no export**: -9.82. Editor usa `setupScene.physics.gravity[1]`.
+13. **Player movement**: Editor usa `physicsRef.current.movePersonal()` (respeita tipo). Export seta `body.velocity` diretamente. Funcionalmente equivalente para PersonalObject, mas diverge em comportamento (export não tem coyote time).
+14. **gc._instanceId mutado no export**: Object.assign(gc, {...}) muta o gc global. Editor usa `{ ...gameContext, _instanceId, mesh }` spread (cópia). Scripts no export com `gc.mesh` referenciam o último runtime criado, não o seu próprio.
+
+### Divergências P2
+15. **Touch events**: Editor usa window-level touchstart/touchend com joystickRef. Export usa canvas-level. Funcionalmente OK mas diferente event target.
+16. **Resize handler**: Export adiciona listener sem cleanup. Editor não precisa (R3F gere).
+17. **Splash screen**: Export tem splash SVG de 2s. Editor não tem (R3F canvas instantâneo).
+
+## 15. Resumo de Issues por Severidade
+
+| Severity | Count | Categoria |
+|----------|-------|-----------|
+| P0 | 38 | dead-code crítico, divergências editor/runtime, bugs lógicos que impedem features |
+| P1 | 32 | bugs que afetam UX mas não impedem uso básico |
+| P2 | 28 | performance, robustez, code smells |
+| P3 | 19 | dead code menor, style, doc |
+
+## 16. Tabela Prioritária de Ação
+
+| # | Severity | File:Line | Description | Suggested Fix |
+|---|----------|-----------|-------------|---------------|
+| 1 | P0 | npcAI.js:30 + physicsSystem.js:239 | NPCs não se movem (movePersonal rejeita NpcObject + npcPos é initial position) | Aceitar NpcObject em movePersonal; ler posição do mesh via helper |
+| 2 | P0 | gameRuntime.js:43-89 | FlirCode export não implementa if/else/loops/switch/concat/this | Portar lógica completa de flircode.js para o export |
+| 3 | P0 | gameRuntime.js:366 | Physics export usa Box(0.5,0.5,0.5) hardcoded, ignora collider props | Portar createShape() do physicsSystem.js |
+| 4 | P0 | gameRuntime.js:435-437 | innerHTML XSS em Checkbox/Slider/Image (regressão do POST-AUDIT-4.0) | createElement + appendChild + textContent |
+| 5 | P0 | gameRuntime.js:107,116 | changeScene e playAnim são log-only no export | Implementar gc.changeScene e AnimationMixer |
+| 6 | P0 | gameRuntime.js:250-252 | shoot/reload/equipWeapon são stubs no export | Implementar WeaponObject |
+| 7 | P0 | gameRuntime.js | NPC AI, Timers, Animation Players, Joints, 24+ conects não implementados | Portar do SceneLevel3D.jsx |
+| 8 | P0 | gameRuntime.js:347,403 | Object.assign(gc, ...) muta gc global; gc.mesh é do último runtime | Criar contexto por-instância |
+| 9 | P0 | gameRuntime.js:459-472 | Player movement bypassa movePersonal; sem coyote time | Usar movePersonal |
+| 10 | P0 | db.js:11-12 | Credenciais Neon hardcoded em source | Exigir process.env.NEON_DATABASE_URL |
+| 11 | P0 | db.js:16 | SSL rejectUnauthorized:false | ssl: true |
+| 12 | P0 | auth/login.js:22, auth/register.js:23 | sha256 sem salt | bcrypt/scrypt |
+| 13 | P0 | physicsSystem.rapier.js | Ficheiro inteiro é dead code | Remover ou implementar switch |
+| 14 | P0 | animationController.js:24 | createAnimationController nunca importado | Integrar com animationPlayer |
+| 15 | P0 | flircode.js:567 | `?? playSound` causa double-play | Usar if/else em playSoundByName |
+| 16 | P0 | flircode.js:536-549 | repeat_inc/dec sem guarda de loop infinito | Cap MAX_LOOP, validar step |
+| 17 | P0 | flircode.js:593-601 | wait() é no-op (_waitQueue não existe) | Implementar fila de wait |
+| 18 | P0 | executor.js:355-371 + register.js:83-88 | const/vec3 retorna [0,0,0] (widget props mismatch) | Sincronizar schema de properties |
+| 19 | P0 | executor.js:176-184 | Widgets editados pelo usuário são ignorados | Ler node.properties[input.name] ?? default |
+| 20 | P0 | gameExporter.js:110 | three.min.js removido em three.js r150+ | Usar three.module.js via importmap |
+| 21 | P0 | SceneLevel3D.jsx:440-534 | GameMode useFrame usa activeScene (novo) mas physicsRef tem setupScene (antigo) | Re-inicializar physics em scene change |
+| 22 | P1 | npcAI.js:48-56 | Bloco "decidir comportamento efetivo" é morto (hasSight não muda behavior) | Aplicar overrides de behavior |
+| 23 | P1 | physicsSystem.js:200 | Busca O(n) otherBody em cada collision | Map<Body, instanceId> |
+| 24 | P1 | physicsSystem.js:367-397 | addJoint sem removeJoint (memory leak) | Adicionar removeJoint |
+| 25 | P1 | flircode.js:691-723 | linkTo/setGameState/saveProgress/playSequence/setLight*/getDataAsset/getAutoload não existem no editor | Implementar no gameContext do editor |
+| 26 | P1 | gameRuntime.js:474-479 | Camera follow export não respeita followMode | Portar switch followMode do SceneLevel3D |
+| 27 | P1 | gameRuntime.js:318-336 | setupMesh só suporta 6 primitivos, sem GLB | Integrar GLTFLoader |
+| 28 | P1 | db.js:79 | initDB race condition em serverless | Lock via Promise singleton |
+| 29 | P1 | games/index.js:33 | project_data JSONB sem sanitização | Schema validation |
+| 30 | P1 | health.js:34 | SQL interpolation de table name (mesmo de array fixo) | Whitelist explícita |
+| 31 | P2 | physicsSystem.js:292 | Fixed timestep sem accumulator | Accumulator pattern |
+| 32 | P2 | physicsSystem.js:207 | setTimeout não limpo no dispose | Track IDs + clearTimeout |
+| 33 | P2 | executor.js:407-422 | Sem cycle detection | Set<nodeId> visited |
+| 34 | P2 | flircode.js:460 | evalCondition recompila regex | Pré-compilar |
+| 35 | P2 | flircodeHighlight.js:15-31 | Missing keywords (class, extends, this) e ~30 builtin funcs | Atualizar sets |
+| 36 | P2 | gameRuntime.js:411-413 | Touch events sem passive:false | { passive: false } + preventDefault |
+| 37 | P2 | gameExporter.js:18-20 | optimizeProject é no-op | Remover ou implementar |
+| 38 | P3 | taxonomy.js:1101 | conectsByCategory dead code | Remover |
+| 39 | P3 | physicsSystem.js:227-229, 272-287, 359-365 | setGravity/getStats/updatePersonalState dead exports | Remover ou usar |
+| 40 | P3 | executor.js:187-198 | Switch cases redundantes para events | Consolidar em default |
+| 41 | P3 | flircode.js:768-770 | dispose() vazio | Limpar localVars |
+| 42 | P3 | nodes.js:482 | nodesByCategory dead code | Remover |
+| 43 | P3 | assets/index.js:17 | SELECT * expõe colunas internas | SELECT explícito |
+| 44 | P3 | package.json:1 | Sem dependências declaradas (pg) | Adicionar dependencies |
+
+## 17. Conclusões Gerais
+
+### Estado do motor
+- **Editor (SceneLevel3D.jsx + ConectRenderer.jsx)**: Funciona razoavelmente para casos simples (PersonalObject com keyboard/joystick, StaticObject, LuminousObject, SkyObject gradient, FogObject). NPCs estão quebrados no editor (P0 #1). Coyote time / salto duplo definidos mas não executados (updatePersonalState morto).
+- **Export (gameRuntime.js)**: É um protótipo incomplete. Apenas 8 de 32 conects funcionam parcialmente. NPC AI, Timers, Animations, Joints, Triggers, 24+ conects visual/UI/gameplay ausentes. FlirCode parser é crippleware (sem if/else/loops/switch/concat). innerHTML XSS não corrigido (regressão do POST-AUDIT-4.0).
+- **API marketplace**: Funcional mas com credenciais hardcoded (P0 security), sha256 sem salt (P0), SSL desativado (P0). Não é production-ready.
+
+### Recomendação estratégica
+1. **NÃO publicar jogos exportados em produção** até resolver P0 #2, #3, #4, #5, #6, #7, #8 (gameRuntime crippleware).
+2. **NÃO usar marketplace API em produção** até resolver P0 #10, #11, #12 (security).
+3. **NPC AI é headline feature quebrada** — resolver P0 #1 antes de qualquer demo pública.
+4. **physicsSystem.rapier.js é 288 linhas mortas** — remover ou activar com feature flag.
+5. **animationController.js é 129 linhas mortas** — integrar com animationPlayer ou remover.
+6. **Divergência editor/export é MASSIVA** — considerar unificar o runtime: o exportado deveria importar createPhysicsSystem, createNPCAI, createAnimationPlayer, createFlirCodeRuntime do código-fonte (via esbuild bundle) em vez de reimplementar inline.
+
+Stage Summary:
+- 12 ficheiros auditados (4.644 linhas de código) + 8 serverless functions em api/marketplace
+- 117 issues identificadas (38 P0, 32 P1, 28 P2, 19 P3)
+- 5 ficheiros com dead code massivo: physicsSystem.rapier.js (100%), animationController.js (~80%), e porções de physicsSystem.js (setGravity, getStats, updatePersonalState)
+- Divergência editor/runtime é CRÍTICA: apenas 8 de 32 conects funcionam parcialmente no export; FlirCode parser do export não implementa if/else/loops/switch/concat
+- Security: credenciais Neon hardcoded, sha256 sem salt, SSL desativado, innerHTML XSS no export (regressão)
+- Recomendação: NÃO publicar jogos exportados nem marketplace API em produção até resolver P0s
+- Push: NÃO realizado (auditoria apenas)
+
+---
+Task ID: AUDIT-4
+Agent: audit-css-docs
+Task: Auditoria completa de CSS, documentação e runtime exportado (Scope: global.css, SceneLevel3D.jsx, gameRuntime.js, gameExporter.js, README/ENGINE_DOC, package.json/vite.config.js/index.html/netlify.toml)
+
+Work Log:
+
+## 1. src/styles/global.css (4464 linhas — CRITICAL stylesheet)
+
+### 1.1 @media queries — 38 queries, breakpoints:
+- `max-width: 600px` × 18 (mais usado — grid/panels/mobile-only drawers)
+- `max-width: 1024px` × 8 (drawer mode, bottom-bar)
+- `max-width: 768px` × 5 (panel widths, topbar compact)
+- `max-width: 480px` × 2 (hide viewport-hint, hide topbar groups 4-5)
+- `max-width: 380px` × 2
+- `max-width: 360px` × 2 (tabs-grid 2-col)
+- `min-width: 1025px` × 1 (desktop: hide drawer-toggle)
+- Orientação landscape: `@media (max-width: 1024px) and (orientation: landscape) and (max-height: 500px)` (linha 3584) — usado para telemóvel landscape
+- Orientação portrait: `@media (max-width: 768px) and (orientation: portrait) and (max-height: 500px)` (linha 3915) — mostra orientation-hint
+
+**Inconsistência**: breakpoints 600/768/1024 misturados sem convenção clara. 600px domina onde devia ser 768 (mobile-first). 480px/380px/360px são quase idênticos — desnecessária fragmentação.
+
+### 1.2 `!important` — 33 declarações. Piores ofensores:
+- **Linhas 1774-1790** (litecontextmenu block): 9 `!important` num único bloco para fazer override de estilos LiteGraph injetados dinamicamente. Justificado mas frágil.
+- **Linhas 3061-3063** (.conect-context-submenu .submenu-item): 3 `!important` em background/font-size/padding — pode ser refatorado com especificidade.
+- **Linhas 4064-4065** (.flircode-textarea-overlay): `background: transparent !important; color: transparent !important;` — overlay de syntax highlighting. Justificado.
+- **Linhas 3665-3666** (landscape .panel.left/right): `width: 240px !important` para forçar largura em landscape. Pode ser feito com variável CSS.
+- **Linhas 3823, 3825** (.debug-console landscape): `width: 260px !important; height: 140px !important` — mesma situação.
+- **Linhas 544-545** (Canvas): `width: 100% !important; height: 100% !important` — para garantir que canvas R3F preenche pai. Justificado.
+- **Linhas 237, 241** (game-mode): `padding-bottom: 0 !important; height: 100vh !important` — necessário para fullscreen do modo jogo. Justificado.
+
+Total injustificado: ~6 (litecontextmenu 9 + conect-context-submenu 3 + landscape panels 2 + debug-console 2).
+
+### 1.3 Orphan selectors (CSS classes definidas MAS sem uso em qualquer JSX/JS):
+Confirmados via grep em `src/**/*.jsx` + `src/**/*.js`:
+- **Linha 479** `.prop-row .field-label` — não usado
+- **Linha 755** `.gap-2 { gap: 8px; }` — não usado
+- **Linha 758** `.flex-1 { flex: 1; }` — não usado
+- **Linha 1280** `.hide-tiny` (dentro @media 360px) — não usado
+- **Linha 1264** `.layer-card` (e linha 1272 `.layer-card .row`) — não usado (sistema de camadas não implementado)
+- **Linhas 1773, 1779, 1784** `.litegraph.litecontextmenu`, `.litemenu-title`, `.litemenu-entry` — não usado (LiteGraph não integrado)
+- **Linha 1238** `.mat-preview` — não usado
+- **Linhas 3911, 3917** `.orientation-hint` — não usado (tag HTML não existe no React)
+- **Linhas 1468, 1486** `.preview-cam-btn` — não usado
+- **Linhas 461, 467** `.prop-row .row-2`, `.prop-row .row-3` — não usado
+- **Linhas 1412, 1438, 3795** `.scene-preview-fullscreen` — não usado (ScenePreview.jsx usa `.scene-preview-overlay`)
+- **Linha 1227** `.sculpt-cursor` — não usado
+- **Linha 2535** `.shader-visual-placeholder` — não usado
+- **Linhas 2345, 2361, 2368, 2422** `.ui-editor-body`, `.ui-palette`, `.ui-palette-item`, `.ui-props` — não usado (UIEditor.jsx usa `ui-editor-full`/`ui-editor-left`/`ui-editor-right`)
+
+**Total: 20 classes mortas + 3 variants (litemenu-*) = ~23 seletores órfãos.**
+
+### 1.4 Dark mode handling — INEXISTENTE
+- `:root` (linhas 5-93) define TODAS as variáveis CSS em tema dark-only (`--bg-app: #0e1419`, `color-scheme: dark`)
+- **Nenhuma** `prefers-color-scheme: light` query
+- **Nenhum** `data-theme="light"` ou `html.light` selector
+- **Nenhum** toggle de tema no store (`useStore.js` não tem `theme` field)
+- 87 ocorrências de cores hardcoded em JSX inline (`#0d1117`, `#161b22`, `#0a0e1a`, `#1a1a2e`)
+- README linha 134 afirma "Estilos globais (dark mode + responsivo)" — mas dark mode é o ÚNICO modo; não há light mode.
+
+### 1.5 Responsiveness <768px:
+- **Layout principal**: `@media (max-width: 1024px) { .app-body { grid-template-columns: 1fr; } }` (linha 246) — colapsa para 1 coluna ✓
+- **Painéis laterais**: viram drawers absolute-positioned com `width: 280px; max-width: 85vw;` (linha 620) — em ecrã 360px fica 280px (cabe mas canvas só tem 80px visível quando drawer aberto)
+- **Bottom-bar**: 64px de altura em mobile (linha 1000+) — pode ser demasiado em ecrãs muito baixos, mas tem override para 44px em landscape
+- **Topbar**: compactada em 768px (padding 6px, brand-text hidden), 480px esconde grupos 4-5, landscape esconde `data-landscape="hide"` (P6 do worklog)
+- **Tabs-grid**: 4 colunas por defeito, 2 colunas em 360px ✓
+- **Modais**: `max-width: 420px` (linha 711), mas `max-height: calc(100vh - 16px); overflow-y: auto` apenas aplicado em landscape (linha 3742) — em portrait com altura pequena pode cortar conteúdo
+- **viewport-actions**: 36x36 desktop, 32x32 só em landscape (linha 3713-3719). Em portrait mobile ficam 36x36 (razoável mas sem override)
+- **`.topbar` não tem overflow-x** — se todos os grupos estiverem visíveis em 360px (sem data-landscape="hide"), overflow acontece silenciosamente. Apenas grupos 4-5 são escondidos em 480px.
+
+### 1.6 Conflicting/duplicado rules:
+- `.panel.left, .panel.right` definido em: linha 290 (base), 620 (@1024px), 876 (@768px), 3664 (landscape). A regra @768px apenas repete `width: 280px` (redundante — já estava definido em @1024px).
+- `.debug-console` definido uma vez (linha 2078) mas com `width: 260px !important` em landscape (linha 3823) que sobrepõe-se.
+
+---
+
+## 2. src/components/3d/SceneLevel3D.jsx (733 linhas — editado e modo jogo)
+
+### 2.1 useFrame (linhas 440-534):
+- **Chamada única** por frame, gestão inline (sem abstração cameraController)
+- Ordem: física → mesh sync → FlirCode tick → animation players → NPC AI → timers → joystick/keys → câmara
+- **`physicsRef.current.update(delta)`** ✓ (line 445) — chama step do cannon-es
+- **`mesh.position.copy(entry.body.position)`** ✓ (line 450) — sincroniza meshes
+- **`rt.update(delta)`** e **`rt.triggerEvent('tick', ...)`** ✓ (line 458-459)
+- **`player.update(delta)`** ✓ (line 463) — animation players
+- **`ai.update(delta)`** ✓ (line 466) — NPC AI update
+- **`state.remaining -= delta`** ✓ (line 471) — timers decrementados
+- NÃO usa `cameraController` abstrato — implementa câmara inline (linhas 500-533)
+
+### 2.2 ViewObject conect processing (linhas 500-533):
+- **Suporta `followMode`: 'third', 'top', 'side'** ✓
+- **NÃO suporta 'first' person** (FPV) — limitação documentada em ENGINE_DOC mas não explícita
+- Auto-detecta `cameraRole='player'` → segue PersonalObject se `followTarget` vazio ✓
+- `followDistance` e `followHeight` configuráveis ✓
+- Câmara estática usa `position` e `rotation` do ViewObject ✓
+
+### 2.3 Cleanup no useEffect return (linhas 420-436):
+- **Runtimes disposed** ✓ (line 421)
+- **NPC AIs disposed** ✓ (line 423)
+- **TimerStates cleared** — MAS `if (s.interval) clearInterval(s.interval)` (line 425) é MORTO: `interval` nunca é setado (timers usam delta-time no useFrame, não setInterval)
+- **animPlayersRef.current.clear()** (line 427) — APENAS limpa o Map, NÃO chama `player.dispose()`. Se `createAnimationPlayer` regista listeners em bones/skeletons, leak garantido.
+- **Physics disposed** ✓ (line 428)
+- **Touch/key listeners removidos** ✓ (linhas 430-433)
+- **`window._flirGameContext = null`** ✓ (line 434)
+- **`window._flirJoystick = null`** ✓ (line 100, useEffect separado)
+
+### 2.4 Memory leaks:
+- **P1 — `window._flirKeys`** (set line 418, usado line 481): NUNCA limpo no cleanup. Leak global.
+- **P1 — Multiplayer `mp.on(...)` handlers** (linhas 130, 135, 140): registados mas NUNCA removidos (não há `mp.off()` no cleanup). Cada mount/dismount acumula handlers.
+- **P1 — Multiplayer promise** (line 110): `import(...).then(...)` sem cancelamento. Se componente unmounta antes do import resolver, callback ainda corre e seta `window._multiplayer = mp`.
+- **P2 — Physics setTimeout** (line 300): `setTimeout(() => { ... }, 50)` sem guardar ID. Se `isGameMode` muda antes de 50ms, callback ainda corre e pode registrar conects num physicsRef já disposed.
+- **P2 — animPlayersRef.clear() sem dispose** (line 427): ver acima.
+
+### 2.5 SkyObject / FogObject — DEAD CODE:
+- Linha 400: comentário diz "Aplicado via SceneBackgroundSolid se mudar o background" mas `SceneBackgroundSolid` (linha 51-72) usa `background` do store, NÃO `SkyObject` conect. SkyObject é ignorado no editor.
+- Linha 404: comentário diz "Fog aplicado no useFrame" mas `useFrame` (440-534) NÃO aplica fog. FogObject é ignorado no editor.
+- gameRuntime.js (exportado) aplica SkyObject (linha 387) e FogObject (linha 394) ✓ — divergência editor vs exportado.
+
+### 2.6 gameContext API (linhas 167-292):
+- 21 métodos no gameContext do editor: setVar/getVar, moveObject, rotateObject, playAnimation, playSound, playSoundByName, destroyObject, spawnObject, changeScene, setVisible, applyForce, jumpPlayer, showUIScreen, hideUIScreen, getUIValue, setUIValue, triggerUIEvent, collidingWith, distanceTo, isTouching, sendMessage, getPlayers, getPlayerState.
+- **FALTAM vs ENGINE_DOC sec 7.3**: setLightIntensity, setLightColor, setLightVisible, getDataAsset, getAutoload, setGameState, getGameState, saveProgress, loadProgress, playSequence, shoot, reload, equipWeapon, getAmmo, takeDamage, getHealth, addToInventory, removeFromInventory, getInventoryCount, hasItem, emitSignal, linkTo. (22 métodos documentados mas não no gameContext do editor).
+- flircode.js chama estes via `gameContext.setLightIntensity?.()` (optional chaining) → silently NO-OP no editor.
+
+---
+
+## 3. src/utils/game/gameRuntime.js (506 linhas — runtime exportado)
+
+### 3.1 CRITICAL — FlirCode parser divergente:
+- Tem o seu próprio parser inline (linhas 14-41) — duplicado de `flircode.js`
+- **P0 BUG — `if` statement é NO-OP** (linha 84):
+  ```js
+  if (m = s.t.match(/^if\s*\((.+)\)$/)) { if (evalCond(m[1], vars, gc)) { /* procurar begincode seguinte */ } return }
+  ```
+  A condição é avaliada mas o corpo (próximo `begincode ... endcode`) NUNCA é executado. O comentário diz "procurar begincode seguinte" mas a implementação está em falta.
+- **P0 BUG — `else if`/`else`/`switch`/`case`/`default`/`repeat`/`class` NÃO existem** no parser exportado. Apenas `var`, atribuição, `if` (quebrado) e chamadas de função.
+- Isto significa: qualquer script FlirCode com condicionais ou loops NÃO FUNCIONA no jogo exportado. Apenas funciona no editor (via flircode.js).
+
+### 3.2 CRITICAL — Divergência massiva vs SceneLevel3D.jsx:
+
+| Sistema | Editor (SceneLevel3D) | Exportado (gameRuntime) | Estado |
+|---|---|---|---|
+| FlirCode parser | `flircode.js` completo (if/else/switch/repeat/class) | Parser inline simplificado (apenas var/assign/if-no-op/fn-call) | **P0 divergente** |
+| Física | `createPhysicsSystem` (wrapper cannon-es) | `CANNON.World` direto | OK funcional |
+| NPC AI | `createNPCAI` + `ai.update(delta)` ✓ | **AUSENTE** — NpcObject renderizado como box estático | **P0 faltante** |
+| Animation Players | `createAnimationPlayer` + `player.update(delta)` ✓ | **AUSENTE** — `playAnim` é stub `dbg(...)` | **P0 faltante** |
+| JointObject | `physicsRef.addJoint(conect)` ✓ (line 308) | **AUSENTE** — joints ignorados | **P0 faltante** |
+| TriggerObject | `physicsRef` com `onTriggerEnter/onTriggerExit` ✓ | **AUSENTE** — apenas `collide` event do CANNON | **P0 faltante** |
+| TimerObject | ticked no useFrame + `onTimer` event ✓ | **AUSENTE** — timers nunca decrementam | **P0 faltante** |
+| Camera follow modes | third/top/side ✓ | Apenas third (player role) | P1 divergente |
+| SkyObject | **DEAD CODE** (comentário mas sem aplicação) | Aplicado ✓ (linha 387) | **Divergente** |
+| FogObject | **DEAD CODE** (comentário mas sem aplicação) | Aplicado ✓ (linha 394) | **Divergente** |
+| Mesh rendering | `SceneObject.jsx` com MeshPhysicalMaterial, PBR completo, texturas, GLB loading | Apenas primitivas (cube/sphere/cylinder/cone/plane/torus) com MeshStandardMaterial | **P0 faltante** |
+| Joystick | `window._flirJoystick` global setado por GameUIOverlay React component | Touch handlers inline no canvas | OK funcional |
+| Multiplayer | `multiplayerManager` dinamicamente importado | **AUSENTE** no runtime loop (apenas stubs `sendMessage`/`getPlayers` que retornam defaults) | **P1 faltante** |
+
+### 3.3 Memory leaks (P0):
+- **Linha 447**: `requestAnimationFrame(animate)` — NUNCA cancelado. Sem `cancelAnimationFrame`. Loop corre indefinidamente.
+- **5 listeners NUNCA removidos**:
+  - Linha 374: `body.addEventListener('collide', ...)` (por cada CANNON body)
+  - Linha 411: `canvas.addEventListener('touchstart', ...)`
+  - Linha 412: `canvas.addEventListener('touchmove', ...)`
+  - Linha 413: `canvas.addEventListener('touchend', ...)`
+  - Linha 415: `window.addEventListener('keydown', ...)`
+  - Linha 416: `window.addEventListener('keyup', ...)`
+  - Linha 494: `window.addEventListener('resize', ...)`
+- **Nenhuma função `stopGame()` ou cleanup exportada**. Não há forma de parar o jogo — apenas fechar o tab.
+- Único `dispose` (linha 169) é do FlirCode runtime individual, não do jogo completo.
+
+### 3.4 gameContext API divergente (linhas 237-314):
+- 25 métodos no gameContext exportado (mais que editor porque adiciona stubs)
+- TEM mas editor NÃO TEM: setGameState, getGameState, saveProgress, loadProgress, playSequence, shoot, reload, equipWeapon, getAmmo, takeDamage, getHealth, addToInventory, removeFromInventory, getInventoryCount, hasItem, emitSignal, linkTo. (17 métodos stub no exportado que faltam no editor)
+- MAS os stubs são todos `dbg(...)` — sem implementação real (apenas log). Por exemplo: `shoot: function () { dbg('shoot() — sem implementação no export', 'log', 'Weapon') }` (linha 250).
+- **NÃO TEM mas editor TEM**: moveObject, rotateObject, playSoundByName, destroyObject, spawnObject (exportado é stub), setVisible, applyForce, jumpPlayer, triggerUIEvent. (9 métodos do editor faltam no exportado)
+- Resultado: um script que funciona no editor pode falhar silenciosamente no exportado, e vice-versa.
+
+### 3.5 XSS vulnerabilities (não corrigidas apesar de POST-AUDIT-4.0):
+- **Linha 435**: `dom.innerHTML = '<input type="checkbox" ' + (el.checked ? 'checked' : '') + '> <span>' + (el.label || '') + '</span>'` — innerHTML com `el.label` não escapado.
+- **Linha 436**: `dom.innerHTML = '<input type="range" ...><span ...>' + (el.value || '') + '</span>'` — innerHTML com `el.value` não escapado.
+- **Linha 437**: `dom.innerHTML = '<img src="' + el.url + '" style="...">'` — innerHTML com `el.url` não escapado. Se `el.url` contiver `" onload="alert(1)`, XSS é executado.
+- POST-AUDIT-4.0 afirmava ter corrigido estas 3 vulnerabilidades, MAS o código atual ainda as tem. **OU o fix foi revertido, OU nunca foi aplicado.**
+
+---
+
+## 4. src/utils/game/gameExporter.js (152 linhas)
+
+### 4.1 Tamanho do HTML exportado:
+- **Runtime inline**: 27.6 KB (gameRuntime.js embed via `?raw` import na linha 16)
+- **HTML shell (splash SVG + styles + estrutura)**: ~6 KB
+- **Total sem dados do projeto**: ~33 KB
+- **Com projeto típico (texturas em base64, múltiplas cenas)**: 130 KB – vários MB dependendo de texturas
+- **CDN dependencies**: three@0.169.0 (~600 KB min) + cannon-es@0.20.0 (~150 KB) — carregados externamente, NÃO bundled
+
+### 4.2 Runtime inlined:
+- ✓ `gameRuntimeSource` importado via `?raw` (linha 16) e interpolado no `<script>` (linha 118)
+- O runtime é executado no contexto do HTML exportado, sem módulos ES
+
+### 4.3 Assets bundled:
+- **NÃO** — three.js e cannon-es via CDN (linhas 110-111)
+- **Projeto JSON** inlined como `window.__GAME_DATA__` (linha 114) — inclui todos os objetos, cenas, conects, scripts FlirCode, e texturas base64
+- **Texturas importadas** em objetos do catálogo são serializadas como data URLs dentro do JSON
+- **Ícones/fontes** — não incluídos no HTML exportado
+
+### 4.4 Version mismatch (P0):
+- **package.json declara `three: ^0.185.1`** (linha 20) — versão usada no editor
+- **gameExporter.js carrega `three@0.169.0`** do CDN (linha 110) — versão 16 minor versions atrás
+- APIs que existem em 0.185 podem não existir em 0.169 (ex: MeshPhysicalMaterial melhorias, novos features)
+- `cannon-es@0.20.0` (linha 111) bate com `cannon-es: ^0.20.0` do package.json ✓
+- **Sem fallback offline**: se CDN estiver down ou bloqueado (China, redes corporativas), o jogo exportado não abre.
+
+### 4.5 Outros issues:
+- **P2**: `optimizeProject()` (linha 18) é stub — apenas `JSON.parse(JSON.stringify(projectData))` deep clone, sem otimização real (remover objetos não referenciados, comprimir texturas, etc.)
+- **P2**: `generateShareUrl()` (linha 137) retorna URL hardcoded `https://flir-engine.vercel.app/play/${projectId}` — mas não há rota `/play/:id` implementada no app (index.html é SPA, redirect para `/index.html`). Link shareable não funciona.
+- **P3**: `generateCapacitorConfig()` (linha 124) gera config JSON para empacotar como app móvel, mas não há instrução de uso nem integração com Capacitor CLI.
+
+---
+
+## 5. README.md (435 linhas) vs código real
+
+### 5.1 Documentado MAS não implementado (ou stub):
+1. **README linha 67**: "Suporte a HDRI (campo preparado)" — mas não há código HDRI (RGBELoader/PMREMGenerator) em SceneLevel3D.jsx ou Scene3D.jsx. Campo `skyType: 'hdri'` em taxonomy mas sem handler em ConectRenderer.
+2. **README linha 60**: "Exportar animações junto com o modelo em .glb (compatível com Unity e Godot)" — exporters.js exporta apenas geometria/mesh; FBX/GLB exporter não inclui AnimationClip. Necesita verificação mais profunda mas claim é suspeita.
+3. **README linha 82**: "Testado em ecrãs de 360px: todas as ferramentas acessíveis" — `.topbar` não tem overflow-x explícito; se todos os grupos estão visíveis, pode cortar.
+4. **README linha 134**: "Estilos globais (dark mode + responsivo)" — dark mode é o ÚNICO modo; não há light mode implementado.
+5. **README linha 49**: "Biblioteca de materiais predefinidos: Metais (cromado, ouro, cobre), Madeiras (carvalho, nogueira), Pedras (mármore, granito)..." — materialLibrary.js tem 20+ materiais ✓ (ver TEXPAINT-PIPELINE-3D no worklog). OK.
+
+### 5.2 Stack técnica (linhas 84-89):
+- React 19 ✓ (package.json: `react: ^19.2.8`)
+- Vite 8 ✓ (package.json: `vite: ^8.2.0`)
+- three.js ✓
+- @react-three/fiber + @react-three/drei ✓
+- zustand ✓
+- CSS nativo ✓
+
+### 5.3 Estrutura de pastas (linhas 91-141):
+- **DESATUALIZADA** — lista apenas Scene3D.jsx e SceneObject.jsx, mas faltam SceneLevel3D.jsx, ConectRenderer.jsx, GameMode logic, FlirScript, conects/ (physicsSystem, npcAI, animationController, taxonomy), game/ (gameRuntime, gameExporter), terrain/, multiplayer/, performance systems, etc. Documentação reflete apenas Fase 0-1, não Fase 5-6.
+
+---
+
+## 6. ENGINE_DOC.md (950 linhas) vs código real
+
+### 6.1 Documentado MAS não implementado:
+
+| Feature | Localização doc | Realidade | Severity |
+|---|---|---|---|
+| **Story Mode** (Gravação + Replay) | Sec 15 (linhas 896-909) | **NÃO EXISTE** — sem `storyMode`, `recordAction`, `replayAction`, `isRecording` em qualquer ficheiro. Apenas referenciado em ENGINE_DOC. | **P0 falso** |
+| **EditorAnimationPlayer** | Sec 2.6 (linha 135) | **NÃO EXISTE** — sem classe/function com esse nome no código. Apenas `animationPlayer.js` (modo jogo) e `AnimationPanel.jsx` (UI editor). | **P1 falso** |
+| **Layers (Camadas)** | Sec 12.1 (linhas 802-808), Sec 3.3 (linha 168) | **NÃO EXISTE como sistema** — apenas `material.layers` (texturas de material) e `TerrainEditor.jsx` "Camadas de Textura". Sem `createLayer`/`deleteLayer` no store. | **P1 falso** |
+| **SunObject** (luz solar Kelvin) | Sec 6.2 (linhas 299-302) | Definido em `taxonomy.js` (linha 284) MAS **não renderizado** por ConectRenderer.jsx. Não cria luz na cena. | **P1 falso** |
+| **PointObject** | Sec 6.2 (linhas 304-306) | Definido em taxonomy MAS não renderizado. Apenas `LuminousObject` cria luz. | **P1 falso** |
+| **SpotObject** | Sec 6.2 (linhas 308-311) | Definido em taxonomy MAS não renderizado. | **P1 falso** |
+| **AreaObject** | Sec 6.2 (linhas 313-316) | Definido em taxonomy MAS não renderizado. | **P1 falso** |
+| **AmbientObject** | Sec 6.2 (linhas 318-320) | Definido em taxonomy MAS não renderizado. Apenas `<hemisphereLight>` fixa no SceneLevel3D (linha 665). | **P1 falso** |
+| **NavigatorObject** (Portais) | Sec 10.4 (linhas 754-759) | Definido em taxonomy MAS **sem runtime handler** — o portal não transporta o jogador. | **P1 falso** |
+| **SpawnObject** | Sec 6.6 (linhas 393-395) | Definido em taxonomy MAS **sem runtime handler** — não cria objetos automaticamente. | **P1 falso** |
+| **WeaponObject** | Sec 6.6 (linhas 415-417), Sec 10.1 | Definido em taxonomy MAS **sem runtime handler** — `equipWeapon` é stub `dbg(...)`. Sem crosshair, sem raycast de tiro, sem ammo management. | **P1 falso** |
+| **ItemObject / Inventário** | Sec 6.6 (linhas 419-421), Sec 10.2 | Definido em taxonomy. `addToInventory`/`hasItem` são stubs no gameRuntime.js (apenas `dbg`). Sem auto-pickup. | **P1 falso** |
+| **PrefabObject** | Sec 6.7 (linhas 434-436) | Definido em taxonomy MAS **sem runtime handler** — prefabs não são instanciados. | **P2 falso** |
+| **ReferenceObject** | Sec 6.7 (linhas 443-446) | Definido em taxonomy MAS **sem runtime handler** — não renderiza conteúdo de cena referenciada. | **P2 falso** |
+| **AnimationBoostObject** | Sec 6.6 (linhas 423-425), Sec 10.5, Sec 11.3 | Definido em taxonomy. `animationController.js` existe MAS **NÃO É INTEGRADO** em SceneLevel3D.jsx nem gameRuntime.js — usado apenas pelo AnimationControllerEditor (UI). Sem efeito runtime. | **P1 falso** |
+| **AnimationController state machine** | Sec 11.3 (linhas 786-792) | `animationController.js` existe MAS **NÃO É INTEGRADO** no game loop. Estados (idle/walk/run/jump/attack) e transições automáticas NÃO funcionam em runtime. | **P1 falso** |
+| **PostProcessing: Bloom, SSAO, DoF, Color Grading** | Sec 13.4 (linhas 864-869) | PostProcessingPanel.jsx existe e guarda config em `activeScene.postProcessing` MAS **SEM EffectComposer** em qualquer sítio. Sem `BloomPass`/`SSAOPass`/`RenderPass`. UI shell sem efeito visual. | **P1 falso** |
+| **setGameState / getGameState / saveProgress / loadProgress / playSequence** | Sec 7.3 (linhas 540-545, 611) | No gameRuntime.js são stubs funcionais (setam variável localStorage ou emitem sinal). No SceneLevel3D editor **NÃO EXISTEM** no gameContext. | **P1 divergente** |
+| **setLightIntensity / setLightColor / setLightVisible** | Sec 7.3 (linhas 614-618) | Em `flircode.js` chamam `gameContext.setLightIntensity?.()` — **NÃO existem** no gameContext do SceneLevel3D nem gameRuntime. Silent no-op. | **P1 falso** |
+| **getDataAsset / getAutoload** | Sec 7.3 (linhas 620-624), Sec 12.4-12.5 | Em `flircode.js` chamam `gameContext.getDataAsset?.()` — **NÃO existem** no gameContext. Sem store de ScriptableObjects/Autoloads. | **P1 falso** |
+| **First-person camera mode** | Sec 6.3 (linha 338) diz "modos de seguimento" mas lista apenas none/third/top/side | Não implementado. | **P3 omisso** |
+
+### 6.2 Documentado E implementado (verdadeiro):
+- 40 Conects definidos em taxonomy.js ✓ (mas só ~25 são renderizados/processados em runtime)
+- 19 eventos FlirCode ✓ (parser do editor suporta)
+- 48 funções FlirCode no editor (flircode.js) ✓ (mas 22 são stubs no gameContext)
+- Física cannon-es com RigidObject/StaticObject/StopObject/PersonalObject/NpcObject/TriggerObject ✓
+- Juntas hinge/ball/spring/fixed em physicsSystem.js ✓ (mas não no gameRuntime exportado)
+- ViewObject com third/top/side ✓ (editor), apenas third (exportado)
+- SkyObject gradient ✓ (exportado), procedural shader em skyShaderPro.js ✓
+- FogObject ✓ (exportado), dead no editor
+- WaterObject, TerrainObject, PathObject, ParticleObject, TrailObject, ReflectObject, VisualObject, LuminousObject, CheckpointObject ✓ (renderizados por ConectRenderer)
+
+### 6.3 Estatísticas da Engine (linha 937-949):
+- "Conects: 40 tipos em 7 categorias" ✓ (taxonomy.js tem 40)
+- "Funções FlirCode: 48 (5 são stubs)" ✓ (mas a realidade é ~22 stubs no editor, 35+ stubs no exportado)
+- "Eventos FlirCode: 19" ✓
+- "Modificadores: 5" ✓ (Subdivision/Mirror/Array/Solidify/Curve)
+- "Primitivas: 6" ✓
+- "Funções do gameContext: 38" ❌ (contagem incorreta: editor tem 21, exportado tem 25)
+- "Estados de animação (default): 5 + 8 transições" ❌ (animationController.js tem isto, MAS não integrado em runtime — dados sem efeito)
+- "Uniforms do shader de céu: 5" ✓
+- "Construtores: 2" ✓ (Edifícios + Veículos em buildingGenerator.js / não verificado mas existe)
+
+---
+
+## 7. package.json, vite.config.js, index.html, netlify.toml
+
+### 7.1 package.json:
+- **Versões**: react 19.2.8, vite 8.2.0, three 0.185.1, @react-three/fiber 9.7.0, @react-three/drei 10.7.8, cannon-es 0.20.0, zustand 5.0.14, vite-plugin-pwa 1.3.0 ✓ todos atualizados
+- **Sem dependência `three-mesh-bvh`** declarada (mas worklog menciona PERF-3.6 que corrigiu isto) — verificar se ainda é necessária
+- **devDependencies**: oxlint 1.75.0, sharp 0.35.3 (para processamento de imagens), @vitejs/plugin-react 6.0.4
+- **Scripts**: apenas dev/build/lint/preview — sem test, sem format, sem typecheck
+
+### 7.2 vite.config.js (112 linhas):
+- **PWA habilitado** via VitePWA com `registerType: 'autoUpdate'` ✓
+- **Manifest completo**: ícones 16/32/180/192/512 + maskable ✓
+- **Workbox caching**: JS/CSS/HTML/SVG/PNG/ICO/fonts até 50 MB ✓
+- **Runtime caching**: Google Fonts (CacheFirst), imagens externas (CacheFirst) ✓
+- **devOptions.enabled: false** — SW desativado em dev (evita conflito com HMR) ✓
+- **base: './'** — caminhos relativos (necessário para deploy em subpath) ✓
+- **chunkSizeWarningLimit: 2000** — mas bundle excede 2 MB (warning persistente no build). Sem manualChunks configurado.
+- **P2 — Sem code splitting manual**: o bundle inclui three.js + drei + fiber + GainMap (HDRI loader) num único chunk. Recomendação: `build.rollupOptions.output.manualChunks` para separar vendor.
+
+### 7.3 index.html (28 linhas):
+- **Meta tags PWA completas**: viewport, theme-color, apple-mobile-web-app-capable, apple-touch-icon ✓
+- **viewport-fit=cover** + `maximum-scale=1.0 user-scalable=no` — necessário para jogos mas quebra acessibilidade (utilizadores com baixa visão não podem fazer zoom)
+- **Manifest link** ✓
+- **Ícones** (16/32/192/apple-touch) ✓
+- **Sem preconnect para CDN** — o jogo exportado carrega three.js/cannon-es de jsdelivr.net sem `<link rel="preconnect">`, causando latência extra no first paint
+- **Sem meta tags Open Graph / Twitter Card** — share social não tem preview
+- **Sem `<noscript>`** fallback — se JS desativado, ecrã branco
+
+### 7.4 netlify.toml (12 linhas):
+- **Build command**: `npm run build` ✓
+- **Publish directory**: `dist` ✓
+- **NODE_VERSION**: 20 ✓
+- **SPA redirect**: `from = "/*" to = "/index.html" status = 200` ✓
+- **P3 — Sem headers de cache** para assets hashed (`Cache-Control: public, max-age=31536000, immutable` para `/assets/*`)
+- **P3 — Sem headers de segurança** (Content-Security-Policy, X-Frame-Options, etc.)
+
+---
+
+## Prioritized Summary Table
+
+| ID | File | Line(s) | Severity | Issue | Suggested Fix |
+|---|---|---|---|---|---|
+| AUDIT-4-001 | gameRuntime.js | 84 | **P0** | `if (cond)` é no-op: condição avaliada mas corpo nunca executado. `else if`/`else`/`switch`/`case`/`default`/`repeat` não existem no parser exportado. | Portar parser completo de flircode.js para gameRuntime.js (ou importar flircode.js no bundle exportado). |
+| AUDIT-4-002 | gameRuntime.js | 447 | **P0** | `requestAnimationFrame(animate)` NUNCA cancelado. Loop corre indefinidamente após unmount/close. | Guardar RAF id, adicionar `stopGame()` que chama `cancelAnimationFrame`, e remover todos os listeners. |
+| AUDIT-4-003 | gameRuntime.js | 374, 411-413, 415-416, 494 | **P0** | 7 `addEventListener` sem `removeEventListener` correspondente. Leak acumulativo. | Guardar handlers em vars, exportar `stopGame()` que remove todos. |
+| AUDIT-4-004 | gameRuntime.js | 354-389 | **P0** | NPC AI ausente no exportado — NpcObject é box estática, não persegue/foge/patrulha. Portar `createNPCAI` do editor. |
+| AUDIT-4-005 | gameRuntime.js | 116, 353-361 | **P0** | Animation players ausentes — `playAnim` é stub `dbg(...)`. Modelos com skeleton/animation clips não tocam. | Portar `createAnimationPlayer` e atualizar no loop. |
+| AUDIT-4-006 | gameRuntime.js | 352-406 | **P0** | JointObject, TriggerObject, TimerObject, SpawnObject não processados no exportado. | Portar handlers do physicsSystem e do useFrame do SceneLevel3D. |
+| AUDIT-4-007 | gameRuntime.js | 318-336 | **P0** | Apenas primitivas são renderizadas (cube/sphere/cylinder/cone/plane/torus). GLB/GLTF loading ausente. MeshPhysicalMaterial ausente. PBR props ausentes. | Portar SceneObject.jsx lógica para runtime DOM-based (ou embed SceneObject no bundle). |
+| AUDIT-4-008 | gameExporter.js | 110 | **P0** | three.js CDN usa v0.169.0, editor usa v0.185.1 — 16 minor versions atrás. APIs podem divergir. | Atualizar CDN para 0.185.1 ou bundle three.js no export. |
+| AUDIT-4-009 | gameRuntime.js | 435, 436, 437 | **P0** | 3 `innerHTML` com user input (el.label, el.value, el.url) não escapados — XSS. POST-AUDIT-4.0 afirmava ter corrigido mas código atual ainda tem. | Substituir por `createElement` + `appendChild` + `setAttribute`. |
+| AUDIT-4-010 | SceneLevel3D.jsx | 400-404 | **P1** | SkyObject e FogObject são DEAD CODE no editor — comentário diz "aplicado" mas `useFrame` não aplica. Funciona no exportado mas não no editor. | Adicionar `scene.fog` update no useFrame e aplicar SkyObject via `SceneBackgroundSolid`. |
+| AUDIT-4-011 | SceneLevel3D.jsx | 418, 481 | **P1** | `window._flirKeys` setado mas nunca limpo no cleanup. Leak global. | Adicionar `window._flirKeys = null` no return do useEffect. |
+| AUDIT-4-012 | SceneLevel3D.jsx | 130, 135, 140 | **P1** | Multiplayer `mp.on(...)` handlers registados, nunca removidos no cleanup. | Guardar referências e chamar `mp.off(...)` ou `mp.dispose()` no cleanup. |
+| AUDIT-4-013 | SceneLevel3D.jsx | 110 | **P1** | `import('../../utils/multiplayer/multiplayerManager').then(...)` sem cancelamento — se unmount antes do import resolver, callback seta `window._multiplayer` num componente morto. | Adicionar `let cancelled = false` flag, setar a true no cleanup, checar antes de setar `window._multiplayer`. |
+| AUDIT-4-014 | SceneLevel3D.jsx | 300 | **P1** | `setTimeout(() => { ... }, 50)` sem clearTimeout no cleanup. Se `isGameMode` mudar antes de 50ms, callback corre em physicsRef disposed. | Guardar ID no ref, `clearTimeout` no cleanup. |
+| AUDIT-4-015 | SceneLevel3D.jsx | 427 | **P1** | `animPlayersRef.current.clear()` apenas limpa o Map, NÃO chama `player.dispose()`. Animation players podem leakar listeners em bones. | Iterar e chamar `player.dispose()` antes de `.clear()`. |
+| AUDIT-4-016 | SceneLevel3D.jsx | 167-292 | **P1** | gameContext do editor FALTA 22 métodos documentados (setGameState, saveProgress, shoot, takeDamage, addToInventory, emitSignal, linkTo, setLightIntensity, getDataAsset, getAutoload, etc.) | Adicionar implementações (ou stubs) no gameContext para alinhar com gameRuntime.js. |
+| AUDIT-4-017 | SceneLevel3D.jsx | 516-525 | **P2** | ViewObject camera follow NÃO suporta 'first' (FPV) — apenas third/top/side. | Adicionar branch `if (mode === 'first')` que posiciona câmara na posição do PersonalObject. |
+| AUDIT-4-018 | animationController.js | - | **P1** | `animationController.js` existe mas não é importado por SceneLevel3D.jsx nem gameRuntime.js. Estados/transições (idle→walk→run) não funcionam em runtime. AnimationBoostObject também sem efeito. | Importar e chamar `controller.update(delta, context)` no useFrame. |
+| AUDIT-4-019 | ConectRenderer.jsx | - | **P1** | SunObject, PointObject, SpotObject, AreaObject, AmbientObject NÃO renderizados — só LuminousObject cria luz. | Adicionar branches no ConectRenderer para cada tipo. |
+| AUDIT-4-020 | PostProcessingPanel.jsx | - | **P1** | UI panel existe e guarda config em `activeScene.postProcessing` MAS SEM EffectComposer integrado. Bloom/SSAO/DoF/ColorGrading não têm efeito visual. | Adicionar `EffectComposer` + passes em Scene3D.jsx/SceneLevel3D.jsx quando `activeScene.postProcessing` tem efeitos ativos. |
+| AUDIT-4-021 | ENGINE_DOC.md | 896-909 (Sec 15) | **P1** | Story Mode (Gravação + Replay) documentado em detalhe MAS NÃO EXISTE no código. | Implementar (painel + recording system + replay) ou remover secção do doc. |
+| AUDIT-4-022 | ENGINE_DOC.md | 802-808 (Sec 12.1), 168 | **P1** | Layers (Camadas) documentado MAS NÃO EXISTE como sistema (apenas `material.layers` para texturas). | Implementar (store layers + UI panel) ou remover do doc. |
+| AUDIT-4-023 | ENGINE_DOC.md | 135 (Sec 2.6) | **P2** | `EditorAnimationPlayer` documentado MAS NÃO EXISTE no código. | Renomear para `AnimationPlayer` ou implementar e usar no editor. |
+| AUDIT-4-024 | ENGINE_DOC.md | 754-759 (Sec 10.4) | **P1** | NavigatorObject (portais) documentado MAS sem runtime handler — portal não transporta jogador. | Implementar trigger radius check no useFrame que chama `changeScene`. |
+| AUDIT-4-025 | ENGINE_DOC.md | 393-395, 415-417, 419-421 | **P1** | SpawnObject, WeaponObject, ItemObject documentados MAS sem runtime handler — todos são stubs `dbg(...)`. | Implementar spawning automático, sistema de combate raycast, auto-pickup. |
+| AUDIT-4-026 | ENGINE_DOC.md | 434-436, 443-446 | **P2** | PrefabObject, ReferenceObject documentados MAS sem runtime handler. | Implementar instantiation de prefabs e rendering de cena referenciada. |
+| AUDIT-4-027 | ENGINE_DOC.md | 614-618 (Sec 7.3) | **P1** | `setLightIntensity`, `setLightColor`, `setLightVisible` documentados MAS não existem no gameContext (silent no-op via optional chaining). | Implementar no gameContext (manter Map de luzes por instanceId/nome). |
+| AUDIT-4-028 | ENGINE_DOC.md | 620-624, 822-831 (Sec 7.3, 12.4-12.5) | **P1** | `getDataAsset`, `getAutoload` documentados MAS não existem no gameContext nem store. | Implementar ScriptableObjects e Autoloads no store + gameContext. |
+| AUDIT-4-029 | ENGINE_DOC.md | 937-949 | **P2** | Estatísticas incorretas: "Funções do gameContext: 38" (real: 21 editor, 25 exportado), "Estados de animação: 5 + 8 transições" (animationController existe mas não integrado em runtime). | Atualizar contagem após implementar items acima. |
+| AUDIT-4-030 | global.css | 5-93 | **P2** | Dark mode hardcoded — sem light theme, sem `prefers-color-scheme: light`, sem toggle. :root tem `color-scheme: dark` fixo. | Adicionar `:root[data-theme="light"]` com variáveis invertidas + toggle no SettingsPanel. |
+| AUDIT-4-031 | global.css | 1774-1790 | **P2** | Bloco `.litegraph.litecontextmenu` com 9 `!important` para fazer override de estilos LiteGraph — MAS LiteGraph NÃO É USADO no app (classes órfãs). | Remover bloco completo (13 linhas mortas). |
+| AUDIT-4-032 | global.css | 479, 755, 758, 1264, 1272, 1280, 1238, 3911, 3917, 1468, 1486, 461, 467, 1412, 1438, 3795, 1227, 2535, 2345, 2361, 2368, 2422 | **P3** | 20 seletores CSS órfãos (definidos MAS sem uso em qualquer JSX/JS): field-label, flex-1, gap-2, hide-tiny, layer-card, mat-preview, orientation-hint, preview-cam-btn, row-2, row-3, scene-preview-fullscreen, sculpt-cursor, shader-visual-placeholder, ui-editor-body, ui-palette, ui-palette-item, ui-props. | Remover do CSS ou usar nos componentes apropriados. |
+| AUDIT-4-033 | global.css | 38 | **P3** | 38 @media queries com breakpoints fragmentados (600/768/1024/480/380/360). Sem convenção clara. | Padronizar para 2 breakpoints: 768px (tablet/mobile portrait) e 1024px (tablet landscape). |
+| AUDIT-4-034 | global.css | 33 | **P3** | 33 `!important` (~6 injustificados). | Refatorar com especificidade ou remover. |
+| AUDIT-4-035 | global.css | 425 | **P3** | `if (s.interval) clearInterval(s.interval)` no cleanup do SceneLevel3D é MORTO — `interval` nunca é setado. | Remover linha morta. |
+| AUDIT-4-036 | README.md | 91-141 | **P3** | Estrutura de pastas desatualizada — lista apenas Fase 0-1, falta Fase 5-6 (SceneLevel3D, ConectRenderer, conects/, game/, multiplayer/, performance systems). | Atualizar com árvore atual. |
+| AUDIT-4-037 | README.md | 67, 82, 134 | **P3** | Claims incorretas: "HDRI campo preparado" (sem código), "360px testado" (sem overflow), "dark mode + responsivo" (só dark). | Corrigir ou implementar. |
+| AUDIT-4-038 | gameExporter.js | 137 | **P2** | `generateShareUrl()` retorna `https://flir-engine.vercel.app/play/${projectId}` MAS não há rota `/play/:id` no app (SPA fallback para index.html). Link shareable não funciona. | Implementar rota `/play/:id` que carrega projeto do backend, ou remover função. |
+| AUDIT-4-039 | gameExporter.js | 18 | **P3** | `optimizeProject()` é stub — apenas deep clone, sem otimização real (remover objetos não referenciados, comprimir texturas). | Implementar tree-shaking de objetos/cenas não usados + compressão de texturas. |
+| AUDIT-4-040 | vite.config.js | 110 | **P3** | `chunkSizeWarningLimit: 2000` mas bundle excede 2 MB. Sem `manualChunks` para separar three.js/drei/vendor. | Adicionar `build.rollupOptions.output.manualChunks: { vendor: ['three', '@react-three/fiber', '@react-three/drei'] }`. |
+| AUDIT-4-041 | index.html | 5 | **P3** | `maximum-scale=1.0 user-scalable=no` quebra acessibilidade (utilizadores com baixa visão não podem fazer zoom). | Remover ou usar `maximum-scale=5.0`. |
+| AUDIT-4-042 | index.html | - | **P3** | Sem `<link rel="preconnect">` para CDN do jogo exportado (three.js/cannon-es de jsdelivr). Sem `<noscript>` fallback. Sem Open Graph / Twitter Card meta tags. | Adicionar tags apropriadas. |
+| AUDIT-4-043 | netlify.toml | - | **P3** | Sem headers de cache para assets hashed, sem headers de segurança (CSP, X-Frame-Options). | Adicionar `[[headers]]` blocks para `/assets/*` e security headers. |
+| AUDIT-4-044 | SceneLevel3D.jsx | 516-525 | **P3** | ViewObject camera follow inline (sem abstração `cameraController`) — duplicado em gameRuntime.js (linhas 474-479). | Extrair para `src/utils/cameraController.js` (existe em modelagemetexturizacao/ mas não no projeto principal) e usar em ambos. |
+| AUDIT-4-045 | global.css | 3061-3063 | **P3** | `.conect-context-submenu .submenu-item` com 3 `!important` em background/font-size/padding. | Refatorar com variável CSS. |
+| AUDIT-4-046 | gameRuntime.js | 250-252 | **P2** | `shoot`, `reload`, `equipWeapon` são stubs `dbg(...)` no gameContext exportado — funções FlirCode chamam-nas mas nada acontece. | Implementar (raycast para shoot, state para ammo, etc.) ou documentar como não-implementado. |
+| AUDIT-4-047 | gameRuntime.js | 116 | **P2** | `playAnim` é stub `dbg('playAnim: ' + args[0], 'log')` no exportado. Animações em modelos exportados não tocam. | Portar `createAnimationPlayer` para o runtime exportado. |
+| AUDIT-4-048 | gameRuntime.js | 245 | **P2** | `spawnObject` é stub `dbg('spawnObject: ' + name + ' em ' + pos, 'log')`. Objetos não são criados. | Implementar chamando a `setupMesh` e adicionando a `meshMap`. |
+| AUDIT-4-049 | SceneLevel3D.jsx | 437 | **P3** | useEffect deps `[isGameMode, setupScene]` — `setupScene = activeSceneRef.current` é mutável, deps podem não disparar corretamente em mudanças de cena via `changeScene`. | Usar `activeScene.id` como dep em vez de `setupScene`. |
+| AUDIT-4-050 | SceneLevel3D.jsx | 285-291 | **P3** | `getPlayers`/`getPlayerState` leem `window._multiplayer` mas se multiplayer ainda não importou (async), retornam default silenciosamente. | Adicionar log ou state de "loading multiplayer". |
+
+---
+
+## Final Assessment
+
+**Editor (SceneLevel3D.jsx + flircode.js)**: funcionalmente rico mas com leaks (window._flirKeys, mp.on handlers, animPlayersRef clear sem dispose, setTimeout sem clear). SkyObject/FogObject dead code. 22 métodos documentados em falta no gameContext.
+
+**Exportado (gameRuntime.js)**: **CRITICAMENTE DEFEITUOSO**. FlirCode `if`/`else`/`switch`/`repeat` não funcionam (parser simplificado). NPC AI, animation players, joints, triggers, timers, spawnObjects todos ausentes. Apenas primitivas renderizadas. 7 listeners e 1 RAF nunca limpos. 3 innerHTML XSS. Versão three.js CDN 16 minor atrás do editor.
+
+**Divergência editor vs exportado**: MASSIVA. Um jogo que funciona perfeitamente no "Executar Jogo" do editor pode falhar silenciosamente quando exportado — animações não tocam, NPCs não se movem, condicionais não executam, modelos GLB não carregam, juntas não articulam.
+
+**Documentação (README + ENGINE_DOC)**: ~15 features documentadas como existentes MAS não implementadas ou sem runtime handler (Story Mode, Layers, SunObject/PointObject/SpotObject/AreaObject/AmbientObject rendering, NavigatorObject, SpawnObject, WeaponObject, ItemObject, PrefabObject, ReferenceObject, AnimationController integration, PostProcessing, EditorAnimationPlayer, setLight*, getDataAsset/getAutoload).
+
+**CSS**: 4464 linhas com 20 seletores órfãos, 38 @media queries fragmentadas, 33 `!important` (~6 injustificados), dark mode hardcoded sem alternativa light. Layout mobile funciona mas tem arestas (modais sem max-height em portrait, bottom-bar 64px pode cortar canvas em ecrãs baixos).
+
+**P0 count**: 9 (1 no-op if, 1 RAF leak, 1 listeners leak, 1 NPC AI ausente, 1 animation players ausente, 1 joints/triggers/timers ausente, 1 primitivas-only rendering, 1 version mismatch three.js, 1 XSS innerHTML).
+
+**P1 count**: 17 (SkyObject/FogObject dead, _flirKeys leak, mp.on leak, mp import sem cancel, setTimeout sem clear, animPlayers clear sem dispose, 22 métodos gameContext em falta, AnimationController não integrado, 5 luzes não renderizadas, PostProcessing não aplicado, Story Mode falso, Layers falso, NavigatorObject falso, SpawnObject/WeaponObject/ItemObject falsos, setLight* falsos, getDataAsset/getAutoload falsos).
+
+**P2 count**: 8 (sem light mode, litecontextmenu morto, generateShareUrl sem rota, playAnim/spawnObject stubs, shoot/reload/equipWeapon stubs, EditorAnimationPlayer falso doc, PrefabObject/ReferenceObject falsos, stats incorretas).
+
+**P3 count**: 16 (20 seletores órfãos, 38 media queries fragmentadas, 33 !important, 1 linha morta clear interval, README desatualizado, claims incorretas, optimizeProject stub, sem manualChunks, maximum-scale=1, sem preconnect, sem headers netlify, sem cameraController abstrato, conect-context-submenu !important, useEffect deps, getPlayers silent default).
+
+Stage Summary:
+- **9 P0 critical bugs** identificados — runtime exportado é deficiente (if/else no-op, NPC/anim/joints/triggers/timers ausentes, primitivas-only, RAF/listener leaks, version mismatch, XSS).
+- **17 P1 high-severity** — dead code no editor (SkyObject/FogObject), memory leaks (window._flirKeys, mp.on, mp import, setTimeout, animPlayers dispose), 22 métodos documentados em falta no gameContext, 5 luzes não renderizadas, AnimationController não integrado, PostProcessing sem EffectComposer, 5 features falsas no doc (Story/Layers/Navigator/Spawn/Weapon/Item).
+- **8 P2** — sem light theme, 9 !important mortos em litecontextmenu, generateShareUrl sem rota, 3 stubs (playAnim, spawnObject, shoot), 3 features falsas doc (EditorAnimPlayer, Prefab/Reference), stats incorretas.
+- **16 P3** — 20 seletores CSS órfãos, breakpoints fragmentados, 33 !important, linha morta, README desatualizado, claims incorretas, optimizeProject stub, sem manualChunks, maximum-scale=1, sem preconnect/noscript/OG, sem headers netlify, sem cameraController abstrato, conect-context-submenu !important, useEffect deps questionável, getPlayers silent default.
+- **Push: NÃO realizado (auditoria research-only — não houve alterações de código)**
+- Próximo passo recomendado: tackle P0 items 001-009 primeiro (especialmente AUDIT-4-001 parser FlirCode, AUDIT-4-002/003 leaks RAF/listeners, AUDIT-4-004/005/006/007 portar NPC AI + animation players + joints + primitivas-only, AUDIT-4-008 version CDN, AUDIT-4-009 XSS innerHTML).
+
+---
+Task ID: D-D1-D2-D3
+Agent: general-purpose
+Task: Implementar 3 novos utility modules — SculptBrush (D1), Retopologia (D2), Soft Selection (D3)
+
+Work Log:
+- Lido worklog.md (contexto AUDIT-1/2/3): auditou useStore.js e meshOperations.js. Confirmado que sculptStrokeAt em useStore.js:631 chama meshOps.sculptStroke(geometry, point, normal, brushSize, brushStrength, mode) — a nova SculptBrush deve ser compatível com a mesma assinatura conceptual (point/normal como [x,y,z] ou Vector3).
+- Inspecionada dependência de three/addons: MarchingCubes.js exporta edgeTable + triTable (Int32Array flat de 4096 entries, layout 256 cubes × 16 ints); BufferGeometryUtils.js exporta mergeVertices(geometry, tolerance) — usados em retopo.js.
+- Criado /home/z/my-project/src/utils/sculptBrush.js (348 linhas).
+- Criado /home/z/my-project/src/utils/retopo.js (558 linhas).
+- Criado /home/z/my-project/src/utils/softSelect.js (184 linhas).
+- Validado com smoke test node --input-type=module: SculptBrush.stroke para inflate/mask/symmetry, getVerticesInRadius, decimate, cleanUp, quadRemesh, fillHoles (1→4 tris), remesh (box 12 tris → 262 tris com voxelSize=0.5, 46 tris com voxelSize=1.0), computeSoftSelection, applySoftTransform, getVerticesInRadius (soft). Todos passaram.
+
+Stage Summary:
+
+# D-D1-D2-D3 — 3 utility modules (SculptBrush + Retopo + SoftSelect)
+
+## Files created
+- `src/utils/sculptBrush.js` — class `SculptBrush(geometry, options)` com 9 brush types (grab, clay, smooth, flatten, inflate, pinch, mask, crease, symmetry). API: `stroke(point, normal, brushType, params)`, `getMask()`, `clearMask()`, `getVerticesInRadius(point, radius)`. Falloff quadrático `(1 - dist/radius)^2` configurável. Mask Float32Array (1.0=movable, 0.0=fixed). Symmetry mirror X (configurable via options.symmetryAxis). Mutação in-place + needsUpdate + computeVertexNormals. Topologia de vizinhos (Map<index, Set>) construída lazily e cacheada para brush 'smooth' (Laplaciano) e 'crease'. Brush 'symmetry' é meta-brush que toggle o flag persistente; params.symmetry é one-shot.
+- `src/utils/retopo.js` — 5 funções: `decimate(geometry, targetRatio)` via vertex clustering em grid de cellSize = maxDim/cbrt(targetTri); `remesh(geometry, voxelSize)` via Marching Cubes (ray-mesh parity para inside/outside + edgeTable/triTable do three/addons); `quadRemesh(geometry, targetQuadCount)` funde pares de tris adjacentes; `fillHoles(geometry)` encontra edge loops abertos (count==1) e fecha com fan triangulation do centroid; `cleanUp(geometry)` usa mergeVertices do BufferGeometryUtils + remove triângulos degenerados (zero area) + remove vértices não referenciados. Todas devolvem NOVA BufferGeometry.
+- `src/utils/softSelect.js` — `computeSoftSelection(geometry, centerVertexIndex, radius, falloff)` devolve Float32Array de pesos; `applySoftTransform(geometry, centerVertexIndex, transform, params)` aplica translate/rotate/scale ponderado (interpola: final = original + (transformed - original) * weight); `getVerticesInRadius(geometry, center, radius)` helper. Falloff curves: linear (t), smooth (t²), sharp (t⁴).
+
+## Build status
+- `npm run build`: ✓ built in 1.61s, exit 0 (apenas warnings preexistentes: direct eval em perfis de AnimationStudio.jsx, dynamic imports ineffective, chunk >2MB — nenhuma relacionada aos novos ficheiros).
+- `git diff --check`: exit 0 (0 whitespace errors). Verificado também trailing whitespace nos 3 novos ficheiros via grep -nP '[ \t]+$': sem matches.
+
+## Key implementation decisions
+- **Marching Cubes**: implementado próprio usando edgeTable + triTable exportados por `three/addons/objects/MarchingCubes.js`. Densidade binária (+1 inside, -1 outside) via ray-mesh parity test (Möller–Trumbore). Bug inicial: `triTable[cubeIdx]` devolve Int32 (não array) porque a tabela é flat (4096 entries); corrigido para `triTable[cubeIdx * 16 + i]`. Fallback documentado: se mesh > 5000 tris ou grid > 64³, degrada para subdivide(2x) + decimate (não é voxel-perfect mas produz topologia regular).
+- **decimate**: vertex clustering (não QEM) — heurística cellSize = maxDim / cbrt(targetTri). Vértices na mesma célula grid colapsam para o primeiro encontrado (não centroid) — mais rápido e suficiente para o propósito.
+- **SculptBrush 'smooth'**: laplaciano real (média dos vizinhos topológicos), contrariamente ao STUB em meshOperations.js:sculptStroke(mode='smooth') que apenas move vértices no sentido oposto à normal (AUDIT-2 M9). Vizinhança construída via index buffer (ou fallback para 3-vértices-consecutivos em geometrias não-indexadas) e cacheada.
+- **SculptBrush 'grab'**: drag vector computado a partir de `_lastPoint` (stroke anterior). Primeiro stroke usa normal da superfície como fallback (não há drag ainda).
+- **SculptBrush 'crease'**: falloff sharp (expoente × 2, min 4) + alternância de sinal por vértice (índice par afunda, ímpar eleva) — aproxima vinco high-frequency.
+- **SculptBrush 'symmetry'**: meta-brush que toggle `symmetryEnabled`. Stroke normal com `params.symmetry=true` ou `symmetryEnabled=true` aplica stroke mirror em `[-p.x, p.y, p.z]` (configurable via `options.symmetryAxis`).
+- **fillHoles**: agrupa edges abertos em loops via DFS sobre adjacência de vértices; cada loop é fechado com fan triangulation a partir do centroid (1 novo vértice por loop). Não tenta re-triangulação Delaunay — apenas fecha buracos.
+- **quadRemesh**: heurística simples — para cada edge partilhado por exatamente 2 triângulos, reorganiza os 4 vértices como 2 tris "quad-like" (o1,a,o2)+(a,b,o2). Não verifica convexidade nem paralelismo (aproximação).
+- **Compatibilidade com store**: store action `sculptStrokeAt(id, point, normal, params)` continua a chamar `meshOps.sculptStroke` existente (não foi modificado). A nova `SculptBrush` está disponível para import futuro (ex.: `import { SculptBrush } from '../utils/sculptBrush.js'`) sem quebrar a integração atual.
+- **softSelect.applySoftTransform**: devolve NOVA geometria (clone + mutate). Aplica scale → rotate → translate nessa ordem, com pivots opcionais. Interpola `final = original + (transformed - original) * weight` para suavidade.
+
+## Notas
+- Nenhum ficheiro existente foi modificado além do worklog.md (append).
+- 0 erros de build, 0 erros de whitespace.
+- Smoke test completo passou (ver Work Log acima).
+
+---
+Task ID: PART-E
+Agent: builders-agent
+Task: Transform procedural builders from basic boxes+colors into realistic 3D models with PBR materials, architectural details, and variations
+
+Work Log:
+- Read context: worklog.md, buildingGenerator.js (existing pattern with vertex colors + mergeGeometriesWithColors), BuildersPanel.jsx, primitives.js (defaultMaterial PBR schema)
+- Confirmed pattern: each builder returns catalog object compatible with `useStore.addImportedObject`. Single merged mesh with vertex colors (`vertexColors: true`) lets multi-part coloring work with one PBR material per object.
+
+Files Created (6 builders + 1 helper) in `/home/z/my-project/src/utils/proceduralBuilders/`:
+1. `_helpers.js` — hexToRgb, jitter, paintGeometry, mergeGeometriesWithColors, serializeGeometry, makeObject (shared utilities extracted from buildingGenerator.js)
+2. `houseBuilder.js` — generateHouse({ style: modern|classic|cottage, floors, width, depth, floorHeight, wallColor, roofColor }):
+   - Foundation slab (slightly larger + darker)
+   - 4 walls + side windows on wide buildings
+   - Recessed windows: frame flush + glass inset 0.12 + sill + mullions (classic/cottage)
+   - Recessed door + frame + golden knob + entry step
+   - Roof per style: flat parapet / gabled / steep pitched + brick chimney (classic/cottage)
+   - PBR walls roughness 0.7
+3. `carBuilder.js` — generateCar({ type: sedan|suv|sports|truck, color, wheelSize }):
+   - Lower chassis + cabin (sports: long hood + rear deck + splitter + diffuser + spoiler; truck: cab-forward + open bed)
+   - 4 wheels: tire + chrome rim + hub
+   - Sloped windshield + rear glass + side windows
+   - Front + rear bumpers, headlights (white emissive), taillights (red), side mirrors
+   - PBR car paint: roughness 0.15, metalness 0.8, clearcoat 1.0, clearcoatRoughness 0.05
+4. `treeBuilder.js` — generateTree({ type: oak|pine|palm, height, trunkRadius, foliageColor }):
+   - Tapered trunk (radiusTop < radiusBottom), jittered bark color
+   - oak: 5 clustered spheres; pine: 4 stacked cones; palm: 6 flattened frond spheres + 3 coconuts
+   - PBR foliage roughness 0.85, sheen 0.3
+5. `furnitureBuilder.js` — generateFurniture({ type: chair|table|sofa|bed, color }):
+   - chair: seat+back+4 legs+3 slats; table: top+4 legs+2 skirts; sofa: base+back+2 arms+2 cushions; bed: frame+mattress+headboard+2 pillows+blanket
+   - PBR wood roughness 0.6; fabric roughness 0.8 + sheen 0.5
+6. `cityBuilder.js` — generateCity({ blocks, buildingsPerBlock, streetWidth }):
+   - Returns `{ objects, centerOffset }` — caller iterates and calls addImportedObject
+   - Grid of blocks × blocks; each block has buildingsPerBlock houses from generateHouse with randomized style/floors/color/rotation
+   - Street lamps at every outer grid corner (post + arm + emissive head + shade + base, PBR emissive '#fff2c0' intensity 1.5)
+7. `interiorBuilder.js` — generateInterior({ roomWidth, roomDepth, roomHeight, style: modern|rustic }):
+   - Floor + ceiling + 4 walls (front wall split into 3 segments around door opening)
+   - Door leaf hinged on left edge, rotated 45° open inward (translate-to-pivot → rotateY → translate-to-final)
+   - Door knob + baseboard trims around perimeter
+   - Bed in back-left corner, table + chair in front-right corner, rug under table
+   - PBR walls roughness 0.8
+
+Files Modified:
+- `/home/z/my-project/src/components/panels/BuildersPanel.jsx` — full rewrite:
+  - Replaced existing building/vehicle sections with new House + Car sections (more types, better PBR via clearcoat)
+  - Added Tree, Furniture, Interior, City sections
+  - SLIDER/COLOR/SELECT helper components for consistent UI
+  - House style change auto-suggests a fitting default roofColor (modern=dark, classic=red, cottage=brown)
+  - City section iterates `objects` array and calls `addImportedObject` for each
+  - Existing buildingGenerator.js untouched for backwards compat
+
+Build Validation:
+- `npm run lint` on new files (proceduralBuilders/ + BuildersPanel.jsx): 0 warnings, 0 errors ✓
+- `npm run build`: exit 0, built in 1.54s, 26 precache entries ✓ (pre-existing project warnings about chunk size / dynamic imports / eval — NOT caused by PART-E)
+- `git diff --check`: 0 whitespace errors ✓
+
+Material PBR Values Used (brief):
+- House walls: roughness 0.7, metalness 0.0
+- Car body: roughness 0.15, metalness 0.8, clearcoat 1.0, clearcoatRoughness 0.05
+- Tree foliage: roughness 0.85, metalness 0.0, sheen 0.3
+- Furniture wood: roughness 0.6; fabric: roughness 0.8 + sheen 0.5
+- City lamp: roughness 0.6, metalness 0.7, emissive '#fff2c0' intensity 1.5
+- Interior walls: roughness 0.8, metalness 0.0
+
+Pattern Note:
+- All builders use vertex colors (single merged mesh, single material per object). Per-part PBR isn't possible architecturally; each builder picks representative PBR for dominant surface (walls / car paint / foliage / wood) and vertex colors differentiate remaining parts (glass=blue, tires=black, headlights=bright).
+- Each builder exports both a named function (generateHouse etc.) and `generate` alias for spec compat.
+- Work record at `/agent-ctx/PART-E-builders.md` for sharing with subsequent PART agents.
+
+---
+Task ID: D-D4-D5
+Agent: main
+Task: Implement Loop Tools (D4) + UV Editor Component (D5)
+
+Work Log:
+- Lido worklog.md para contexto; criado /agent-ctx para registo
+- D4: Criado `src/utils/loopTools.js` (581 linhas) com 9 funções:
+  - findEdgeLoop / findFaceLoop — walker BFS por arestas manifold (2 faces) com
+    score dot-product para preferir continuação ~180° (estilo Blender)
+  - bridgeLoops / fillHole — criam triângulos entre loops / fan a partir do centroide
+  - gridFill — interpola loops; fallback para bridgeLoops se subdivs ≤ 1 ou tamanhos diferentes
+  - edgeLoopSubdivide — insere midpoint em cada aresta do loop, re-triangula faces adjacentes
+  - connectVertices — insere midpoint na aresta (v1,v2), parte a face partilhada
+  - dissolveEdges — remapeia vértice fundido, remove faces degeneradas
+  - edgeCollapse — funde v2→v1 no ponto médio, remove triângulos degenerados
+  - Todas aceitam/devolvem THREE.BufferGeometry, clonam antes de mutar, chamam
+    computeVertexNormals() e marcam atributos needsUpdate=true
+- D5: Criado `src/components/panels/UVEditor.jsx` (357 linhas) — modal com canvas 2D:
+  - Canvas 512×512, bg #1a1a1a, wireframe UV cyan #00ffff, vértices sel. yellow #ffff00,
+    grelha 0.1 #2a2a2a
+  - Toolbar: Select / Move / Rotate / Scale / Pan (com ícones existentes)
+  - Unwrap: Planar / Box / Spherical / Cylindrical (chama applyMeshOp 'unwrap')
+  - Lista de ilhas UV (display-only) via Union-Find sobre adjacência UV-triângulo
+  - Click / Shift+Click seleciona vértices UV; drag transforma; scroll faz zoom; pan drag
+  - Persiste UVs editados via nova ação `setObjectUVs(id, uvs)` no store
+- Modificado `src/utils/meshOperations.js`: estendido unwrapUV com métodos 'spherical'
+  (atan2 + asin) e 'cylindrical' (atan2 + y normalizado) — necessário para os botões
+- Modificado `src/store/useStore.js`: adicionado `uvEditorOpen`/`openUVEditor`/`closeUVEditor`
+  e `setObjectUVs(id, uvs)` (atualiza customGeometry.uvs ou cria a partir de primitiva/importada)
+- Modificado `src/App.jsx`: importado UVEditor, wired uvEditorOpen/closeUVEditor/selectedId,
+  renderizado o modal junto dos outros
+- Modificado `src/components/ui/MoreToolsGrid.jsx`: adicionado botão "UV Editor" na categoria
+  Painéis (com IconUV, requireSelection)
+- Lint: npx oxlint nos novos ficheiros → 0 erros, 1 warning react-hooks/exhaustive-deps
+  intencional (uvsVersion força recompute após transform UV)
+- Build: `npm run build` → ✓ built in 1.47s, 0 erros (apenas warnings pre-existentes)
+- Whitespace: `git diff --check` → 0 erros
+
+Files Created:
+- src/utils/loopTools.js (581 linhas)
+- src/components/panels/UVEditor.jsx (357 linhas)
+- agent-ctx/D-D4-D5-loopTools-uvEditor.md (registo de trabalho)
+
+Files Modified:
+- src/utils/meshOperations.js (unwrapUV +spherical +cylindrical)
+- src/store/useStore.js (uvEditorOpen + openUVEditor + closeUVEditor + setObjectUVs)
+- src/App.jsx (import UVEditor + state + render)
+- src/components/ui/MoreToolsGrid.jsx (botão "UV Editor" na categoria Painéis)
+
+Build Status:
+- npm run build: ✓ 0 erros
+- git diff --check: ✓ 0 erros whitespace
+
+Simplifications / Fallbacks Used:
+- gridFill: fallback para bridgeLoops quando subdivs ≤ 1 ou loops com tamanhos diferentes
+- findEdgeLoop: walker por arestas manifold (2 faces) com score dot-product; funciona bem em
+  malhas quad-ish, pode parar cedo em malhas triangulares densas
+- connectVertices: simples inserção de midpoint + split (preserva winding); não cobre casos
+  gerais de polygon-slit
+- dissolveEdges: remapeia vértice + remove degeneradas (mantém 2 triângulos com vértice partilhado
+  em vez de fusão completa para polígono n-gon)
+- UVEditor: sem gizmo overlay (drag direto com matemática por modo); ilhas display-only
+  (sem packing/rearranjo na v1)
+- UVEditor unwraps reutilizam a ação existente applyMeshOp('unwrap', {method})

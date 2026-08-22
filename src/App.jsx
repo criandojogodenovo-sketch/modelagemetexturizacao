@@ -38,6 +38,8 @@ import AnimationStudio from './components/panels/AnimationStudio'
 import AnimationControllerEditor from './components/panels/AnimationControllerEditor'
 import MultiplayerPanel from './components/panels/MultiplayerPanel'
 import PostProcessingPanel from './components/panels/PostProcessingPanel'
+import BuildersPanel from './components/panels/BuildersPanel'
+import UVEditor from './components/panels/UVEditor'
 import PerformanceStatsOverlay from './components/ui/PerformanceStatsOverlay'
 import MainMenu from './components/ui/MainMenu'
 import HomePage from './components/home/HomePage'
@@ -46,8 +48,13 @@ import LoadingOverlay from './components/ui/LoadingOverlay'
 import BottomBar from './components/ui/BottomBar'
 import MoreToolsGrid from './components/ui/MoreToolsGrid'
 import OfflineIndicator from './components/ui/OfflineIndicator'
+import SnappingControls from './components/ui/SnappingControls'
+import AutosaveIndicator from './components/ui/AutosaveIndicator'
+import DebugOverlay from './components/ui/DebugOverlay'
+import HotkeyToolbar from './components/ui/HotkeyToolbar'
 import { useStore } from './store/useStore'
 import { useIndexedDBSync } from './hooks/useIndexedDBSync'
+import { useAutosave } from './hooks/useAutosave'
 
 export default function App() {
   const ui = useStore((s) => s.ui)
@@ -80,6 +87,10 @@ export default function App() {
   const perfStatsVisible = useStore((s) => s.perfStatsVisible)
   const postProcessingOpen = useStore((s) => s.postProcessingOpen)
   const closePostProcessing = useStore((s) => s.closePostProcessing)
+  const buildersPanelOpen = useStore((s) => s.buildersPanelOpen)
+  const closeBuildersPanel = useStore((s) => s.closeBuildersPanel)
+  const uvEditorOpen = useStore((s) => s.uvEditorOpen)
+  const closeUVEditor = useStore((s) => s.closeUVEditor)
   const homeVisible = useStore((s) => s.homeVisible)
   const hideHome = useStore((s) => s.hideHome)
 
@@ -96,6 +107,8 @@ export default function App() {
 
   // Sincronização com IndexedDB (auto-save + restore)
   useIndexedDBSync()
+  // Autosave inteligente (ItsMagic-style) — dirty flag + save a cada 5s
+  useAutosave()
 
   // Loop de animação
   useEffect(() => {
@@ -188,6 +201,8 @@ export default function App() {
       {animStudioOpen && <AnimationStudio onClose={closeAnimStudio} />}
       {multiplayerPanelOpen && <MultiplayerPanel onClose={closeMultiplayerPanel} />}
       {postProcessingOpen && <PostProcessingPanel onClose={closePostProcessing} />}
+      {buildersPanelOpen && <BuildersPanel open={buildersPanelOpen} onClose={closeBuildersPanel} />}
+      {uvEditorOpen && <UVEditor objectId={selectedId} onClose={closeUVEditor} />}
       {perfStatsVisible && <PerformanceStatsOverlay />}
       {animControllerTarget && (
         <div className="modal-backdrop" onClick={closeAnimController}>
@@ -203,6 +218,8 @@ export default function App() {
 
       <Toasts />
       <LoadingOverlay />
+      <HotkeyToolbar />
+      <DebugOverlay />
     </div>
   )
 }

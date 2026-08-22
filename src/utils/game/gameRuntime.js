@@ -471,11 +471,23 @@ function startGame() {
       if ((keys[' '] || keys['space']) && player.canJump) bodies[player.instanceId].velocity.y = player.jumpForce || 8
     }
 
-    // Camera follow
-    if (activeView && activeView.cameraRole === 'player' && player && meshMap[player.instanceId]) {
-      var pm = meshMap[player.instanceId]
-      camera.position.lerp(new THREE.Vector3(pm.position.x, pm.position.y + (activeView.followHeight || 3), pm.position.z + (activeView.followDistance || 6)), 0.1)
-      camera.lookAt(pm.position)
+    // Camera follow — via cameraController (suporta first/third/top/side/none)
+    if (activeView) {
+      var targetId = activeView.followTarget
+      if (!targetId && activeView.cameraRole === 'player' && player) targetId = player.instanceId
+      var targetMesh = targetId ? meshMap[targetId] : null
+      if (targetMesh) {
+        var targetState = {
+          x: targetMesh.position.x,
+          y: targetMesh.position.y,
+          z: targetMesh.position.z,
+          rotation: { x: targetMesh.rotation.x, y: targetMesh.rotation.y, z: targetMesh.rotation.z }
+        }
+        updateCameraSerialized(camera, activeView, targetState, { lerpFactor: 0.1 })
+      } else if (activeView.followMode === 'none' || !activeView.followMode) {
+        // Câmara estática na posição da ViewObject
+        updateCameraSerialized(camera, activeView, null, { lerpFactor: 0.1 })
+      }
     }
 
     renderer.render(scene3d, camera)

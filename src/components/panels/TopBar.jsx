@@ -27,6 +27,8 @@ import {
   IconSettings,
 } from '../ui/Icons'
 import AppModeSwitch from '../ui/AppModeSwitch'
+import SnappingControls from '../ui/SnappingControls'
+import AutosaveIndicator from '../ui/AutosaveIndicator'
 
 export default function TopBar() {
   const fileInputRef = useRef()
@@ -333,6 +335,12 @@ export default function TopBar() {
       </div>
 
       <div className="spacer" />
+
+      {/* Autosave indicator + Snapping (Part C — ItsMagic-style) */}
+      <div className="group topbar-hide-narrow" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <AutosaveIndicator />
+        <SnappingControls />
+      </div>
 
       <div className="group">
         <button onClick={undo} disabled={!canUndo} title={`Desfazer (${HOTKEYS.undo})`} className="icon">

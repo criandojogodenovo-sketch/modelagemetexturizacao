@@ -33,6 +33,9 @@ import {
   IconClose,
 } from './Icons'
 
+// Ícone "Construtores" — usa IconLibrary como fallback visual
+const IconBuilders = IconLibrary
+
 export default function MoreToolsGrid({ onClose }) {
   const addObject = useStore((s) => s.addObject)
   const setTransformMode = useStore((s) => s.setTransformMode)
@@ -46,6 +49,8 @@ export default function MoreToolsGrid({ onClose }) {
   const setActivePanel = useStore((s) => s.setActivePanel)
   const addModifier = useStore((s) => s.addModifier)
   const addBone = useStore((s) => s.addBone)
+  const openBuildersPanel = useStore((s) => s.openBuildersPanel)
+  const openUVEditor = useStore((s) => s.openUVEditor)
   const toast = useStore((s) => s.toast)
 
   const handle = (fn) => () => {
@@ -224,6 +229,16 @@ export default function MoreToolsGrid({ onClose }) {
               icon={<IconBoolean width={20} height={20} />}
               label="Booleanas"
               onClick={handle(() => setActivePanel('boolean'))}
+            />
+            <ToolButton
+              icon={<IconBuilders width={20} height={20} />}
+              label="Construtores"
+              onClick={handle(() => openBuildersPanel())}
+            />
+            <ToolButton
+              icon={<IconUV width={20} height={20} />}
+              label="UV Editor"
+              onClick={requireSelection(() => openUVEditor())}
             />
           </Category>
         </div>

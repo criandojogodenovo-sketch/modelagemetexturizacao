@@ -466,6 +466,38 @@ export function unwrapUV(geometry, method = 'planar') {
       uvs[i * 2] = u
       uvs[i * 2 + 1] = v
     }
+  } else if (method === 'spherical') {
+    // Spherical projection: usa ângulos theta (longitude) e phi (latitude)
+    const center = new THREE.Vector3()
+    geo.boundingBox.getCenter(center)
+    const posAttr = geo.getAttribute('position')
+    for (let i = 0; i < posAttr.count; i++) {
+      const dx = posAttr.getX(i) - center.x
+      const dy = posAttr.getY(i) - center.y
+      const dz = posAttr.getZ(i) - center.z
+      const r = Math.max(1e-6, Math.sqrt(dx * dx + dy * dy + dz * dz))
+      // u: longitude (atan2 z,x) normalizado 0..1
+      const u = 0.5 + Math.atan2(dz, dx) / (2 * Math.PI)
+      // v: latitude (asin y/r) normalizado 0..1
+      const v = 0.5 + Math.asin(Math.max(-1, Math.min(1, dy / r))) / Math.PI
+      uvs[i * 2] = u
+      uvs[i * 2 + 1] = v
+    }
+  } else if (method === 'cylindrical') {
+    // Cylindrical projection: u = atan2(z,x), v = y normalizado
+    const center = new THREE.Vector3()
+    geo.boundingBox.getCenter(center)
+    const minY = bbox.min.y
+    const heightY = Math.max(1e-6, size.y)
+    const posAttr = geo.getAttribute('position')
+    for (let i = 0; i < posAttr.count; i++) {
+      const dx = posAttr.getX(i) - center.x
+      const dz = posAttr.getZ(i) - center.z
+      const u = 0.5 + Math.atan2(dz, dx) / (2 * Math.PI)
+      const v = (posAttr.getY(i) - minY) / heightY
+      uvs[i * 2] = u
+      uvs[i * 2 + 1] = v
+    }
   }
 
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
