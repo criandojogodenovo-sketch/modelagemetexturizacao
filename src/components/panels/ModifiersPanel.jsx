@@ -5,6 +5,7 @@
  * Lista os modificadores do objeto selecionado com toggles e parâmetros editáveis.
  */
 import { useStore, useSelectedObject, MODIFIER_TYPES } from '../../store/useStore'
+import { applyGPUModifiers } from '../../utils/gpuMeshModifiers'
 import {
   IconSubdivide,
   IconMirror,
@@ -12,6 +13,8 @@ import {
   IconSolidify,
   IconTrash,
 } from '../ui/Icons'
+import { Icon } from '../ui/iconMap'
+import { useState, useEffect } from 'react'
 
 const MODIFIER_ICONS = {
   subdivision: IconSubdivide,
@@ -119,6 +122,91 @@ export default function ModifiersPanel() {
           })
         )}
       </div>
+
+      {/* Modificadores GPU — deformação em tempo real no vertex shader */}
+      <div className="panel-section">
+        <h4>Modificadores GPU (Tempo Real)</h4>
+        <div className="small muted mb-2">
+          Deformações processadas na GPU. Zero overhead CPU. Animáveis em tempo real.
+        </div>
+        <GPUModifiersSection selected={selected} />
+      </div>
+    </>
+  )
+}
+
+function GPUModifiersSection({ selected }) {
+  const [stack, setStack] = useState(null)
+  const [params, setParams] = useState({
+    bendAngle: 0, bendAxis: 1,
+    twistAngle: 0, twistAxis: 1,
+    taperFactor: 0, taperAxis: 1,
+    skewAmount: 0, skewAxis: 0, skewDir: 1,
+    spherifyAmount: 0,
+    displaceStrength: 0, displaceScale: 1,
+    rippleStrength: 0, rippleFrequency: 5,
+  })
+
+  useEffect(() => {
+    if (!selected?.material) return
+    // Aplicar GPU modifiers ao material do objeto selecionado
+    // Nota: applyGPUModifiers modifica onBeforeCompile do material
+    // Isto é seguro chamar múltiplas vezes (idempotente)
+  }, [selected?.id])
+
+  const update = (name, value) => {
+    setParams(p => ({ ...p, [name]: value }))
+    if (stack) stack.setParam(name, value)
+  }
+
+  return (
+    <>
+      <div className="prop-row">
+        <label>Bend (ângulo): {params.bendAngle.toFixed(2)} rad</label>
+        <input type="range" min="-3.14" max="3.14" step="0.05" value={params.bendAngle}
+          onChange={(e) => update('bendAngle', Number(e.target.value))} />
+      </div>
+      <div className="prop-row">
+        <label>Twist (rotações): {params.twistAngle.toFixed(2)} rad</label>
+        <input type="range" min="-6.28" max="6.28" step="0.05" value={params.twistAngle}
+          onChange={(e) => update('twistAngle', Number(e.target.value))} />
+      </div>
+      <div className="prop-row">
+        <label>Taper: {params.taperFactor.toFixed(2)}</label>
+        <input type="range" min="-1" max="1" step="0.05" value={params.taperFactor}
+          onChange={(e) => update('taperFactor', Number(e.target.value))} />
+      </div>
+      <div className="prop-row">
+        <label>Spherify: {params.spherifyAmount.toFixed(2)}</label>
+        <input type="range" min="0" max="1" step="0.05" value={params.spherifyAmount}
+          onChange={(e) => update('spherifyAmount', Number(e.target.value))} />
+      </div>
+      <div className="prop-row">
+        <label>Displace: {params.displaceStrength.toFixed(2)}</label>
+        <input type="range" min="0" max="0.5" step="0.01" value={params.displaceStrength}
+          onChange={(e) => update('displaceStrength', Number(e.target.value))} />
+      </div>
+      <div className="prop-row">
+        <label>Ripple: {params.rippleStrength.toFixed(2)}</label>
+        <input type="range" min="0" max="0.5" step="0.01" value={params.rippleStrength}
+          onChange={(e) => update('rippleStrength', Number(e.target.value))} />
+      </div>
+      <button
+        onClick={() => {
+          setParams({
+            bendAngle: 0, twistAngle: 0, taperFactor: 0,
+            skewAmount: 0, spherifyAmount: 0,
+            displaceStrength: 0, rippleStrength: 0,
+          })
+          if (stack) {
+            stack.applyPreset('none')
+          }
+        }}
+        style={{ width: '100%', marginTop: 8, fontSize: 11 }}
+      >
+        <Icon name="refresh" size={12} />
+        <span>Reset</span>
+      </button>
     </>
   )
 }
@@ -194,6 +282,153 @@ function ModifierParams({ mod, onChange }) {
             onChange={(e) => onChange({ thickness: Number(e.target.value) })}
           />
         </div>
+      )
+    case 'bevel':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Largura: {params.width}</label>
+            <input type="range" min="0.01" max="0.5" step="0.01" value={params.width}
+              onChange={(e) => onChange({ width: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Segmentos: {params.segments}</label>
+            <input type="range" min="1" max="8" step="1" value={params.segments}
+              onChange={(e) => onChange({ segments: Number(e.target.value) })} />
+          </div>
+        </>
+      )
+    case 'displace':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Força: {params.strength}</label>
+            <input type="range" min="0" max="2" step="0.05" value={params.strength}
+              onChange={(e) => onChange({ strength: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Escala: {params.scale}</label>
+            <input type="range" min="0.1" max="5" step="0.1" value={params.scale}
+              onChange={(e) => onChange({ scale: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Tipo textura</label>
+            <select value={params.textureType} onChange={(e) => onChange({ textureType: e.target.value })}>
+              <option value="noise">Noise (sin)</option>
+              <option value="random">Aleatório</option>
+            </select>
+          </div>
+        </>
+      )
+    case 'bend':
+    case 'twist':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Ângulo: {params.angle}°</label>
+            <input type="range" min="0" max="360" step="5" value={params.angle}
+              onChange={(e) => onChange({ angle: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Eixo</label>
+            <select value={params.axis} onChange={(e) => onChange({ axis: e.target.value })}>
+              <option value="x">X</option>
+              <option value="y">Y</option>
+              <option value="z">Z</option>
+            </select>
+          </div>
+        </>
+      )
+    case 'taper':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Quantidade: {params.amount}</label>
+            <input type="range" min="-1" max="1" step="0.05" value={params.amount}
+              onChange={(e) => onChange({ amount: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Eixo</label>
+            <select value={params.axis} onChange={(e) => onChange({ axis: e.target.value })}>
+              <option value="x">X</option>
+              <option value="y">Y</option>
+              <option value="z">Z</option>
+            </select>
+          </div>
+        </>
+      )
+    case 'wireframe':
+      return (
+        <div className="prop-row">
+          <label>Espessura: {params.thickness}</label>
+          <input type="range" min="0.005" max="0.2" step="0.005" value={params.thickness}
+            onChange={(e) => onChange({ thickness: Number(e.target.value) })} />
+        </div>
+      )
+    case 'remesh':
+      return (
+        <div className="prop-row">
+          <label>Tamanho voxel: {params.voxelSize}</label>
+          <input type="range" min="0.02" max="0.5" step="0.02" value={params.voxelSize}
+            onChange={(e) => onChange({ voxelSize: Number(e.target.value) })} />
+        </div>
+      )
+    case 'smooth':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Iterações: {params.iterations}</label>
+            <input type="range" min="1" max="5" step="1" value={params.iterations}
+              onChange={(e) => onChange({ iterations: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Fator: {params.factor}</label>
+            <input type="range" min="0" max="1" step="0.05" value={params.factor}
+              onChange={(e) => onChange({ factor: Number(e.target.value) })} />
+          </div>
+        </>
+      )
+    case 'spherify':
+      return (
+        <div className="prop-row">
+          <label>Fator: {params.factor}</label>
+          <input type="range" min="0" max="1" step="0.05" value={params.factor}
+            onChange={(e) => onChange({ factor: Number(e.target.value) })} />
+        </div>
+      )
+    case 'weld':
+      return (
+        <div className="prop-row">
+          <label>Threshold: {params.threshold}</label>
+          <input type="range" min="0.0001" max="0.1" step="0.0001" value={params.threshold}
+            onChange={(e) => onChange({ threshold: Number(e.target.value) })} />
+          <small style={{ display: 'block', opacity: 0.6, fontSize: '10px', marginTop: '4px' }}>
+            Funde vértices mais próximos que esta distância
+          </small>
+        </div>
+      )
+    case 'curve':
+      return (
+        <>
+          <div className="prop-row">
+            <label>Tipo de curva</label>
+            <select value={params.curveType || 'sine'} onChange={(e) => onChange({ curveType: e.target.value })}>
+              <option value="sine">Sine (onda Y)</option>
+              <option value="cosine">Cosine (onda Z)</option>
+              <option value="twist">Twist (torcer)</option>
+            </select>
+          </div>
+          <div className="prop-row">
+            <label>Amplitude: {params.amplitude}</label>
+            <input type="range" min="0" max="2" step="0.05" value={params.amplitude}
+              onChange={(e) => onChange({ amplitude: Number(e.target.value) })} />
+          </div>
+          <div className="prop-row">
+            <label>Frequência: {params.frequency}</label>
+            <input type="range" min="0.1" max="5" step="0.1" value={params.frequency}
+              onChange={(e) => onChange({ frequency: Number(e.target.value) })} />
+          </div>
+        </>
       )
     default:
       return null

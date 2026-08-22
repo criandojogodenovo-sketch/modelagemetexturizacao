@@ -10,7 +10,9 @@
  */
 import { useStore } from '../../store/useStore'
 import { debugLog } from '../../utils/debug/debugStore'
+import { getCameraState, applyCameraInput, applyCameraKeyInput } from '../../utils/cameraController'
 import JoystickControl from '../ui/JoystickControl'
+import { useRef, useEffect } from 'react'
 
 export default function GameUIOverlay() {
   const uiScreens = useStore((s) => s.uiScreens)
@@ -19,10 +21,19 @@ export default function GameUIOverlay() {
   const visibleScreens = uiScreens.filter((sc) => sc.visible !== false)
 
   const activeScene = scenes.find((s) => s.id === activeSceneId)
-  // Procurar JoystickObjects na cena ativa
-  const joysticks = (activeScene?.conects || []).filter((c) => c.type === 'JoystickObject')
+  // Procurar TODOS os Conects de UI na cena ativa
+  const uiConects = (activeScene?.conects || []).filter((c) =>
+    c.type === 'ButtonObject' || c.type === 'JoystickObject' ||
+    c.type === 'TextObject' || c.type === 'ImageObject' || c.type === 'PanelObject' ||
+    c.type === 'CameraTouchZone'
+  )
+  const joysticks = uiConects.filter((c) => c.type === 'JoystickObject')
+  const cameraZones = uiConects.filter((c) => c.type === 'CameraTouchZone')
+  const otherUiConects = uiConects.filter((c) =>
+    c.type !== 'JoystickObject' && c.type !== 'CameraTouchZone'
+  )
 
-  if (visibleScreens.length === 0 && joysticks.length === 0) return null
+  if (visibleScreens.length === 0 && uiConects.length === 0) return null
 
   const handleEvent = (element, eventType, value) => {
     debugLog(`UI Event: ${element.name}.${eventType}`, 'log', 'UI')
@@ -193,6 +204,199 @@ export default function GameUIOverlay() {
           onEnd={handleJoystickEnd}
         />
       ))}
+
+      {/* CameraTouchZone — zona de toque para rodar câmara (FPS/BR-style) */}
+      {cameraZones.map((cz) => (
+        <CameraTouchZoneControl
+          key={cz.instanceId}
+          zone={cz.zone}
+          sensitivity={cz.sensitivity ?? 1.0}
+          invertY={cz.invertY || false}
+          minPitch={cz.minPitch ?? -1.4}
+          maxPitch={cz.maxPitch ?? 1.4}
+        />
+      ))}
+
+      {/* Conects de UI da cena ativa (ButtonObject, TextObject, etc.) */}
+      {otherUiConects.map((conect) => {
+        const pos = conect.position || [10, 10]
+        const size = conect.size || [120, 40]
+        const baseStyle = {
+          position: 'absolute',
+          left: `${pos[0]}%`,
+          top: `${pos[1]}%`,
+          width: size[0],
+          height: size[1],
+          transform: 'translate(-50%, -50%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: conect.color || 'transparent',
+          color: conect.textColor || '#e6edf3',
+          fontSize: (conect.fontSize || 14) + 'px',
+          borderRadius: 4,
+          padding: 0,
+          opacity: conect.opacity ?? 1,
+          pointerEvents: 'auto',
+          userSelect: 'none',
+          fontFamily: '-apple-system, sans-serif',
+          boxSizing: 'border-box',
+          zIndex: 91,
+        }
+
+        switch (conect.type) {
+          case 'ButtonObject':
+            return (
+              <button
+                key={conect.instanceId}
+                style={{ ...baseStyle, cursor: 'pointer', border: 'none', borderRadius: 6 }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  handleEvent(conect, conect.eventName || 'onClick')
+                }}
+                onTouchStart={(e) => { e.stopPropagation() }}
+              >
+                {conect.label || 'Botão'}
+              </button>
+            )
+          case 'TextObject':
+            return (
+              <div
+                key={conect.instanceId}
+                style={{
+                  ...baseStyle,
+                  textAlign: conect.align || 'center',
+                  background: 'transparent',
+                  width: 'auto',
+                  height: 'auto',
+                  padding: '4px 8px',
+                  textShadow: '0 1px 3px rgba(0,0,0,0.8)',
+                }}
+              >
+                {conect.text || conect.label || ''}
+              </div>
+            )
+          case 'ImageObject':
+            return (
+              <div key={conect.instanceId} style={{ ...baseStyle, overflow: 'hidden' }}>
+                {conect.url ? (
+                  <img src={conect.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                ) : null}
+              </div>
+            )
+          case 'PanelObject':
+            return <div key={conect.instanceId} style={baseStyle} />
+          default:
+            return null
+        }
+      })}
     </div>
+  )
+}
+
+/**
+ * CameraTouchZoneControl — zona de toque para rodar a câmara (pitch/yaw).
+ * Estilo COD Mobile / Fortnite: arrastar o dedo nesta zona roda a câmara.
+ * Invisível (transparente) mas captura eventos de toque.
+ * Usa cameraController (getCameraState + applyCameraInput) — fonte única de verdade.
+ */
+function CameraTouchZoneControl({ zone, sensitivity, invertY, minPitch, maxPitch }) {
+  const touchIdRef = useRef(null)
+  const lastPosRef = useRef(null)
+
+  useEffect(() => {
+    // Configurar estado da câmara via cameraController
+    const camState = getCameraState()
+    camState.sensitivity = sensitivity
+    camState.invertY = invertY
+    camState.minPitch = minPitch
+    camState.maxPitch = maxPitch
+    camState.enabled = true
+    camState.hasTouchZone = true
+
+    // Teclado (setas) — útil em desktop sem rato a arrastar
+    const onKeyDown = (e) => {
+      const key = e.key.toLowerCase()
+      if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key)) {
+        e.preventDefault()
+        applyCameraKeyInput(key, getCameraState())
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      const s = getCameraState()
+      s.enabled = false
+      s.hasTouchZone = false
+    }
+  }, [sensitivity, invertY, minPitch, maxPitch])
+
+  const z = zone || { x: 50, y: 0, w: 50, h: 100 }
+  const zoneStyle = {
+    position: 'fixed',
+    left: `${z.x}%`,
+    top: `${z.y}%`,
+    width: `${z.w}%`,
+    height: `${z.h}%`,
+    zIndex: 88,
+    touchAction: 'none',
+    background: 'transparent',
+    pointerEvents: 'auto',
+  }
+
+  const onTouchStart = (e) => {
+    const touch = e.changedTouches[0]
+    touchIdRef.current = touch.identifier
+    lastPosRef.current = { x: touch.clientX, y: touch.clientY }
+  }
+  const onTouchMove = (e) => {
+    if (touchIdRef.current === null) return
+    for (const touch of e.changedTouches) {
+      if (touch.identifier === touchIdRef.current) {
+        const dx = touch.clientX - lastPosRef.current.x
+        const dy = touch.clientY - lastPosRef.current.y
+        lastPosRef.current = { x: touch.clientX, y: touch.clientY }
+        applyCameraInput(dx, dy, getCameraState())
+        break
+      }
+    }
+  }
+  const onTouchEnd = (e) => {
+    for (const touch of e.changedTouches) {
+      if (touch.identifier === touchIdRef.current) {
+        touchIdRef.current = null
+        lastPosRef.current = null
+        break
+      }
+    }
+  }
+
+  const onMouseDown = (e) => {
+    e.preventDefault()
+    lastPosRef.current = { x: e.clientX, y: e.clientY }
+    const move = (ev) => {
+      const dx = ev.clientX - lastPosRef.current.x
+      const dy = ev.clientY - lastPosRef.current.y
+      lastPosRef.current = { x: ev.clientX, y: ev.clientY }
+      applyCameraInput(dx, dy, getCameraState())
+    }
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
+  return (
+    <div
+      style={zoneStyle}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchEnd}
+      onMouseDown={onMouseDown}
+    />
   )
 }

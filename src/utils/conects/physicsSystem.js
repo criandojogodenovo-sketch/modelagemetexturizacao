@@ -24,6 +24,7 @@
 import * as CANNON from 'cannon-es'
 import * as THREE from 'three'
 import { findConectDefinition } from './taxonomy'
+import { SpatialPartitionSystem } from '../spatialPartitionSystem'
 
 const MAX_PHYSICS_OBJECTS = 50 // limite para performance em mobile
 
@@ -35,6 +36,13 @@ export function createPhysicsSystem(options = {}) {
   world.allowSleep = true
   world.defaultContactMaterial.friction = 0.3
   world.defaultContactMaterial.restitution = 0.3
+
+  // Objectos reutilizáveis para raycast (evita allocations por frame)
+  const _rayFrom = new CANNON.Vec3()
+  const _rayTo = new CANNON.Vec3()
+  const _rayResult = new CANNON.RaycastResult()
+  // Set reutilizável para triggers (evita new Set() por trigger por frame)
+  const _triggerContacts = new Set()
 
   // Materiais para diferentes tipos de interação
   const materials = {
@@ -142,6 +150,25 @@ export function createPhysicsSystem(options = {}) {
     // TriggerObject = sensor, sem colisão física
     const isTrigger = conect.isTrigger || conect.type === 'TriggerObject'
 
+    // TerrainObject: criar um PLANO de chão infinito em vez de uma box
+    if (conect.type === 'TerrainObject') {
+      const planeShape = new CANNON.Plane()
+      const planeBody = new CANNON.Body({
+        mass: 0,
+        shape: planeShape,
+        position: new CANNON.Vec3(
+          conect.position?.[0] || 0,
+          conect.position?.[1] || 0,
+          conect.position?.[2] || 0
+        ),
+      })
+      // O plano aponta para +Z por defeito — rodar para apontar para +Y (chão)
+      planeBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2)
+      world.addBody(planeBody)
+      bodies.set(conect.instanceId, { body: planeBody, conect, mesh })
+      return planeBody
+    }
+
     const shape = createShape(conect, mesh)
     // Sistema 1: aplicar offset do colisor à posição do body
     const offset = getColliderOffset(conect)
@@ -150,15 +177,21 @@ export function createPhysicsSystem(options = {}) {
       conect.position[1] + offset[1],
       conect.position[2] + offset[2]
     )
+    // CRITICAL: cannon-es sets body.type = STATIC when mass <= 0 (see cannon-es Body constructor).
+    // PersonalObject and NpcObject MUST have mass > 0 or they become immovable static bodies
+    // and movePersonal()/velocity changes are silently ignored by the integrator.
+    // Use taxonomy defaults (mass=1, fixedRotation=true) when the conect doesn't specify them.
+    const isCharacter = conect.type === 'PersonalObject' || conect.type === 'NpcObject'
+    const defaultMass = isCharacter ? 1 : 0
     const body = new CANNON.Body({
-      mass: isTrigger ? 0 : (conect.mass ?? 0),
+      mass: isTrigger ? 0 : (conect.mass ?? defaultMass),
       shape,
       position: bodyPos,
       material: conect.type === 'PersonalObject' ? materials.player : materials.default,
     })
-    body.linearDamping = conect.linearDamping ?? 0.01
+    body.linearDamping = conect.linearDamping ?? (isCharacter ? 0.4 : 0.01) // characters need higher damping to stop quickly
     body.angularDamping = conect.angularDamping ?? 0.01
-    body.fixedRotation = conect.fixedRotation ?? false
+    body.fixedRotation = conect.fixedRotation ?? isCharacter // characters should not tip over
 
     // Tipos especiais
     if (conect.type === 'StaticObject') {
@@ -189,28 +222,41 @@ export function createPhysicsSystem(options = {}) {
       previousContacts: new Set(),
     })
 
+    // Performance Core 3.6 — Registar no SpatialPartitionSystem
+    // (apenas corpos não-trigger, para query de triggers os encontrarem)
+    if (!isTrigger) {
+      SpatialPartitionSystem.insert(
+        conect.instanceId,
+        body.position.x,
+        body.position.y,
+        body.position.z,
+        conect.type
+      )
+    }
+
     if (isTrigger) {
       triggers.push(conect.instanceId)
     }
 
     // Eventos de colisão do cannon
-    body.addEventListener('collide', (e) => {
+    const collideHandler = (e) => {
       const otherBody = e.body
-      // Encontrar o instanceId do outro corpo
       const otherEntry = [...bodies.entries()].find(([, v]) => v.body === otherBody)
       if (!otherEntry) return
       const [otherId] = otherEntry
       const pairKey = `${conect.instanceId}:${otherId}`
       if (collisionPairs.has(pairKey)) return
       collisionPairs.add(pairKey)
-      // Limpar a chave após um tempo curto para permitir nova emissão
       setTimeout(() => collisionPairs.delete(pairKey), 100)
 
       emit('onCollision', {
         instanceId: conect.instanceId,
         otherInstanceId: otherId,
       })
-    })
+    }
+    body.addEventListener('collide', collideHandler)
+    // Guardar referência para cleanup no dispose
+    entry._collideHandler = collideHandler
 
     return body
   }
@@ -220,6 +266,8 @@ export function createPhysicsSystem(options = {}) {
     if (!entry) return
     world.removeBody(entry.body)
     bodies.delete(instanceId)
+    // Performance Core 3.6 — Remover do SpatialPartitionSystem
+    SpatialPartitionSystem.remove(instanceId)
     const tIdx = triggers.indexOf(instanceId)
     if (tIdx >= 0) triggers.splice(tIdx, 1)
   }
@@ -300,28 +348,43 @@ export function createPhysicsSystem(options = {}) {
         mesh.quaternion.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w)
       }
 
+      // Performance Core 3.6 — Atualizar posição no SpatialPartitionSystem
+      // (apenas corpos não-trigger, para query de triggers os encontrarem)
+      if (!isTrigger) {
+        SpatialPartitionSystem.update(instanceId, body.position.x, body.position.y, body.position.z)
+      }
+
       // Detetar "grounded" para PersonalObject (raycast para baixo)
       if (type === 'PersonalObject') {
-        const from = new CANNON.Vec3(body.position.x, body.position.y, body.position.z)
-        const to = new CANNON.Vec3(body.position.x, body.position.y - 1.1, body.position.z)
-        const result = new CANNON.RaycastResult()
-        world.raycastClosest(from, to, { skipBackfaces: true, collisionFilterMask: -1 }, result)
-        const wasGrounded = entry.grounded
-        entry.grounded = result.hasHit
+        // Reutilizar objectos pré-alocados (evita 3 allocations por frame)
+        _rayFrom.set(body.position.x, body.position.y, body.position.z)
+        _rayTo.set(body.position.x, body.position.y - 1.1, body.position.z)
+        _rayResult.reset()
+        world.raycastClosest(_rayFrom, _rayTo, { skipBackfaces: true, collisionFilterMask: -1 }, _rayResult)
+        entry.grounded = _rayResult.hasHit
       }
     }
 
     // Verificar triggers (sobreposição com outros corpos)
+    // Performance Core 3.6 — Otimizado com SpatialPartitionSystem
+    // Antes: O(triggers × bodies) por frame
+    // Agora: O(triggers × candidates) onde candidates = bodies na vizinhança do trigger
     for (const triggerId of triggers) {
       const triggerEntry = bodies.get(triggerId)
       if (!triggerEntry) continue
-      const currentContacts = new Set()
+      _triggerContacts.clear()
       const triggerPos = triggerEntry.body.position
       const triggerSize = triggerEntry.conect.size || [2, 2, 2]
-      // Verificar sobreposição com cada corpo
-      for (const [otherId, otherEntry] of bodies) {
+      // Query espacial: encontrar bodies na região do trigger (max dimension)
+      const maxDim = Math.max(triggerSize[0], triggerSize[1], triggerSize[2])
+      const candidates = SpatialPartitionSystem.querySphere(
+        triggerPos.x, triggerPos.y, triggerPos.z, maxDim
+      )
+      // Verificar sobreposição com cada candidato
+      for (const otherId of candidates) {
         if (otherId === triggerId) continue
-        if (otherEntry.isTrigger) continue
+        const otherEntry = bodies.get(otherId)
+        if (!otherEntry || otherEntry.isTrigger) continue
         const otherPos = otherEntry.body.position
         // Verificação simples AABB
         const dx = Math.abs(otherPos.x - triggerPos.x)
@@ -329,7 +392,7 @@ export function createPhysicsSystem(options = {}) {
         const dz = Math.abs(otherPos.z - triggerPos.z)
         const inside = dx < triggerSize[0] / 2 && dy < triggerSize[1] / 2 && dz < triggerSize[2] / 2
         if (inside) {
-          currentContacts.add(otherId)
+          _triggerContacts.add(otherId)
           if (!triggerEntry.previousContacts.has(otherId)) {
             emit('onTriggerEnter', { instanceId: triggerId, otherInstanceId: otherId })
           }
@@ -337,16 +400,21 @@ export function createPhysicsSystem(options = {}) {
       }
       // Sair de triggers
       for (const prevId of triggerEntry.previousContacts) {
-        if (!currentContacts.has(prevId)) {
+        if (!_triggerContacts.has(prevId)) {
           emit('onTriggerExit', { instanceId: triggerId, otherInstanceId: prevId })
         }
       }
-      triggerEntry.previousContacts = currentContacts
+      // Copiar para previousContacts (precisa de ser um Set novo para não partilhar referência)
+      triggerEntry.previousContacts.clear()
+      for (const id of _triggerContacts) triggerEntry.previousContacts.add(id)
     }
   }
 
   function dispose() {
     for (const [, entry] of bodies) {
+      if (entry._collideHandler) {
+        entry.body.removeEventListener('collide', entry._collideHandler)
+      }
       world.removeBody(entry.body)
     }
     bodies.clear()
@@ -354,6 +422,8 @@ export function createPhysicsSystem(options = {}) {
     eventListeners.onCollision.length = 0
     eventListeners.onTriggerEnter.length = 0
     eventListeners.onTriggerExit.length = 0
+    // Performance Core 3.6 — Limpar SpatialPartitionSystem (Bug #4 safe)
+    SpatialPartitionSystem.restore()
   }
 
   function getStats() {

@@ -22,6 +22,8 @@ export default function MainMenu({ onClose }) {
   const openProjectBrowser = useStore((s) => s.openProjectBrowser)
   const openDebugConsole = useStore((s) => s.openDebugConsole)
   const openGameExport = useStore((s) => s.openGameExport)
+  const openMarketplace = useStore((s) => s.openMarketplace)
+  const openInstancingPanel = useStore((s) => s.openInstancingPanel)
   const toggleConectsWindow = useStore((s) => s.toggleConectsWindow)
   const openMultiplayerPanel = useStore((s) => s.openMultiplayerPanel)
   const togglePerfStats = useStore((s) => s.togglePerfStats)
@@ -128,6 +130,20 @@ export default function MainMenu({ onClose }) {
             </div>
           </button>
           <div className="mm-divider" />
+          <button className="mm-item" onClick={handle(openInstancingPanel)}>
+            <span className="mm-icon"><Icon name="boxes" size={18} /></span>
+            <div>
+              <div className="mm-label">Hardware Instancing</div>
+              <div className="mm-desc small muted">Florestas, pedras, partículas (GPU)</div>
+            </div>
+          </button>
+          <button className="mm-item" onClick={handle(openMarketplace)}>
+            <span className="mm-icon"><Icon name="package" size={18} /></span>
+            <div>
+              <div className="mm-label">Marketplace</div>
+              <div className="mm-desc small muted">Assets, jogos e templates da comunidade</div>
+            </div>
+          </button>
           <button className="mm-item primary" onClick={handle(openGameExport)}>
             <span className="mm-icon"><Icon name="gamepad-2" size={18} /></span>
             <div>

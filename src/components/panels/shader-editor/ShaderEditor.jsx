@@ -331,7 +331,7 @@ export default function ShaderEditor({ onClose }) {
               className={mode === 'code' ? 'active' : ''}
               onClick={() => setMode('code')}
             >
-              💻 Código GLSL
+Código GLSL
             </button>
           </div>
 

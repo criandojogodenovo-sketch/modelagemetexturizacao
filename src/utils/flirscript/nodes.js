@@ -19,10 +19,10 @@
 // Aqui apenas exportamos os metadados e o registo.
 
 export const NODE_CATEGORIES = [
-  { id: 'events', label: 'Eventos', icon: '⚡', color: '#f4a261' },
-  { id: 'actions', label: 'Ações', icon: '🎬', color: '#2a9d8f' },
+  { id: 'events', label: 'Eventos', icon: 'zap', color: '#f4a261' },
+  { id: 'actions', label: 'Ações', icon: 'film', color: '#2a9d8f' },
   { id: 'logic', label: 'Lógica', icon: '🔀', color: '#8957e5' },
-  { id: 'variables', label: 'Variáveis', icon: '📦', color: '#2f81f7' },
+  { id: 'variables', label: 'Variáveis', icon: 'package', color: '#2f81f7' },
   { id: 'input', label: 'Input', icon: '👆', color: '#e63946' },
 ]
 

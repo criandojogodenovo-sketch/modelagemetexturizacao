@@ -4,17 +4,13 @@
  * Responsabilidades:
  *  - Construir geometria (primitiva, importada, ou customGeometry de edit mode)
  *  - Aplicar modificadores não destrutivos (subdivision, mirror, array, solidify)
- *  - Construir material PBR completo (MeshPhysicalMaterial) com:
- *      cor, roughness, metalness, emissive, opacity
- *      map, normalMap, roughnessMap, metalnessMap, emissiveMap
- *      anisotropy, ior, transmission, clearcoat, sheen, specularIntensity
+ *  - Construir material PBR com cor, roughness, metalness, emissive, opacity,
+ *    map, normalMap, múltiplas camadas de textura
  *  - Aplicar repeat/offset (tiling UV)
  *  - Suportar seleção visual
  *  - Receber pointer events para seleção
  *  - Forward ref do mesh para o parent usar com TransformControls
  *  - Suportar skeleton (ossos) para animação
- *  - INTEGRAÇÃO TEXTURE PAINT: usa PaintTextureManager para pintura real-time
- *      nos 4 canais (color/roughness/metallic/normal) sem recriar textura
  */
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
@@ -24,23 +20,106 @@ import {
   mirrorGeometry,
   arrayGeometry,
   solidifyGeometry,
+  bevelGeometry,
+  displaceGeometry as meshDisplaceGeometry,
+  taperGeometry as meshTaperGeometry,
+  twistGeometry as meshTwistGeometry,
+  bendGeometry as meshBendGeometry,
+  smoothGeometry as meshSmoothGeometry,
+  decimateGeometry,
+  weldVertices,
 } from '../../utils/meshOperations'
 import { compositeTextureLayers } from '../../utils/textureCompositor'
-import { getPaintTexture } from '../../utils/texturePaint'
 
-// Cache de texturas carregadas a partir de dataURLs (texturas importadas, não paint)
-const textureCache = new Map()
+// Cache de texturas carregadas a partir de dataURLs
+// Performance Core 3.8 — Consolidado: apenas StreamingManager LRU cache
+// (limite 50 texturas, eviction automática de texturas com refCount=0)
+// Antes havia dupla cache (local Map + StreamingManager) que impedia LRU
+// de funcionar corretamente. Agora apenas StreamingManager gere texturas.
+import { StreamingManager } from '../../utils/streamingManager'
+// Post-Audit 4.0 — A6: Import estático (antes era dinâmico, causava
+// INEFFECTIVE_DYNAMIC_IMPORT warning porque lodSystem.js já é importado
+// estaticamente por useLOD.js e flirScriptAPI.js)
+import { LODSystem } from '../../utils/lodSystem'
 
 export function loadTexture(dataURL) {
   if (!dataURL) return null
-  if (textureCache.has(dataURL)) return textureCache.get(dataURL)
-  const loader = new THREE.TextureLoader()
-  const tex = loader.load(dataURL)
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.wrapS = THREE.RepeatWrapping
-  tex.wrapT = THREE.RepeatWrapping
-  textureCache.set(dataURL, tex)
+  // StreamingManager.getTexture: cache hit retorna textura existente,
+  // cache miss chama loader (cria THREE.TextureLoader + carrega dataURL)
+  const tex = StreamingManager.getTexture(dataURL, () => {
+    const loader = new THREE.TextureLoader()
+    const t = loader.load(dataURL)
+    t.colorSpace = THREE.SRGBColorSpace
+    t.wrapS = THREE.RepeatWrapping
+    t.wrapT = THREE.RepeatWrapping
+    return t
+  })
   return tex
+}
+
+// Post-Audit 4.0 — A1: loadTexture com tracking de key para releaseTexture() no cleanup.
+// Retorna a textura e registra a key no Map passado. Chamar releaseTrackedTextures()
+// no cleanup para decrementar refCount de cada textura exatamente o mesmo número de vezes.
+// Post-Audit 4.2 — V1 FIX: Usa Map<string, number> em vez de Set para contar o número
+// exato de getTexture() por key. Assim, N chamadas a getTexture(key) produzem N
+// chamadas a releaseTexture(key), garantindo refCount correto.
+function loadTextureTracked(dataURL, trackedCounts) {
+  if (!dataURL) return null
+  const tex = loadTexture(dataURL)
+  if (tex && trackedCounts) {
+    // Incrementar contador para esta key (Map aceita duplicados — conta gets)
+    const current = trackedCounts.get(dataURL) || 0
+    trackedCounts.set(dataURL, current + 1)
+  }
+  return tex
+}
+
+// Post-Audit 4.0 — A1: Release de todas as texturas tracked.
+// Chama StreamingManager.releaseTexture() para cada key, decrementando refCount
+// o número exato de vezes que getTexture foi chamado para essa key.
+// Post-Audit 4.2 — V1 FIX: Usa Map<string, number> — release Texture(key) N vezes
+// onde N = contador de getTexture para essa key. Garante accounting correto.
+// StreamingManager garante que refCount nunca fica abaixo de zero (Math.max(0, ...)).
+// Idempotente: se Map estiver vazio ou já limpo, não faz nada.
+function releaseTrackedTextures(trackedCounts) {
+  if (!trackedCounts || trackedCounts.size === 0) return
+  for (const [key, count] of trackedCounts) {
+    // Release exatamente `count` vezes — uma por cada getTexture(key)
+    for (let i = 0; i < count; i++) {
+      StreamingManager.releaseTexture(key)
+    }
+  }
+  trackedCounts.clear()
+}
+
+// === Implementações de modificadores locais ===
+
+// Wireframe — converte para LineSegments
+function wireframeGeometry(geometry, thickness = 0.02) {
+  const edges = new THREE.EdgesGeometry(geometry)
+  const wireGeo = new THREE.BufferGeometry()
+  const positions = edges.attributes.position.array
+  wireGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  return wireGeo
+}
+
+// Spherify — deforma em direcção a uma esfera
+function spherifyGeometry(geometry, factor = 0.5) {
+  const pos = geometry.attributes.position
+  geometry.computeBoundingSphere()
+  const radius = geometry.boundingSphere.radius
+  const center = geometry.boundingSphere.center
+  const v = new THREE.Vector3()
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i)
+    const dir = v.clone().sub(center).normalize()
+    const target = center.clone().addScaledVector(dir, radius)
+    v.lerp(target, factor)
+    pos.setXYZ(i, v.x, v.y, v.z)
+  }
+  pos.needsUpdate = true
+  geometry.computeVertexNormals()
+  return geometry
 }
 
 // Aplica a stack de modificadores a uma geometria
@@ -67,6 +146,80 @@ function applyModifiers(geometry, modifiers) {
         case 'solidify':
           result = solidifyGeometry(result, mod.params.thickness || 0.1)
           break
+        case 'bevel':
+          try { result = bevelGeometry(result, (mod.params.width || 0.05) / 2, mod.params.segments || 2) } catch {}
+          break
+        case 'displace':
+          result = meshDisplaceGeometry(result, {
+            strength: mod.params.strength || 0.5,
+            scale: mod.params.scale || 1.0,
+          })
+          break
+        case 'bend':
+          result = meshBendGeometry(result, {
+            angle: ((mod.params.angle || 45) * Math.PI) / 180,
+            axis: mod.params.axis || 'y',
+          })
+          break
+        case 'twist':
+          result = meshTwistGeometry(result, {
+            angle: ((mod.params.angle || 90) * Math.PI) / 180,
+            axis: mod.params.axis || 'y',
+          })
+          break
+        case 'taper':
+          result = meshTaperGeometry(result, {
+            factor: mod.params.amount || 0.5,
+            axis: mod.params.axis || 'y',
+          })
+          break
+        case 'wireframe':
+          result = wireframeGeometry(result, mod.params.thickness || 0.02)
+          break
+        case 'remesh':
+          // Simplificação: usa decimate (não é voxelização real)
+          result = decimateGeometry(result, { ratio: 0.5 })
+          break
+        case 'smooth':
+          result = meshSmoothGeometry(result, {
+            iterations: mod.params.iterations || 1,
+            factor: mod.params.factor || 0.5,
+          })
+          break
+        case 'spherify':
+          result = spherifyGeometry(result, mod.params.factor || 0.5)
+          break
+        case 'weld':
+          // Weld = Merge by Distance — funde vértices próximos
+          result = weldVertices(result, mod.params.threshold ?? 0.001)
+          break
+        case 'curve':
+          // Curve = Deforma malha ao longo de uma curva
+          {
+            const pos = result.attributes.position
+            const amp = mod.params.amplitude ?? 0.5
+            const freq = mod.params.frequency ?? 1.0
+            const curveType = mod.params.curveType || 'sine'
+            for (let i = 0; i < pos.count; i++) {
+              const x = pos.getX(i)
+              const y = pos.getY(i)
+              const z = pos.getZ(i)
+              if (curveType === 'sine') {
+                pos.setY(i, y + Math.sin(x * freq) * amp)
+              } else if (curveType === 'cosine') {
+                pos.setZ(i, z + Math.cos(y * freq) * amp)
+              } else if (curveType === 'twist') {
+                const angle = y * freq * amp
+                const newX = x * Math.cos(angle) - z * Math.sin(angle)
+                const newZ = x * Math.sin(angle) + z * Math.cos(angle)
+                pos.setX(i, newX)
+                pos.setZ(i, newZ)
+              }
+            }
+            pos.needsUpdate = true
+            result.computeVertexNormals()
+          }
+          break
         default:
           break
       }
@@ -77,16 +230,14 @@ function applyModifiers(geometry, modifiers) {
   return result
 }
 
-// Aplica tiling UV a uma textura (helper)
-function applyTilingToTexture(tex, m) {
-  if (!tex) return
-  tex.repeat.set(m.repeat?.[0] ?? 1, m.repeat?.[1] ?? 1)
-  tex.offset.set(m.offset?.[0] ?? 0, m.offset?.[1] ?? 0)
-  tex.needsUpdate = true
-}
-
 const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect }, meshRef) {
   const innerRef = useRef()
+
+  // Post-Audit 4.0 — A1: Track de texturas carregadas para releaseTexture() no cleanup.
+  // Post-Audit 4.2 — V1 FIX: Usa Map<string, number> em vez de Set. Cada getTexture(key)
+  // incrementa o contador; releaseTrackedTextures decrementa refCount esse mesmo número
+  // de vezes. Garante que N gets = N releases, mesmo se useMemo/useEffect re-executam.
+  const loadedTextureCounts = useRef(new Map())
 
   // ----- Geometria (com modificadores aplicados) -----
   const geometry = useMemo(() => {
@@ -102,34 +253,9 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       }
       if (obj.customGeometry.uvs) {
         base.setAttribute('uv', new THREE.Float32BufferAttribute(obj.customGeometry.uvs, 2))
-      } else {
-        // Sem UVs — gerar UVs planar para permitir pintura
-        const uvs = new Float32Array(base.attributes.position.count * 2)
-        base.computeBoundingBox()
-        const bb = base.boundingBox
-        const size = new THREE.Vector3(); bb.getSize(size)
-        const pos = base.attributes.position
-        for (let i = 0; i < pos.count; i++) {
-          uvs[i * 2]     = (pos.getX(i) - bb.min.x) / Math.max(0.0001, size.x)
-          uvs[i * 2 + 1] = (pos.getY(i) - bb.min.y) / Math.max(0.0001, size.y)
-        }
-        base.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
       }
     } else if (obj.imported && obj.bufferGeometry) {
       base = obj.bufferGeometry
-      // Garantir que imported geometries têm UVs
-      if (!base.getAttribute('uv')) {
-        const uvs = new Float32Array(base.attributes.position.count * 2)
-        base.computeBoundingBox()
-        const bb = base.boundingBox
-        const size = new THREE.Vector3(); bb.getSize(size)
-        const pos = base.attributes.position
-        for (let i = 0; i < pos.count; i++) {
-          uvs[i * 2]     = (pos.getX(i) - bb.min.x) / Math.max(0.0001, size.x)
-          uvs[i * 2 + 1] = (pos.getY(i) - bb.min.y) / Math.max(0.0001, size.y)
-        }
-        base.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
-      }
     } else {
       const def = PRIMITIVES[obj.type]
       base = def ? def.build(THREE, obj.args) : new THREE.BoxGeometry(1, 1, 1)
@@ -139,35 +265,18 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     return final
   }, [obj.type, obj.args, obj.imported, obj.bufferGeometry, obj.customGeometry, obj.modifiers])
 
-  // ----- Material (MeshPhysicalMaterial — PBR completo) -----
+  // ----- Material -----
   const material = useMemo(() => {
     const m = obj.material || {}
-    const isTransparent = m.transparent || (m.opacity ?? 1) < 1 || (m.transmission ?? 0) > 0
-    const mat = new THREE.MeshPhysicalMaterial({
+    const mat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(m.color || '#cccccc'),
       roughness: m.roughness ?? 0.7,
       metalness: m.metalness ?? 0.0,
-      transparent: isTransparent,
+      transparent: m.transparent || (m.opacity ?? 1) < 1,
       opacity: m.opacity ?? 1,
       wireframe: m.wireframe || false,
       flatShading: m.flatShading || false,
       side: obj.type === 'plane' ? THREE.DoubleSide : THREE.FrontSide,
-      // PBR físico:
-      anisotropy: m.anisotropy ?? 0.0,
-      anisotropyRotation: m.anisotropyRotation ?? 0.0,
-      ior: m.ior ?? 1.5,
-      transmission: m.transmission ?? 0.0,
-      thickness: m.thickness ?? 0.0,
-      attenuationColor: new THREE.Color(m.attenuationColor || '#ffffff'),
-      attenuationDistance: m.attenuationDistance ?? 0.5,
-      clearcoat: m.clearcoat ?? 0.0,
-      clearcoatRoughness: m.clearcoatRoughness ?? 0.0,
-      sheen: m.sheen ?? 0.0,
-      sheenColor: new THREE.Color(m.sheenColor || '#ffffff'),
-      sheenRoughness: m.sheenRoughness ?? 0.5,
-      specularIntensity: m.specularIntensity ?? 1.0,
-      specularColor: new THREE.Color(m.specularColor || '#ffffff'),
-      envMapIntensity: m.envMapIntensity ?? 1.0,
     })
 
     // Emissive
@@ -176,98 +285,35 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
       mat.emissiveIntensity = m.emissiveIntensity ?? 1
     }
 
-    // ===== Texturas importadas (dataURL) — aplicadas com prioridade =====
-    // Se o utilizador fez upload de um mapa, usa esse. Caso contrário,
-    // a textura do PaintTextureManager (paint) é aplicada no effect abaixo.
-
     if (m.map) {
-      const tex = loadTexture(m.map)
+      const tex = loadTextureTracked(m.map, loadedTextureCounts.current)
       if (tex) {
-        applyTilingToTexture(tex, m)
+        tex.repeat.set(m.repeat?.[0] ?? 1, m.repeat?.[1] ?? 1)
+        tex.offset.set(m.offset?.[0] ?? 0, m.offset?.[1] ?? 0)
+        tex.needsUpdate = true
         mat.map = tex
       }
     }
 
     if (m.normalMap) {
-      const tex = loadTexture(m.normalMap)
+      const tex = loadTextureTracked(m.normalMap, loadedTextureCounts.current)
       if (tex) {
-        applyTilingToTexture(tex, m)
-        tex.colorSpace = THREE.NoColorSpace
+        tex.repeat.set(m.repeat?.[0] ?? 1, m.repeat?.[1] ?? 1)
+        tex.offset.set(m.offset?.[0] ?? 0, m.offset?.[1] ?? 0)
+        tex.needsUpdate = true
         mat.normalMap = tex
       }
     }
 
-    if (m.roughnessMap) {
-      const tex = loadTexture(m.roughnessMap)
-      if (tex) {
-        applyTilingToTexture(tex, m)
-        tex.colorSpace = THREE.NoColorSpace
-        mat.roughnessMap = tex
-      }
-    }
-
-    if (m.metalnessMap) {
-      const tex = loadTexture(m.metalnessMap)
-      if (tex) {
-        applyTilingToTexture(tex, m)
-        tex.colorSpace = THREE.NoColorSpace
-        mat.metalnessMap = tex
-      }
-    }
-
+    // Emissive map (se existir)
     if (m.emissiveMap) {
-      const tex = loadTexture(m.emissiveMap)
+      const tex = loadTextureTracked(m.emissiveMap, loadedTextureCounts.current)
       if (tex) mat.emissiveMap = tex
     }
 
     mat.needsUpdate = true
     return mat
   }, [obj.material, obj.type])
-
-  // ----- INTEGRAÇÃO TEXTURE PAINT (real-time, sem recriar textura) -----
-  // Quando o material é criado (ou o objeto é selecionado para pintura),
-  // obter as CanvasTextures vivas do PaintTextureManager e atribuí-las
-  // aos slots do material. Isto permite que a pintura apareça instantaneamente
-  // no mesh via texture.needsUpdate = true (passo 8 do pipeline).
-  useEffect(() => {
-    if (!material || !obj.id) return
-    // Atribuir CanvasTexture do PaintTextureManager a cada canal que não
-    // tenha textura importada (a importada tem prioridade).
-    const m = obj.material || {}
-
-    if (!m.map) {
-      const pt = getPaintTexture(obj.id, 'color')
-      if (pt && pt.texture) {
-        applyTilingToTexture(pt.texture, m)
-        material.map = pt.texture
-        material.needsUpdate = true
-      }
-    }
-    if (!m.normalMap) {
-      const pt = getPaintTexture(obj.id, 'normal')
-      if (pt && pt.texture) {
-        applyTilingToTexture(pt.texture, m)
-        material.normalMap = pt.texture
-        material.needsUpdate = true
-      }
-    }
-    if (!m.roughnessMap) {
-      const pt = getPaintTexture(obj.id, 'roughness')
-      if (pt && pt.texture) {
-        applyTilingToTexture(pt.texture, m)
-        material.roughnessMap = pt.texture
-        material.needsUpdate = true
-      }
-    }
-    if (!m.metalnessMap) {
-      const pt = getPaintTexture(obj.id, 'metallic')
-      if (pt && pt.texture) {
-        applyTilingToTexture(pt.texture, m)
-        material.metalnessMap = pt.texture
-        material.needsUpdate = true
-      }
-    }
-  }, [obj.id, obj.material, material])
 
   // ----- Compositing de camadas de textura (assíncrono) -----
   // Quando há múltiplas camadas, compõe-as num único mapa e aplica ao material.
@@ -287,23 +333,30 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
   }, [obj.material?.layers, obj.material?.repeat, obj.material?.offset, material])
 
   // ----- Atualização de repeat/offset em tempo real -----
+  // Post-Audit 4.2 — V1 FIX: NÃO chama loadTextureTracked aqui. As texturas já
+  // foram carregadas no useMemo do material (que tem dependência [obj.material, obj.type]).
+  // Aplicar tiling diretamente a material.map e material.normalMap evita incrementar
+  // refCount novamente. Se m.map mudou, o useMemo re-executa e carrega a nova textura;
+  // este useEffect apenas ajusta repeat/offset da textura atual do material.
   useEffect(() => {
     if (!material) return
     const m = obj.material
-    if (m.map) applyTilingToTexture(loadTexture(m.map), m)
-    if (m.normalMap) applyTilingToTexture(loadTexture(m.normalMap), m)
-    if (m.roughnessMap) applyTilingToTexture(loadTexture(m.roughnessMap), m)
-    if (m.metalnessMap) applyTilingToTexture(loadTexture(m.metalnessMap), m)
-    // Aplicar também às CanvasTextures do PaintTextureManager
-    const ptColor = getPaintTexture(obj.id, 'color', { dataURL: m.map })
-    applyTilingToTexture(ptColor?.texture, m)
-    const ptNormal = getPaintTexture(obj.id, 'normal', { dataURL: m.normalMap })
-    applyTilingToTexture(ptNormal?.texture, m)
-    const ptRough = getPaintTexture(obj.id, 'roughness', { dataURL: m.roughnessMap })
-    applyTilingToTexture(ptRough?.texture, m)
-    const ptMetal = getPaintTexture(obj.id, 'metallic', { dataURL: m.metalnessMap })
-    applyTilingToTexture(ptMetal?.texture, m)
-  }, [obj.material?.repeat, obj.material?.offset, obj.material?.map, obj.material?.normalMap, obj.material?.roughnessMap, obj.material?.metalnessMap, obj.id, material])
+    const repeatX = m.repeat?.[0] ?? 1
+    const repeatY = m.repeat?.[1] ?? 1
+    const offsetX = m.offset?.[0] ?? 0
+    const offsetY = m.offset?.[1] ?? 0
+    // Aplicar tiling às texturas já presentes no material (sem getTexture)
+    if (material.map) {
+      material.map.repeat.set(repeatX, repeatY)
+      material.map.offset.set(offsetX, offsetY)
+      material.map.needsUpdate = true
+    }
+    if (material.normalMap) {
+      material.normalMap.repeat.set(repeatX, repeatY)
+      material.normalMap.offset.set(offsetX, offsetY)
+      material.normalMap.needsUpdate = true
+    }
+  }, [obj.material?.repeat, obj.material?.offset, obj.material?.map, obj.material?.normalMap, material])
 
   // ----- Sincronizar transform -----
   // Aplicamos diretamente como props do mesh para garantir que estão sempre
@@ -323,9 +376,51 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     return () => {
       if (geometry && !obj.imported) geometry.dispose?.()
       material.dispose?.()
+      // Post-Audit 4.0 — A1: Release de texturas tracked no StreamingManager.
+      // Post-Audit 4.2 — V1 FIX: releaseTrackedTextures usa Map<string, number>
+      // e chama releaseTexture(key) N vezes (uma por cada getTexture). Garante
+      // refCount correto mesmo com múltiplos re-runs do useMemo.
+      // StreamingManager garante refCount >= 0 (Math.max). Quando refCount
+      // chega a 0, textura fica elegível para LRU eviction.
+      // NÃO chama texture.dispose() diretamente — StreamingManager gere disposal.
+      // Idempotente: se já limpo (Map vazio), não faz nada.
+      releaseTrackedTextures(loadedTextureCounts.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geometry, material])
+
+  // Performance Core 3.4 — Registar mesh no LODSystem
+  // Só regista se: tem geometria, não é customGeometry, não é animado (skeleton),
+  // e tem >1000 triângulos. LODSystem decide se cria THREE.LOD ou ignora.
+  // Post-Audit 4.0 — A6: Import estático (antes era dinâmico)
+  useEffect(() => {
+    const mesh = innerRef.current
+    if (!mesh || !geometry) return
+    // Calcular triângulos (positions.count / 3 para não indexada, index.count / 3 para indexada)
+    let triCount = 0
+    if (geometry.index) {
+      triCount = geometry.index.count / 3
+    } else if (geometry.attributes.position) {
+      triCount = geometry.attributes.position.count / 3
+    }
+    // Verificar se é animado (tem skeleton — NÃO aplicar LOD)
+    const isAnimated = !!(obj.skeleton || obj.animations)
+    const isCustomGeometry = !!obj.customGeometry
+
+    // Só regista se LODSystem está ativo (Play Mode)
+    // LODSystem.restore() é chamado no cleanup do useLOD, pelo que registos
+    // só persistem durante Play Mode
+    LODSystem.register(obj.id, mesh, triCount, {
+      isAnimated,
+      isCustomGeometry,
+    })
+
+    return () => {
+      // Desregistar ao desmontar
+      LODSystem.unregister(obj.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geometry, obj.id, obj.skeleton, obj.animations, obj.customGeometry])
 
   const handlePointerDown = (e) => {
     e.stopPropagation()

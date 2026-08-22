@@ -16,6 +16,7 @@ import { useState } from 'react'
 import { useStore } from '../../../store/useStore'
 import { CONECT_CATEGORIES, CONECT_TAXONOMY } from '../../../utils/conects/taxonomy'
 import { IconClose } from '../../ui/Icons'
+import { Icon } from '../../ui/iconMap'
 
 export default function ConectsWindow({ onClose }) {
   const [search, setSearch] = useState('')
@@ -86,7 +87,9 @@ export default function ConectsWindow({ onClose }) {
                   onClick={() => toggleCategory(cat.id)}
                   style={{ borderLeftColor: cat.color }}
                 >
-                  <span className="cat-icon">{cat.icon}</span>
+                  <span className="cat-icon" style={{ color: cat.color }}>
+                    <Icon name={cat.icon} size={14} />
+                  </span>
                   <span className="cat-label">{cat.label}</span>
                   <span className="cat-count">{conects.length}</span>
                   <span className="cat-chevron">{isCollapsed ? '▶' : '▼'}</span>
@@ -103,7 +106,7 @@ export default function ConectsWindow({ onClose }) {
                         title={conect.description}
                       >
                         <span className="conect-icon" style={{ color: cat.color }}>
-                          {conect.icon}
+                          <Icon name={conect.icon} size={14} />
                         </span>
                         <div className="conect-info">
                           <div className="conect-label">{conect.label}</div>

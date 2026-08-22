@@ -28,7 +28,7 @@ export function mulberry32(seed) {
 }
 
 /** Constrói uma tabela de permutação de Perlin a partir de uma seed. */
-function buildPermutation(seed) {
+export function buildPermutation(seed) {
   const rng = mulberry32(seed)
   const p = new Uint8Array(512)
   const base = new Uint8Array(256)

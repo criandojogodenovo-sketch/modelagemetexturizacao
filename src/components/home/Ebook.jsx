@@ -46,7 +46,7 @@ const CHAPTERS = [
   {
     id: 'modeling',
     title: '2. Modelagem 3D',
-    icon: '🧊',
+icon: '',
     content: (
       <>
         <h3>Modelagem de Objetos</h3>
@@ -504,7 +504,7 @@ function Illustration({ type }) {
         <text x="230" y="100" textAnchor="middle" fill="#2f81f7" fontSize="20"></text>
         <text x="230" y="125" textAnchor="middle" fill="#8b949e" fontSize="9">APK</text>
         <rect x="300" y="60" width="80" height="80" rx="6" fill="#1c2128" stroke="#f4a261" />
-        <text x="340" y="100" textAnchor="middle" fill="#f4a261" fontSize="20">🔗</text>
+<text x="340" y="100" textAnchor="middle" fill="#f4a261" fontSize="20"></text>
         <text x="340" y="125" textAnchor="middle" fill="#8b949e" fontSize="9">URL</text>
       </svg>
     ),

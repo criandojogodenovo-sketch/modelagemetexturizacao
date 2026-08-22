@@ -12,16 +12,16 @@
  * Os dados das telas de UI são guardados no store (uiScreens) e persistidos.
  * O GameUIOverlay usa exatamente os mesmos dados para renderizar durante o jogo.
  */
-import { useState } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useStore, useActiveUIScreen, useSelectedUIElement } from '../../../store/useStore'
 import { IconPlus, IconTrash, IconClose } from '../../ui/Icons'
 
 const ELEMENT_TYPES = [
   { type: 'Button', icon: 'mouse-pointer-2', label: 'Botão' },
-  { type: 'Label', icon: '🏷️', label: 'Label' },
+{ type: 'Label', icon: '️', label: 'Label' },
   { type: 'Input', icon: 'type', label: 'Input' },
-  { type: 'Checkbox', icon: '☑️', label: 'Checkbox' },
-  { type: 'Slider', icon: '🎚️', label: 'Slider' },
+{ type: 'Checkbox', icon: '️', label: 'Checkbox' },
+{ type: 'Slider', icon: '️', label: 'Slider' },
   { type: 'Form', icon: 'clipboard', label: 'Formulário' },
   { type: 'Text', icon: 'file', label: 'Texto' },
   { type: 'Image', icon: 'image', label: 'Imagem' },
@@ -135,6 +135,71 @@ export default function UIEditor() {
           </div>
         )}
 
+        {/* Fase 7 — Componentes pré-estilizados (presets estilo Figma) */}
+        {activeScreen && (
+          <div className="panel-section">
+            <h4>Componentes Pré-estilizados</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <button
+                onClick={() => {
+                  const el = addUIElement('Button', activeScreen.id)
+                  if (el?.id) updateUIElement(el.id, {
+                    label: 'Confirmar', color: '#2f81f7', textColor: '#ffffff',
+                    borderRadius: 8, fontSize: 14, padding: 12,
+                  })
+                }}
+                style={{ textAlign: 'left', padding: '6px 8px', fontSize: 11 }}
+              >
+                🔵 Botão Primário (azul, arredondado)
+              </button>
+              <button
+                onClick={() => {
+                  const el = addUIElement('Panel', activeScreen.id)
+                  if (el?.id) updateUIElement(el.id, {
+                    color: '#0d1117', opacity: 0.85, borderRadius: 12, padding: 16,
+                  })
+                }}
+                style={{ textAlign: 'left', padding: '6px 8px', fontSize: 11 }}
+              >
+                📦 Painel Escuro (overlay)
+              </button>
+              <button
+                onClick={() => {
+                  const el = addUIElement('Label', activeScreen.id)
+                  if (el?.id) updateUIElement(el.id, {
+                    label: 'Título', textColor: '#ffffff', fontSize: 24, fontWeight: 'bold',
+                  })
+                }}
+                style={{ textAlign: 'left', padding: '6px 8px', fontSize: 11 }}
+              >
+                📝 Label Título (branco, 24px, bold)
+              </button>
+              <button
+                onClick={() => {
+                  const el = addUIElement('Slider', activeScreen.id)
+                  if (el?.id) updateUIElement(el.id, {
+                    label: 'Volume', min: 0, max: 100, value: 50,
+                  })
+                }}
+                style={{ textAlign: 'left', padding: '6px 8px', fontSize: 11 }}
+              >
+                🎚️ Slider Volume (0-100)
+              </button>
+              <button
+                onClick={() => {
+                  const el = addUIElement('Checkbox', activeScreen.id)
+                  if (el?.id) updateUIElement(el.id, {
+                    label: 'Ativar som', checked: true,
+                  })
+                }}
+                style={{ textAlign: 'left', padding: '6px 8px', fontSize: 11 }}
+              >
+                ☑️ Checkbox Config
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Outliner de elementos da tela ativa */}
         {activeScreen && activeScreen.elements.length > 0 && (
           <div className="panel-section">
@@ -186,13 +251,12 @@ export default function UIEditor() {
               }}
             >
               {activeScreen.elements.map((el) => (
-                <UIElementRenderer
+                <DraggableUIElement
                   key={el.id}
                   element={el}
                   isSelected={el.id === selectedUIElementId}
                   onSelect={() => selectUIElement(el.id)}
                   onUpdate={(patch) => updateUIElement(el.id, patch)}
-                  isEditor={true}
                 />
               ))}
               {/* Fase 5: Preview de JoystickObjects da cena ativa */}
@@ -227,6 +291,137 @@ export default function UIEditor() {
           )}
         </div>
       </aside>
+    </div>
+  )
+}
+
+// ===== Fase 9 — DraggableUIElement: drag + resize + rotação no canvas =====
+// Wrapper que envolve o UIElementRenderer no modo editor.
+// Permite arrastar, redimensionar e rotacionar elementos no canvas.
+function DraggableUIElement({ element, isSelected, onSelect, onUpdate }) {
+  const dragRef = useRef(null)
+  const dragState = useRef({ mode: null, startX: 0, startY: 0, startPos: [0,0], startSize: [0,0], startRot: 0 })
+
+  const handlePointerDown = useCallback((e, mode) => {
+    e.stopPropagation()
+    e.preventDefault()
+    onSelect()
+    dragState.current = {
+      mode,
+      startX: e.clientX,
+      startY: e.clientY,
+      startPos: [...(element.position || [50, 50])],
+      startSize: [...(element.size || [120, 40])],
+      startRot: element.rotation || 0,
+    }
+
+    const handleMove = (ev) => {
+      const dx = ev.clientX - dragState.current.startX
+      const dy = ev.clientY - dragState.current.startY
+      const canvas = dragRef.current?.parentElement
+      if (!canvas) return
+      const cw = canvas.offsetWidth
+      const ch = canvas.offsetHeight
+
+      if (dragState.current.mode === 'drag') {
+        // Mover — converte pixels para percentagem
+        const newPosX = dragState.current.startPos[0] + (dx / cw) * 100
+        const newPosY = dragState.current.startPos[1] + (dy / ch) * 100
+        onUpdate({ position: [Math.round(newPosX * 10) / 10, Math.round(newPosY * 10) / 10] })
+      } else if (dragState.current.mode === 'resize') {
+        // Redimensionar — pixels absolutos
+        const newW = Math.max(30, dragState.current.startSize[0] + dx)
+        const newH = Math.max(20, dragState.current.startSize[1] + dy)
+        onUpdate({ size: [Math.round(newW), Math.round(newH)] })
+      } else if (dragState.current.mode === 'rotate') {
+        // Rotacionar — converte dx em graus
+        const newRot = dragState.current.startRot + (dx * 0.5)
+        onUpdate({ rotation: Math.round(newRot) })
+      }
+    }
+
+    const handleUp = () => {
+      dragState.current.mode = null
+      window.removeEventListener('pointermove', handleMove)
+      window.removeEventListener('pointerup', handleUp)
+    }
+
+    window.addEventListener('pointermove', handleMove)
+    window.addEventListener('pointerup', handleUp)
+  }, [element, onSelect, onUpdate])
+
+  const pos = element.position || [50, 50]
+  const size = element.size || [120, 40]
+  const rotation = element.rotation || 0
+
+  return (
+    <div
+      ref={dragRef}
+      style={{
+        position: 'absolute',
+        left: `${pos[0]}%`,
+        top: `${pos[1]}%`,
+        width: size[0],
+        height: size[1],
+        transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+        cursor: isSelected ? 'move' : 'pointer',
+      }}
+      onPointerDown={(e) => { if (isSelected) handlePointerDown(e, 'drag'); else onSelect() }}
+    >
+      <UIElementRenderer
+        element={element}
+        isSelected={isSelected}
+        onSelect={onSelect}
+        onUpdate={onUpdate}
+        isEditor={true}
+      />
+
+      {/* Handles de edição — só quando selecionado */}
+      {isSelected && (
+        <>
+          {/* Handle de resize (canto inferior direito) */}
+          <div
+            style={{
+              position: 'absolute',
+              bottom: -6,
+              right: -6,
+              width: 12,
+              height: 12,
+              background: '#2f81f7',
+              border: '2px solid #fff',
+              borderRadius: '50%',
+              cursor: 'nwse-resize',
+              zIndex: 100,
+            }}
+            onPointerDown={(e) => handlePointerDown(e, 'resize')}
+          />
+          {/* Handle de rotação (topo centro) */}
+          <div
+            style={{
+              position: 'absolute',
+              top: -20,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: 12,
+              height: 12,
+              background: '#3fb950',
+              border: '2px solid #fff',
+              borderRadius: '50%',
+              cursor: 'grab',
+              zIndex: 100,
+            }}
+            onPointerDown={(e) => handlePointerDown(e, 'rotate')}
+          />
+          {/* Borda de seleção */}
+          <div style={{
+            position: 'absolute',
+            inset: -2,
+            border: '1px dashed #2f81f7',
+            pointerEvents: 'none',
+            borderRadius: (element.borderRadius || 0) + 2,
+          }} />
+        </>
+      )}
     </div>
   )
 }
@@ -448,6 +643,16 @@ function UIElementProperties({ element, onUpdate }) {
           <div className="axis y" data-axis="H">
             <input type="number" value={element.size?.[1] || 40} onChange={(e) => setSize(1, Number(e.target.value))} />
           </div>
+        </div>
+      </div>
+
+      {/* Fase 9 — Rotação */}
+      <div className="panel-section">
+        <h4>Rotação</h4>
+        <div className="prop-row">
+          <label>Ângulo: {element.rotation || 0}°</label>
+          <input type="range" min="0" max="360" step="1" value={element.rotation || 0}
+            onChange={(e) => set({ rotation: Number(e.target.value) })} />
         </div>
       </div>
 

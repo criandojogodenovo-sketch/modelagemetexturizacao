@@ -26,6 +26,13 @@ import { getCachedPose, applyPose, clearPoseCache } from './sharedAnimationCache
 function interpolate(a, b, t, type = 'ease') {
   if (type === 'step') return a
   if (type === 'linear') return a + (b - a) * t
+  // Fase 7/11 — Curvas de interpolação reais
+  if (type === 'easeIn') return a + (b - a) * t * t
+  if (type === 'easeOut') return a + (b - a) * (1 - (1 - t) * (1 - t))
+  if (type === 'easeInOut') {
+    const eased = t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t)
+    return a + (b - a) * eased
+  }
   // ease (smoothstep)
   const eased = t * t * (3 - 2 * t)
   return a + (b - a) * eased
@@ -46,13 +53,16 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
   let loop = false
   let speed = 1
   let onComplete = null
-  
+
   // AnimationBoost: blending entre clips
   let prevClip = null
   let prevTime = 0
   let blendTime = 0
   let blendDuration = 0
   let boostEnabled = false
+
+  // Cache de maxTime por clip (evita keyframes.map() por frame)
+  const _maxTimeCache = new Map()
 
   function play(clipName, options = {}) {
     if (!animations[clipName] || animations[clipName].length === 0) return false
@@ -121,8 +131,15 @@ export function createAnimationPlayer(animations, getMesh, getBones) {
 
     currentTime += deltaTime * speed
 
-    // Calcular duração total do clip
-    const maxTime = Math.max(...keyframes.map((k) => k.time))
+    // Calcular duração total do clip (cached — evita keyframes.map() por frame)
+    let maxTime = _maxTimeCache.get(currentClip)
+    if (maxTime === undefined) {
+      maxTime = 0
+      for (let i = 0; i < keyframes.length; i++) {
+        if (keyframes[i].time > maxTime) maxTime = keyframes[i].time
+      }
+      _maxTimeCache.set(currentClip, maxTime)
+    }
 
     if (currentTime >= maxTime) {
       if (loop) {

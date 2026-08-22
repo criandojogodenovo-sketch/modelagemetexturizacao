@@ -193,7 +193,7 @@ export default function FlirCodeEditor() {
         <button onClick={() => insertSnippet('fun onTick() begincode\n    \nendcode\n')} title="Event Tick">⏱ Tick</button>
         <button onClick={() => insertSnippet('fun onCollide(other) begincode\n    \nendcode\n')} title="Event Collide">Collide</button>
         <button onClick={() => insertSnippet('if (true) begincode\n    \nendcode\n')} title="Condicional">? If</button>
-        <button onClick={() => insertSnippet('repeat in number(3, i) begincode\n    \nendcode\n')} title="Ciclo">🔁 Repeat</button>
+<button onClick={() => insertSnippet('repeat in number(3, i) begincode\n \nendcode\n')} title="Ciclo"> Repeat</button>
         <button onClick={() => insertSnippet('print("mensagem")\n')} title="Print">Print</button>
         <button onClick={() => insertSnippet('move(0, 0, 1)\n')} title="Mover">Move</button>
         <button onClick={() => insertSnippet('playAnim("idle")\n')} title="Animação">Anim</button>
@@ -236,7 +236,7 @@ export default function FlirCodeEditor() {
       {/* Referência rápida */}
       <div className="flircode-reference">
         <details>
-          <summary>📖 Referência rápida</summary>
+<summary> Referência rápida</summary>
           <div className="flircode-ref-content">
             <h5>Events:</h5>
             <code>fun onStart()</code> — BeginPlay<br/>

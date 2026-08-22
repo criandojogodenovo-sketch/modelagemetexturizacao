@@ -38,10 +38,16 @@ import AnimationStudio from './components/panels/AnimationStudio'
 import AnimationControllerEditor from './components/panels/AnimationControllerEditor'
 import MultiplayerPanel from './components/panels/MultiplayerPanel'
 import PostProcessingPanel from './components/panels/PostProcessingPanel'
+import MarketplacePanel from './components/panels/MarketplacePanel'
+import InstancingPanel from './components/panels/InstancingPanel'
+import SettingsPanel from './components/panels/SettingsPanel'
 import BuildersPanel from './components/panels/BuildersPanel'
+import MechanicsPanel from './components/panels/MechanicsPanel'
+import DialoguePanel from './components/panels/DialoguePanel'
 import UVEditor from './components/panels/UVEditor'
 import PerformanceStatsOverlay from './components/ui/PerformanceStatsOverlay'
 import MainMenu from './components/ui/MainMenu'
+import VerticalRail from './components/ui/VerticalRail'
 import HomePage from './components/home/HomePage'
 import Toasts from './components/ui/Toasts'
 import LoadingOverlay from './components/ui/LoadingOverlay'
@@ -62,6 +68,7 @@ export default function App() {
   const toggleMoreTools = useStore((s) => s.toggleMoreTools)
   const appMode = useStore((s) => s.appMode)
   const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
+  const closeScenePreview = useStore((s) => s.closeScenePreview)
   const conectsWindowOpen = useStore((s) => s.ui.conectsWindowOpen)
   const toggleConectsWindow = useStore((s) => s.toggleConectsWindow)
   const gameExportOpen = useStore((s) => s.gameExportOpen)
@@ -87,8 +94,18 @@ export default function App() {
   const perfStatsVisible = useStore((s) => s.perfStatsVisible)
   const postProcessingOpen = useStore((s) => s.postProcessingOpen)
   const closePostProcessing = useStore((s) => s.closePostProcessing)
+  const marketplaceOpen = useStore((s) => s.marketplaceOpen)
+  const closeMarketplace = useStore((s) => s.closeMarketplace)
+  const instancingPanelOpen = useStore((s) => s.instancingPanelOpen)
+  const closeInstancingPanel = useStore((s) => s.closeInstancingPanel)
+  const settingsPanelOpen = useStore((s) => s.settingsPanelOpen)
+  const closeSettingsPanel = useStore((s) => s.closeSettingsPanel)
   const buildersPanelOpen = useStore((s) => s.buildersPanelOpen)
   const closeBuildersPanel = useStore((s) => s.closeBuildersPanel)
+  const mechanicsPanelOpen = useStore((s) => s.mechanicsPanelOpen)
+  const closeMechanicsPanel = useStore((s) => s.closeMechanicsPanel)
+  const dialoguePanelOpen = useStore((s) => s.dialoguePanelOpen)
+  const closeDialoguePanel = useStore((s) => s.closeDialoguePanel)
   const uvEditorOpen = useStore((s) => s.uvEditorOpen)
   const closeUVEditor = useStore((s) => s.closeUVEditor)
   const homeVisible = useStore((s) => s.homeVisible)
@@ -147,6 +164,11 @@ export default function App() {
         if (key === 'd' && selectedId) { e.preventDefault(); duplicateObject(selectedId) }
         return
       }
+      // Em modo jogo, WASD/Space/etc. são para o jogador — não ativar atalhos do editor
+      if (scenePreviewOpen) {
+        if (key === 'escape') { closeScenePreview() }
+        return
+      }
       if (key === 'g') setTransformMode('translate')
       if (key === 'r') setTransformMode('rotate')
       if (key === 's') setTransformMode('scale')
@@ -157,12 +179,13 @@ export default function App() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [undo, redo, setTransformMode, deleteObject, duplicateObject, selectedId, deselect, closeDrawers])
+  }, [undo, redo, setTransformMode, deleteObject, duplicateObject, selectedId, deselect, closeDrawers, scenePreviewOpen, closeScenePreview])
 
   return (
     <div className={`app-shell ${scenePreviewOpen ? 'game-mode' : ''}`}>
       {homeVisible && <HomePage onOpenProject={hideHome} />}
       {!scenePreviewOpen && <TopBar />}
+      {!scenePreviewOpen && appMode !== 'flirscript' && appMode !== 'ui' && <VerticalRail />}
       <OfflineIndicator />
 
       {appMode === 'flirscript' ? (
@@ -201,7 +224,12 @@ export default function App() {
       {animStudioOpen && <AnimationStudio onClose={closeAnimStudio} />}
       {multiplayerPanelOpen && <MultiplayerPanel onClose={closeMultiplayerPanel} />}
       {postProcessingOpen && <PostProcessingPanel onClose={closePostProcessing} />}
-      {buildersPanelOpen && <BuildersPanel open={buildersPanelOpen} onClose={closeBuildersPanel} />}
+      {marketplaceOpen && <MarketplacePanel onClose={closeMarketplace} />}
+      {instancingPanelOpen && <InstancingPanel onClose={closeInstancingPanel} />}
+      {settingsPanelOpen && <SettingsPanel onClose={closeSettingsPanel} />}
+      {buildersPanelOpen && <BuildersPanel onClose={closeBuildersPanel} />}
+      {mechanicsPanelOpen && <MechanicsPanel onClose={closeMechanicsPanel} />}
+      {dialoguePanelOpen && <DialoguePanel onClose={closeDialoguePanel} />}
       {uvEditorOpen && <UVEditor objectId={selectedId} onClose={closeUVEditor} />}
       {perfStatsVisible && <PerformanceStatsOverlay />}
       {animControllerTarget && (

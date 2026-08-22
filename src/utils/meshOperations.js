@@ -1025,3 +1025,22 @@ export function curveDeform(geometry, pathPoints, options = {}) {
   result.computeBoundingSphere()
   return result
 }
+
+// ---------- Weld (Fundir Vértices Próximos) ----------
+// Weld = equivalente ao "Merge by Distance" do Blender.
+// Funde vértices que estão dentro de um threshold, limpando geometria duplicada.
+// Útil para limpar modelos importados com vértices redundantes ou após boolean ops.
+// Usa BufferGeometryUtils.mergeVertices internamente.
+export function weldVertices(geometry, threshold = 0.001) {
+  // Validar geometria
+  if (!geometry || !geometry.attributes || !geometry.attributes.position) {
+    return geometry
+  }
+  // mergeVertices requer geometria não-indexada → converte se necessário
+  // (mergeVertices aceita ambas, mas resultado é sempre indexado)
+  const result = BufferGeometryUtils.mergeVertices(geometry, threshold)
+  result.computeVertexNormals()
+  result.computeBoundingBox()
+  result.computeBoundingSphere()
+  return result
+}

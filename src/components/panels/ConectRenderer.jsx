@@ -14,14 +14,28 @@
  *  - CheckpointObject: renderiza uma bandeira/marca
  *  - Outros (UI, Sound, Sky, Fog, View, etc.): sem visual 3D (só lógica)
  */
-import { forwardRef, useMemo, useEffect } from 'react'
+import { forwardRef, useMemo, useEffect, useRef } from 'react'
+import { useThree, useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useStore } from '../../store/useStore'
 import { findConectDefinition } from '../../utils/conects/taxonomy'
+import { createWaterProMaterial } from '../../utils/waterShaderPro'
+import { createSkyProMaterial, calculateSunDirection } from '../../utils/skyShaderPro'
+import { createRealWaterMaterial } from '../../utils/realWaterShader'
 import SceneObject from '../3d/SceneObject'
 
 const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, setMeshRef }, meshRef) {
   const def = findConectDefinition(conect.type)
+
+  // Post-Audit 4.0 — P3: objectsById Map para lookup O(1) em vez de objects.find() O(N).
+  // Reconstroi só quando `objects` muda (useMemo). Mesmo pattern do SceneLevel3D.
+  const objectsById = useMemo(() => {
+    const map = new Map()
+    for (const obj of objects || []) {
+      if (obj?.id) map.set(obj.id, obj)
+    }
+    return map
+  }, [objects])
 
   // Se não tem visual, não renderiza mesh — mas pode adicionar luzes, etc.
   if (conect.type === 'LuminousObject') {
@@ -63,6 +77,85 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
     return <ReflectMesh conect={conect} setMeshRef={setMeshRef} />
   }
 
+  // SkyObject: renderiza esfera de céu com shader procedural
+  if (conect.type === 'SkyObject') {
+    return <SkyMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // SunObject: luz direcional (sol)
+  if (conect.type === 'SunObject') {
+    return <SunLightMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // PointObject: luz pontual
+  if (conect.type === 'PointObject') {
+    return <PointLightMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // SpotObject: luz spot
+  if (conect.type === 'SpotObject') {
+    return <SpotLightMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // AmbientObject: luz ambiente (sem gizmo, só aplica à cena)
+  if (conect.type === 'AmbientObject') {
+    return <AmbientLightMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // SpawnObject: ponto de spawn (gizmo em forma de estrela)
+  if (conect.type === 'SpawnObject') {
+    return <SpawnMarkerMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // NavigatorObject: portal para outra cena
+  if (conect.type === 'NavigatorObject') {
+    return <NavigatorMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // WeaponObject: arma visual (gizmo em forma de arma)
+  if (conect.type === 'WeaponObject') {
+    return <WeaponMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // ItemObject: item coleccionável (gizmo em forma de diamante rotativo)
+  if (conect.type === 'ItemObject') {
+    return <ItemMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // AreaObject: área de influência (gizmo wireframe)
+  if (conect.type === 'AreaObject') {
+    return <AreaMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // Realism Conects — gizmos visuais no editor (efeitos reais aplicados no runtime pelo PostProcessingPanel)
+  if (conect.type === 'GIProbeObject') return <GIProbeMesh conect={conect} setMeshRef={setMeshRef} />
+  if (conect.type === 'SSRObject') return <SSRMesh conect={conect} setMeshRef={setMeshRef} />
+  if (conect.type === 'VolumetricFogObject') return <VolumetricFogMesh conect={conect} setMeshRef={setMeshRef} />
+  if (conect.type === 'SSSObject') return <SSSMesh conect={conect} setMeshRef={setMeshRef} />
+  if (conect.type === 'BloomObject') return <BloomMesh conect={conect} setMeshRef={setMeshRef} />
+  if (conect.type === 'DOFObject') return <DOFMesh conect={conect} setMeshRef={setMeshRef} />
+
+  // Markers
+  if (conect.type === 'EmptyObject') return <EmptyMesh conect={conect} setMeshRef={setMeshRef} />
+  if (conect.type === 'ArrowMarker') return <ArrowMarkerMesh conect={conect} setMeshRef={setMeshRef} />
+  if (conect.type === 'PointMarker') return <PointMarkerMesh conect={conect} setMeshRef={setMeshRef} />
+
+  // RealWater — água super-realista
+  if (conect.type === 'RealWaterObject') return <RealWaterMesh conect={conect} setMeshRef={setMeshRef} />
+
+  // Fase 8 — DialogueObject: gizmo de NPC diálogo
+  if (conect.type === 'DialogueObject') return <DialogueMesh conect={conect} setMeshRef={setMeshRef} />
+
+  // Fase 13 — WindObject, CloudObject, DayNightCycleObject
+  if (conect.type === 'WindObject') return <WindMesh conect={conect} setMeshRef={setMeshRef} />
+  if (conect.type === 'CloudObject') return <CloudMesh conect={conect} setMeshRef={setMeshRef} />
+  if (conect.type === 'DayNightCycleObject') return <DayNightMesh conect={conect} setMeshRef={setMeshRef} />
+
+  // ReferenceObject: renderiza conteúdo de outra cena
+  if (conect.type === 'ReferenceObject') {
+    return <ReferenceMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
   if (!def?.hasVisual && conect.type !== 'VisualObject') {
     // Sem visual — ligar o meshRef a null para que physics não tente usar
     useEffect(() => { setMeshRef?.(null) }, [])
@@ -71,7 +164,8 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
 
   // VisualObject: usa modelo do catálogo
   if (conect.type === 'VisualObject') {
-    const obj = objects.find((o) => o.id === conect.sourceObjectId)
+    // Post-Audit 4.0 — P3: lookup O(1) via Map em vez de O(N) find
+    const obj = objectsById.get(conect.sourceObjectId)
     if (!obj) return null
     const sceneObj = {
       ...obj,
@@ -107,6 +201,19 @@ export default ConectRenderer
 
 // ===== Placeholder para conects com física =====
 const PlaceholderMesh = forwardRef(function PlaceholderMesh({ conect }, ref) {
+  // Em modo jogo com ViewObject FPS, esconder o PersonalObject para não tapar a câmara
+  const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
+  // Selector estreito: só lê os ViewObjects da cena ativa, não o array scenes inteiro
+  const hasFPSView = useStore((s) => {
+    if (!scenePreviewOpen || conect.type !== 'PersonalObject') return false
+    const activeScene = s.scenes.find((sc) => sc.id === s.activeSceneId)
+    if (!activeScene) return false
+    return (activeScene.conects || []).some((c) =>
+      c.type === 'ViewObject' && c.followMode === 'first' &&
+      (c.followTarget === conect.instanceId || c.cameraRole === 'player')
+    )
+  })
+
   const color = conect.type === 'PersonalObject' ? '#3fb950'
                 : conect.type === 'StaticObject' ? '#6e7681'
                 : conect.type === 'StopObject' ? '#d29922'
@@ -120,7 +227,7 @@ const PlaceholderMesh = forwardRef(function PlaceholderMesh({ conect }, ref) {
       position={conect.position}
       rotation={conect.rotation}
       scale={conect.scale}
-      visible={conect.visible !== false}
+      visible={conect.visible !== false && !hasFPSView}
       castShadow
       receiveShadow
       userData={{ conectInstanceId: conect.instanceId }}
@@ -232,6 +339,9 @@ function TerrainMesh({ conect, setMeshRef }) {
     return g
   }, [conect.width, conect.depth, conect.segments, conect.heightScale, conect.heightmapSeed, conect.heightmap, conect.splatmap, conect.textureLayers, conect.maxLayers])
 
+  // Disposal: libertar geometry quando o componente desmonta
+  useEffect(() => () => { geometry.dispose() }, [geometry])
+
   const hasVertexColors = !!(conect.splatmap && conect.textureLayers && conect.splatmap.length > 0)
 
   return (
@@ -247,6 +357,7 @@ function TerrainMesh({ conect, setMeshRef }) {
         vertexColors={hasVertexColors}
         roughness={0.9}
         metalness={0}
+        side={THREE.DoubleSide}
       />
     </mesh>
   )
@@ -254,20 +365,86 @@ function TerrainMesh({ conect, setMeshRef }) {
 
 // ===== WaterObject =====
 function WaterMesh({ conect, setMeshRef }) {
+  const meshRef = useRef()
+  const time = useRef(0)
+  const waterQuality = useStore((s) => s.renderSettings?.waterQuality || 'basic')
+
+  // Material Pro (Gerstner + caustics + IOR + Fresnel) quando quality = professional
+  const proMaterial = useMemo(() => {
+    if (waterQuality !== 'professional') return null
+    return createWaterProMaterial({
+      color: conect.color || '#2f81f7',
+      deepColor: conect.deepColor || '#0a3d5c',
+      opacity: conect.opacity ?? 0.85,
+      waveHeight: conect.waveHeight ?? 0.2,
+      waveSpeed: conect.waveSpeed ?? 0.5,
+      waterMode: conect.waterMode || 'lake',
+      flowDirection: conect.flowDirection || 0,
+      foamEnabled: conect.foamEnabled !== false,
+      foamThreshold: conect.foamThreshold ?? 0.7,
+      depthGradient: conect.depthGradient !== false,
+      skyColor: '#88aacc',
+    })
+  }, [waterQuality, conect.color, conect.deepColor, conect.opacity, conect.waveHeight,
+      conect.waveSpeed, conect.waterMode, conect.flowDirection, conect.foamEnabled,
+      conect.foamThreshold, conect.depthGradient])
+
+  const geometry = useMemo(() => {
+    const [w, h] = conect.size || [20, 20]
+    const segs = waterQuality === 'professional' ? 48 : 32
+    const g = new THREE.PlaneGeometry(w, h, segs, segs)
+    g.rotateX(-Math.PI / 2)
+    return g
+  }, [conect.size, waterQuality])
+
+  // Disposal: libertar geometry e proMaterial
+  useEffect(() => () => { geometry.dispose(); proMaterial?.dispose() }, [geometry, proMaterial])
+
+  // Animar ondas no useFrame (apenas para water básico; Pro usa shader)
+  useFrame((state, delta) => {
+    if (!meshRef.current) return
+    if (proMaterial) {
+      // Pro: actualizar uniforms do shader
+      if (proMaterial.uniforms) {
+        proMaterial.uniforms.uTime.value += delta
+        proMaterial.uniforms.uCameraPos.value.copy(state.camera.position)
+      }
+      return
+    }
+    // Básico: animar vértices
+    time.current += delta * (conect.waveSpeed || 0.5)
+    const pos = meshRef.current.geometry.attributes.position
+    const waveHeight = conect.waveHeight || 0.1
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i)
+      const z = pos.getZ(i)
+      const y = Math.sin(x * 0.5 + time.current) * waveHeight
+        + Math.cos(z * 0.5 + time.current * 0.7) * waveHeight * 0.5
+      pos.setY(i, y)
+    }
+    pos.needsUpdate = true
+    meshRef.current.geometry.computeVertexNormals()
+  })
+
   return (
     <mesh
-      ref={setMeshRef}
+      ref={(node) => {
+        meshRef.current = node
+        if (typeof setMeshRef === 'function') setMeshRef(node)
+      }}
       position={conect.position}
-      rotation={[-Math.PI / 2, 0, 0]}
+      geometry={geometry}
+      material={proMaterial || undefined}
     >
-      <planeGeometry args={conect.size || [20, 20]} />
-      <meshStandardMaterial
-        color={conect.color}
-        transparent
-        opacity={conect.opacity}
-        roughness={0.1}
-        metalness={0.3}
-      />
+      {!proMaterial && (
+        <meshStandardMaterial
+          color={conect.color || '#2f81f7'}
+          transparent
+          opacity={conect.opacity ?? 0.6}
+          roughness={0.1}
+          metalness={0.3}
+        />
+      )}
     </mesh>
   )
 }
@@ -321,31 +498,99 @@ function CheckpointMesh({ conect, setMeshRef }) {
 
 // ===== ParticleObject =====
 function ParticleMesh({ conect, setMeshRef }) {
-  const particles = useMemo(() => {
-    const arr = []
-    const count = Math.min(conect.maxParticles || 100, 500)
+  const groupRef = useRef()
+  const timeRef = useRef(0)
+
+  // Usar BufferGeometry + Points para performance (1 draw call em vez de N)
+  const count = Math.min(conect.maxParticles || 100, 300)
+  const positionsRef = useRef(new Float32Array(count * 3))
+  const velocitiesRef = useRef(new Float32Array(count * 3))
+  const lifeRef = useRef(new Float32Array(count))
+
+  // Inicializar partículas
+  useMemo(() => {
+    const spread = conect.spread || 1
+    const speed = conect.particleSpeed || 0.5
     for (let i = 0; i < count; i++) {
-      arr.push({
-        position: [
-          (Math.random() - 0.5) * (conect.spread || 1),
-          Math.random() * 0.5,
-          (Math.random() - 0.5) * (conect.spread || 1),
-        ],
-        size: 0.02 + Math.random() * (conect.particleSize || 0.1),
-      })
+      positionsRef.current[i * 3] = (Math.random() - 0.5) * spread
+      positionsRef.current[i * 3 + 1] = 0
+      positionsRef.current[i * 3 + 2] = (Math.random() - 0.5) * spread
+      velocitiesRef.current[i * 3] = (Math.random() - 0.5) * speed
+      velocitiesRef.current[i * 3 + 1] = Math.random() * speed + 0.2
+      velocitiesRef.current[i * 3 + 2] = (Math.random() - 0.5) * speed
+      lifeRef.current[i] = Math.random() * (conect.particleLife || 2)
     }
-    return arr
-  }, [conect.maxParticles, conect.particleSize, conect.spread])
+  }, [count, conect.spread, conect.particleSpeed, conect.particleLife])
+
+  const geometry = useMemo(() => {
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(positionsRef.current, 3))
+    return geo
+  }, [])
+
+  const material = useMemo(() => {
+    return new THREE.PointsMaterial({
+      color: conect.color || '#ffffff',
+      size: conect.particleSize || 0.1,
+      transparent: true,
+      opacity: 0.7,
+      sizeAttenuation: true,
+      depthWrite: false,
+    })
+  }, [conect.color, conect.particleSize])
+
+  // Animar partículas no useFrame
+  useFrame((_, delta) => {
+    timeRef.current += delta
+    const positions = positionsRef.current
+    const velocities = velocitiesRef.current
+    const life = lifeRef.current
+    const gravity = conect.gravity ?? -0.5
+    const maxLife = conect.particleLife || 2
+    const spread = conect.spread || 1
+
+    for (let i = 0; i < count; i++) {
+      // Atualizar vida
+      life[i] += delta
+      if (life[i] >= maxLife) {
+        // Reciclar partícula
+        positions[i * 3] = (Math.random() - 0.5) * spread
+        positions[i * 3 + 1] = 0
+        positions[i * 3 + 2] = (Math.random() - 0.5) * spread
+        velocities[i * 3] = (Math.random() - 0.5) * (conect.particleSpeed || 0.5)
+        velocities[i * 3 + 1] = Math.random() * (conect.particleSpeed || 0.5) + 0.2
+        velocities[i * 3 + 2] = (Math.random() - 0.5) * (conect.particleSpeed || 0.5)
+        life[i] = 0
+      } else {
+        // Mover partícula
+        positions[i * 3] += velocities[i * 3] * delta
+        positions[i * 3 + 1] += velocities[i * 3 + 1] * delta
+        positions[i * 3 + 2] += velocities[i * 3 + 2] * delta
+        // Aplicar gravidade
+        velocities[i * 3 + 1] += gravity * delta
+      }
+    }
+    geometry.attributes.position.needsUpdate = true
+  })
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      geometry.dispose()
+      material.dispose()
+    }
+  }, [geometry, material])
 
   return (
-    <group ref={setMeshRef} position={conect.position}>
-      {particles.map((p, i) => (
-        <mesh key={i} position={p.position}>
-          <sphereGeometry args={[p.size, 6, 6]} />
-          <meshBasicMaterial color={conect.color} transparent opacity={0.7} />
-        </mesh>
-      ))}
-    </group>
+    <points
+      ref={(node) => {
+        groupRef.current = node
+        if (typeof setMeshRef === 'function') setMeshRef(node)
+      }}
+      position={conect.position}
+      geometry={geometry}
+      material={material}
+    />
   )
 }
 
@@ -401,23 +646,69 @@ function ViewObjectMesh({ conect, setMeshRef }) {
 // Renderiza uma linha que segue a posição do objeto pai.
 // Em tempo de execução, o GameRunner atualiza as posições do trail.
 function TrailMesh({ conect, setMeshRef }) {
-  const points = useMemo(() => {
-    const arr = []
-    const len = conect.length || 30
-    for (let i = 0; i < len; i++) {
-      arr.push(new THREE.Vector3(conect.position[0], conect.position[1], conect.position[2]))
+  const groupRef = useRef()
+  const lineRef = useRef()
+  const maxPoints = conect.length || 30
+  const positionsRef = useRef(new Float32Array(maxPoints * 3))
+  const currentIndexRef = useRef(0)
+  const frameCountRef = useRef(0)
+
+  // Inicializar todas as posições na posição inicial do trail
+  useMemo(() => {
+    const px = conect.position?.[0] || 0
+    const py = conect.position?.[1] || 0
+    const pz = conect.position?.[2] || 0
+    for (let i = 0; i < maxPoints; i++) {
+      positionsRef.current[i * 3] = px
+      positionsRef.current[i * 3 + 1] = py
+      positionsRef.current[i * 3 + 2] = pz
     }
-    return arr
-  }, [conect.length])
+  }, [maxPoints, conect.position])
 
   const geometry = useMemo(() => {
-    const g = new THREE.BufferGeometry().setFromPoints(points)
-    return g
-  }, [points])
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(positionsRef.current, 3))
+    return geo
+  }, [])
+
+  // Seguir o followTarget e atualizar o trail
+  useFrame(() => {
+    if (!conect.followTarget) return
+    // Procurar o mesh do followTarget nos conectMeshRefs
+    const targetMesh = window._flirConectMeshRefs?.get(conect.followTarget)
+      || window._flirMeshRefs?.get(conect.followTarget)
+    if (!targetMesh) return
+
+    // Atualizar a cada N frames (não todos os frames — performance)
+    const updateInterval = Math.max(1, Math.floor(60 / (conect.updateRate || 30)))
+    frameCountRef.current++
+    if (frameCountRef.current < updateInterval) return
+    frameCountRef.current = 0
+
+    // Shift: mover todos os pontos uma posição para trás
+    const positions = positionsRef.current
+    for (let i = maxPoints - 1; i > 0; i--) {
+      positions[i * 3] = positions[(i - 1) * 3]
+      positions[i * 3 + 1] = positions[(i - 1) * 3 + 1]
+      positions[i * 3 + 2] = positions[(i - 1) * 3 + 2]
+    }
+    // Novo ponto na posição do target
+    positions[0] = targetMesh.position.x
+    positions[1] = targetMesh.position.y
+    positions[2] = targetMesh.position.z
+
+    geometry.attributes.position.needsUpdate = true
+    geometry.setDrawRange(0, maxPoints)
+  })
+
+  // Cleanup
+  useEffect(() => {
+    return () => { geometry.dispose() }
+  }, [geometry])
 
   return (
-    <group ref={setMeshRef} position={conect.position}>
-      <line geometry={geometry}>
+    <group ref={setMeshRef} position={[0, 0, 0]}>
+      <line ref={lineRef} geometry={geometry}>
         <lineBasicMaterial
           color={conect.color || '#2f81f7'}
           transparent
@@ -443,5 +734,786 @@ function ReflectMesh({ conect, setMeshRef }) {
         envMapIntensity={conect.intensity || 1}
       />
     </mesh>
+  )
+}
+
+// ===== SkyObject — esfera de céu com shader procedural =====
+function SkyMesh({ conect, setMeshRef }) {
+  const { scene } = useThree()
+  const meshRef = useRef()
+
+  // Ler propriedades com os nomes correctos da taxonomy
+  const skyType = conect.skyType || 'gradient'
+  const topColor = conect.topColor || conect.gradientTop || '#1a4d8f'
+  const bottomColor = conect.bottomColor || conect.gradientBottom || '#aac4e8'
+  const solidColor = conect.solidColor || conect.color || '#87ceeb'
+
+  // Material Pro para procedural (Rayleigh + Mie scattering)
+  const proMaterial = useMemo(() => {
+    if (skyType !== 'procedural') return null
+    // Calcular direção do sol: priorizar sunPosition se definido (mais intuitivo)
+    // Senão, usar sunElevation (graus 0-90) convertido para hourOfDay
+    let sunDir
+    if (conect.sunPosition && Array.isArray(conect.sunPosition) && conect.sunPosition.length === 3) {
+      sunDir = new THREE.Vector3(conect.sunPosition[0], conect.sunPosition[1], conect.sunPosition[2]).normalize()
+    } else {
+      // sunElevation em graus (0=horizonte, 90=zénite) → converter para hourOfDay
+      // 0° = 6h/18h, 90° = 12h
+      const elevation = conect.sunElevation ?? 45
+      const hourOfDay = 12 - (90 - elevation) / 90 * 6  // mapeia 0°→6h, 90°→12h
+      sunDir = calculateSunDirection(hourOfDay, 172, 0)
+    }
+    return createSkyProMaterial({
+      sunDirection: [sunDir.x, sunDir.y, sunDir.z],
+      sunIntensity: 15,
+      rayleigh: conect.rayleigh ?? 2.5,
+      mie: 0.5,
+      turbidity: conect.turbidity ?? 10,
+      starsEnabled: conect.starsEnabled || false,
+    })
+  }, [skyType, conect.sunPosition, conect.sunElevation, conect.rayleigh, conect.turbidity, conect.starsEnabled])
+
+  // Disposal: libertar proMaterial quando desmonta
+  useEffect(() => () => { proMaterial?.dispose() }, [proMaterial])
+
+  // Animar uTime do sky shader
+  useFrame((_, delta) => {
+    if (proMaterial && proMaterial.uniforms?.uTime) {
+      proMaterial.uniforms.uTime.value += delta
+    }
+  })
+
+  // Aplicar background à cena
+  useEffect(() => {
+    if (!scene) return
+    if (skyType === 'procedural' && proMaterial) {
+      // Procedural usa esfera com shader — manter fallback azul céu caso a SkyMesh falhe
+      // (anteriormente era null, o que causava ecrã PRETO se a esfera não renderizasse)
+      scene.background = new THREE.Color(bottomColor || '#87ceeb')
+    } else if (skyType === 'gradient') {
+      // Gradiente via canvas
+      const canvas = document.createElement('canvas')
+      canvas.width = 2; canvas.height = 256
+      const ctx = canvas.getContext('2d')
+      const grad = ctx.createLinearGradient(0, 0, 0, 256)
+      grad.addColorStop(0, topColor)
+      grad.addColorStop(1, bottomColor)
+      ctx.fillStyle = grad
+      ctx.fillRect(0, 0, 2, 256)
+      const tex = new THREE.CanvasTexture(canvas)
+      tex.colorSpace = THREE.SRGBColorSpace
+      scene.background = tex
+      return () => { tex.dispose() }
+    } else if (skyType === 'hdri' && conect.hdriUrl) {
+      import('three/examples/jsm/loaders/RGBELoader.js').then(({ RGBELoader }) => {
+        const loader = new RGBELoader()
+        loader.load(conect.hdriUrl, (texture) => {
+          texture.mapping = THREE.EquirectangularReflectionMapping
+          scene.background = texture
+          scene.environment = texture
+        })
+      }).catch(() => {
+        scene.background = new THREE.Color(solidColor)
+      })
+    } else {
+      // solid
+      scene.background = new THREE.Color(solidColor)
+    }
+  }, [scene, skyType, topColor, bottomColor, solidColor, conect.hdriUrl, proMaterial])
+
+  // Esfera grande com material de céu
+  if (skyType === 'procedural' && proMaterial) {
+    // Esfera com shader procedural (Rayleigh + Mie)
+    return (
+      <mesh
+        ref={(node) => {
+          meshRef.current = node
+          if (typeof setMeshRef === 'function') setMeshRef(node)
+        }}
+        scale={[100, 100, 100]}
+        material={proMaterial}
+      >
+        <sphereGeometry args={[1, 32, 16]} />
+      </mesh>
+    )
+  }
+  if (skyType === 'solid' || skyType === 'hdri') {
+    return (
+      <mesh ref={setMeshRef} scale={[100, 100, 100]}>
+        <sphereGeometry args={[1, 32, 16]} />
+        <meshBasicMaterial
+          color={solidColor}
+          side={THREE.BackSide}
+          fog={false}
+        />
+      </mesh>
+    )
+  }
+  // gradient: background canvas, mesh invisível
+  return (
+    <mesh ref={setMeshRef} visible={false} scale={[0.001, 0.001, 0.001]}>
+      <sphereGeometry args={[1, 8, 8]} />
+      <meshBasicMaterial />
+    </mesh>
+  )
+}
+
+// ===== SunObject — luz direcional =====
+function SunLightMesh({ conect, setMeshRef }) {
+  return (
+    <group ref={setMeshRef} position={conect.position}>
+      <directionalLight
+        color={conect.color || '#ffffff'}
+        intensity={conect.intensity ?? 1.5}
+        castShadow={conect.castShadow !== false}
+      />
+      {/* Gizmo esférico para visualizar no editor */}
+      <mesh>
+        <sphereGeometry args={[0.3, 16, 16]} />
+        <meshBasicMaterial color={conect.color || '#ffff00'} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== PointObject — luz pontual =====
+function PointLightMesh({ conect, setMeshRef }) {
+  return (
+    <group ref={setMeshRef} position={conect.position}>
+      <pointLight
+        color={conect.color || '#ffffff'}
+        intensity={conect.intensity ?? 1.0}
+        distance={conect.distance || 20}
+        decay={2}
+      />
+      <mesh>
+        <sphereGeometry args={[0.15, 12, 12]} />
+        <meshBasicMaterial color={conect.color || '#ffffff'} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== SpotObject — luz spot =====
+function SpotLightMesh({ conect, setMeshRef }) {
+  return (
+    <group ref={setMeshRef} position={conect.position}>
+      <spotLight
+        color={conect.color || '#ffffff'}
+        intensity={conect.intensity ?? 2.0}
+        distance={conect.distance || 30}
+        angle={conect.angle ? (conect.angle * Math.PI / 180) : Math.PI / 6}
+        penumbra={conect.penumbra ?? 0.3}
+        castShadow={conect.castShadow !== false}
+      />
+      <mesh>
+        <coneGeometry args={[0.2, 0.4, 12]} />
+        <meshBasicMaterial color={conect.color || '#ffffff'} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== AmbientObject — luz ambiente =====
+function AmbientLightMesh({ conect, setMeshRef }) {
+  const { scene } = useThree()
+
+  useEffect(() => {
+    if (!scene) return
+    // Adicionar luz ambiente à cena
+    const ambient = new THREE.AmbientLight(
+      conect.color || '#ffffff',
+      conect.intensity ?? 0.5
+    )
+    scene.add(ambient)
+    return () => { scene.remove(ambient) }
+  }, [scene, conect.color, conect.intensity])
+
+  // Sem gizmo visível
+  return null
+}
+
+// ===== ReferenceObject — renderiza conteúdo de outra cena =====
+function ReferenceMesh({ conect, setMeshRef }) {
+  const scenes = useStore((s) => s.scenes)
+  const targetScene = scenes.find(s => s.id === conect.targetSceneId)
+
+  if (!targetScene) {
+    // Sem cena de destino — mostrar gizmo de placeholder
+    return (
+      <mesh ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+        <boxGeometry args={[0.5, 0.5, 0.5]} />
+        <meshBasicMaterial color="#8957e5" wireframe />
+      </mesh>
+    )
+  }
+
+  // Renderizar objetos do catálogo da cena referenciada
+  const refObjects = (targetScene.objects || []).map((instance) => {
+    // Post-Audit 4.0 — P3: lookup O(1) via Map em vez de O(N) find
+    const obj = objectsById.get(instance.objectId)
+    if (!obj) return null
+    const sceneObj = {
+      ...obj,
+      id: `${conect.instanceId}_ref_${instance.instanceId}`,
+      position: [
+        (conect.position?.[0] || 0) + (instance.position?.[0] || 0),
+        (conect.position?.[1] || 0) + (instance.position?.[1] || 0),
+        (conect.position?.[2] || 0) + (instance.position?.[2] || 0),
+      ],
+      rotation: instance.rotation || [0, 0, 0],
+      scale: instance.scale || [1, 1, 1],
+    }
+    return <SceneObject key={instance.instanceId} obj={sceneObj} isSelected={false} onSelect={() => {}} />
+  }).filter(Boolean)
+
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      {refObjects}
+    </group>
+  )
+}
+
+// ===== SpawnObject — ponto de spawn (seta para cima + anel) =====
+function SpawnMarkerMesh({ conect, setMeshRef }) {
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      {/* Seta para cima */}
+      <mesh position={[0, 1, 0]} castShadow>
+        <coneGeometry args={[0.3, 0.8, 4]} />
+        <meshStandardMaterial color="#10b981" emissive="#10b981" emissiveIntensity={0.4} roughness={0.4} />
+      </mesh>
+      {/* Anel base */}
+      <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.6, 0.8, 16]} />
+        <meshBasicMaterial color="#10b981" transparent opacity={0.5} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Cilindro fino para visualizar */}
+      <mesh position={[0, 0.5, 0]}>
+        <cylinderGeometry args={[0.05, 0.05, 1, 8]} />
+        <meshStandardMaterial color="#10b981" emissive="#10b981" emissiveIntensity={0.3} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== NavigatorObject — portal (anel rotativo com partículas) =====
+function NavigatorMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  useFrame((_, dt) => {
+    if (ref.current) ref.current.rotation.y += dt * 0.8
+  })
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      <group ref={ref}>
+        {/* Anel exterior */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[1, 0.1, 16, 32]} />
+          <meshStandardMaterial color="#a855f7" emissive="#a855f7" emissiveIntensity={0.6} roughness={0.3} />
+        </mesh>
+        {/* Anel interior */}
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.7, 0.05, 16, 32]} />
+          <meshStandardMaterial color="#c084fc" emissive="#c084fc" emissiveIntensity={0.5} />
+        </mesh>
+      </group>
+      {/* Disco central translúcido */}
+      <mesh>
+        <circleGeometry args={[0.95, 32]} />
+        <meshBasicMaterial color="#a855f7" transparent opacity={0.2} side={THREE.DoubleSide} />
+      </mesh>
+      <pointLight color="#a855f7" intensity={2} distance={5} />
+    </group>
+  )
+}
+
+// ===== WeaponObject — arma visual (caixa + cano) =====
+function WeaponMesh({ conect, setMeshRef }) {
+  // Em modo jogo, esconder a arma visual (não está parented à câmara —
+  // ficaria flutuante no mundo a tapar a vista FPS).
+  // No editor, mostra para o utilizador poder posicionar.
+  const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale} visible={!scenePreviewOpen}>
+      {/* Corpo da arma */}
+      <mesh castShadow>
+        <boxGeometry args={[0.15, 0.2, 0.6]} />
+        <meshStandardMaterial color="#1f2937" roughness={0.6} metalness={0.4} />
+      </mesh>
+      {/* Cano */}
+      <mesh position={[0, 0.05, -0.4]} castShadow>
+        <cylinderGeometry args={[0.04, 0.04, 0.4, 8]} rotation={[Math.PI / 2, 0, 0]} />
+        <meshStandardMaterial color="#374151" roughness={0.4} metalness={0.7} />
+      </mesh>
+      {/* Gatilho */}
+      <mesh position={[0, -0.15, 0.1]}>
+        <boxGeometry args={[0.04, 0.1, 0.08]} />
+        <meshStandardMaterial color="#111827" />
+      </mesh>
+      {/* Mira */}
+      <mesh position={[0, 0.18, -0.2]}>
+        <boxGeometry args={[0.02, 0.06, 0.02]} />
+        <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={0.5} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== ItemObject — item coleccionável (octaedro rotativo + brilho) =====
+function ItemMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  useFrame((_, dt) => {
+    if (ref.current) {
+      ref.current.rotation.y += dt * 1.5
+      ref.current.rotation.x += dt * 0.5
+      // Hover
+      ref.current.position.y = 1 + Math.sin(performance.now() * 0.003) * 0.15
+    }
+  })
+  const color = conect.color || '#fbbf24'
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      <mesh ref={ref} position={[0, 1, 0]}>
+        <octahedronGeometry args={[0.3, 0]} />
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={1.2}
+          roughness={0.1}
+          metalness={0.8}
+          flatShading
+        />
+      </mesh>
+      {/* Anel no chão */}
+      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.4, 0.5, 16]} />
+        <meshBasicMaterial color={color} transparent opacity={0.4} side={THREE.DoubleSide} />
+      </mesh>
+      {/* pointLight removido — emissiveIntensity elevado compensa; poupa 1 luz dinâmica por item */}
+      {conect.emitLight && <pointLight color={color} intensity={1.5} distance={3} position={[0, 1, 0]} />}
+    </group>
+  )
+}
+
+// ===== AreaObject — área de influência (caixa wireframe) =====
+function AreaMesh({ conect, setMeshRef }) {
+  const size = conect.size || [4, 4, 4]
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      <mesh>
+        <boxGeometry args={size} />
+        <meshBasicMaterial color="#3b82f6" wireframe transparent opacity={0.5} />
+      </mesh>
+      {/* Preenchimento translúcido */}
+      <mesh>
+        <boxGeometry args={size} />
+        <meshBasicMaterial color="#3b82f6" transparent opacity={0.08} depthWrite={false} />
+      </mesh>
+      {/* Centro */}
+      <mesh>
+        <sphereGeometry args={[0.15, 8, 8]} />
+        <meshBasicMaterial color="#3b82f6" />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== REALISM CONECTS =====
+
+// GIProbe — gizmo esférico com gradient interior
+function GIProbeMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  useFrame((_, dt) => {
+    if (ref.current) ref.current.rotation.y += dt * 0.2
+  })
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      <mesh ref={ref}>
+        <icosahedronGeometry args={[2, 1]} />
+        <meshBasicMaterial color="#ec4899" wireframe transparent opacity={0.4} />
+      </mesh>
+      <mesh>
+        <sphereGeometry args={[0.4, 16, 16]} />
+        <meshStandardMaterial color="#ec4899" emissive="#ec4899" emissiveIntensity={1.2} transparent opacity={0.6} />
+      </mesh>
+      {/* pointLight removido por defeito — ativar com conect.emitLight */}
+      {conect.emitLight && <pointLight color="#ec4899" intensity={0.5 * (conect.intensity || 1)} distance={10} />}
+    </group>
+  )
+}
+
+// SSR — gizmo de espelho
+function SSRMesh({ conect, setMeshRef }) {
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[3, 3]} />
+        <meshStandardMaterial color="#e5e7eb" metalness={1} roughness={0.05} transparent opacity={0.6 * (conect.intensity || 0.8)} />
+      </mesh>
+      <mesh>
+        <torusGeometry args={[1.8, 0.05, 8, 32]} />
+        <meshBasicMaterial color="#ec4899" />
+      </mesh>
+    </group>
+  )
+}
+
+// VolumetricFog — gizmo de nuvem
+function VolumetricFogMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  useFrame((_, dt) => {
+    if (ref.current) ref.current.rotation.y += dt * 0.1
+  })
+  const color = conect.color || '#a0c4ff'
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      <mesh ref={ref}>
+        <sphereGeometry args={[3, 16, 16]} />
+        <meshBasicMaterial color={color} transparent opacity={0.15 * (conect.density || 0.02) * 20} depthWrite={false} />
+      </mesh>
+      <mesh>
+        <sphereGeometry args={[3.1, 16, 16]} />
+        <meshBasicMaterial color={color} wireframe transparent opacity={0.2} />
+      </mesh>
+    </group>
+  )
+}
+
+// SSS — gizmo de pele
+function SSSMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  useFrame((_, dt) => {
+    if (ref.current) ref.current.rotation.y += dt * 0.3
+  })
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      <mesh ref={ref}>
+        <sphereGeometry args={[0.8, 32, 32]} />
+        <meshStandardMaterial
+          color="#ffcba4"
+          emissive="#ff8855"
+          emissiveIntensity={0.4 * (conect.intensity || 1)}
+          roughness={0.6}
+          transparent
+          opacity={0.85}
+        />
+      </mesh>
+      <mesh>
+        <sphereGeometry args={[1.0, 16, 16]} />
+        <meshBasicMaterial color="#ff8855" wireframe transparent opacity={0.3} />
+      </mesh>
+    </group>
+  )
+}
+
+// Bloom — gizmo de sol brilhante
+function BloomMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  useFrame((_, dt) => {
+    if (ref.current) {
+      ref.current.rotation.z += dt * 0.5
+      const s = 1 + Math.sin(performance.now() * 0.003) * 0.1
+      ref.current.scale.setScalar(s)
+    }
+  })
+  const intensity = conect.intensity || 1
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      <mesh ref={ref}>
+        <sphereGeometry args={[0.6, 32, 32]} />
+        <meshBasicMaterial color="#ffffff" />
+      </mesh>
+      {/* Halo */}
+      <mesh>
+        <sphereGeometry args={[0.9, 16, 16]} />
+        <meshBasicMaterial color="#fff7d6" transparent opacity={0.3 * intensity} depthWrite={false} />
+      </mesh>
+      <mesh>
+        <sphereGeometry args={[1.3, 16, 16]} />
+        <meshBasicMaterial color="#fbbf24" transparent opacity={0.15 * intensity} depthWrite={false} />
+      </mesh>
+      {/* pointLight removido — gizmo visual basta; poupa 1 luz dinâmica */}
+      {conect.emitLight && <pointLight color="#fff7d6" intensity={2 * intensity} distance={15} />}
+    </group>
+  )
+}
+
+// DOF — gizmo de câmara com plano de foco
+function DOFMesh({ conect, setMeshRef }) {
+  const focusDist = conect.focusDistance || 10
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      {/* Câmara */}
+      <mesh>
+        <boxGeometry args={[0.4, 0.3, 0.5]} />
+        <meshStandardMaterial color="#06b6d4" emissive="#06b6d4" emissiveIntensity={0.3} />
+      </mesh>
+      {/* Plano de foco */}
+      <mesh position={[0, 0, -focusDist]}>
+        <planeGeometry args={[3, 2]} />
+        <meshBasicMaterial color="#06b6d4" transparent opacity={0.15} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[0, 0, -focusDist]}>
+        <ringGeometry args={[1.5, 1.55, 32]} />
+        <meshBasicMaterial color="#06b6d4" side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== MARKERS =====
+
+// Empty — cruz de eixos
+function EmptyMesh({ conect, setMeshRef }) {
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      <axesHelper args={[1]} />
+      {/* Centro visível */}
+      <mesh>
+        <sphereGeometry args={[0.1, 8, 8]} />
+        <meshBasicMaterial color="#ffffff" />
+      </mesh>
+    </group>
+  )
+}
+
+// ArrowMarker — seta direccional
+function ArrowMarkerMesh({ conect, setMeshRef }) {
+  const dir = conect.direction || [0, 1, 0]
+  const length = conect.length || 1.5
+  const color = conect.color || '#fbbf24'
+  const dirVec = useMemo(() => new THREE.Vector3(...dir).normalize(), [dir])
+  // Calcular rotação para apontar na direcção
+  const quat = useMemo(() => {
+    const up = new THREE.Vector3(0, 1, 0)
+    return new THREE.Quaternion().setFromUnitVectors(up, dirVec)
+  }, [dirVec])
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      <group quaternion={quat}>
+        {/* Haste */}
+        <mesh position={[0, length / 2, 0]}>
+          <cylinderGeometry args={[0.04, 0.04, length, 8]} />
+          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.4} />
+        </mesh>
+        {/* Ponta */}
+        <mesh position={[0, length + 0.15, 0]}>
+          <coneGeometry args={[0.18, 0.35, 8]} />
+          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.0} />
+        </mesh>
+      </group>
+      {/* pointLight removido — emissive compensa */}
+      {conect.emitLight && <pointLight color={color} intensity={1} distance={3} />}
+    </group>
+  )
+}
+
+// PointMarker — esfera com anel + label
+function PointMarkerMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  useFrame(() => {
+    if (ref.current) {
+      ref.current.rotation.y += 0.02
+      ref.current.position.y = Math.sin(performance.now() * 0.002) * 0.1
+    }
+  })
+  const size = conect.size || 0.3
+  const color = conect.color || '#10b981'
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      <mesh ref={ref}>
+        <sphereGeometry args={[size, 16, 16]} />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.4} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[size * 1.4, size * 1.6, 24]} />
+        <meshBasicMaterial color={color} transparent opacity={0.5} side={THREE.DoubleSide} />
+      </mesh>
+      {/* pointLight removido — emissive compensa */}
+      {conect.emitLight && <pointLight color={color} intensity={0.8} distance={2} />}
+    </group>
+  )
+}
+
+// ===== REAL WATER — água super-realista =====
+function RealWaterMesh({ conect, setMeshRef }) {
+  const meshRef = useRef()
+  const { camera } = useThree()
+  const material = useMemo(() => {
+    return createRealWaterMaterial({
+      color: conect.color,
+      deepColor: conect.deepColor,
+      clarity: conect.clarity,
+      refraction: conect.refraction,
+      reflection: conect.reflection,
+      flowSpeed: conect.flowSpeed,
+      waveHeight: conect.waveHeight,
+      waveFrequency: conect.waveFrequency,
+      foamThreshold: conect.foamThreshold,
+      foamColor: conect.foamColor,
+      fresnelPower: conect.fresnelPower,
+      ior: conect.ior,
+      sunDirection: conect.sunDirection,
+      // Fase 4 — High Realism
+      windDirection: conect.windDirection || [1.0, 0.0],
+      windStrength: conect.windStrength ?? 0.3,
+      dynamicFoam: conect.dynamicFoam !== false,
+      foamIntensity: conect.foamIntensity ?? 0.8,
+      depthGradient: conect.depthGradient !== false,
+    })
+  }, [
+    conect.color, conect.deepColor, conect.clarity, conect.refraction,
+    conect.reflection, conect.flowSpeed, conect.waveHeight, conect.waveFrequency,
+    conect.foamThreshold, conect.foamColor, conect.fresnelPower, conect.ior, conect.sunDirection,
+    conect.windDirection, conect.windStrength, conect.dynamicFoam, conect.foamIntensity, conect.depthGradient,
+  ])
+
+  const geometry = useMemo(() => {
+    const segs = conect.segments || 128
+    const g = new THREE.PlaneGeometry(conect.size?.[0] || 50, conect.size?.[1] || 50, segs, segs)
+    g.rotateX(-Math.PI / 2)
+    return g
+  }, [conect.size, conect.segments])
+
+  useFrame((state) => {
+    if (material.userData.update) {
+      material.userData.update(state.clock.elapsedTime, camera)
+    }
+  })
+
+  useEffect(() => {
+    return () => {
+      material.dispose()
+      geometry.dispose()
+    }
+  }, [material, geometry])
+
+  return (
+    <mesh
+      ref={(node) => {
+        meshRef.current = node
+        setMeshRef?.(node)
+      }}
+      geometry={geometry}
+      material={material}
+      position={conect.position}
+      rotation={conect.rotation}
+      scale={conect.scale}
+      receiveShadow
+    />
+  )
+}
+
+// ===== Fase 8 — DialogueObject (gizmo de NPC diálogo) =====
+function DialogueMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  useFrame((_, dt) => {
+    if (ref.current) ref.current.rotation.y += dt * 0.3
+  })
+  const npcName = conect.npcName || 'NPC'
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      {/* Indicador flutuante (balão de diálogo) */}
+      <mesh ref={ref} position={[0, 2.5, 0]}>
+        <sphereGeometry args={[0.3, 16, 16]} />
+        <meshStandardMaterial color="#2f81f7" emissive="#2f81f7" emissiveIntensity={0.6} transparent opacity={0.8} />
+      </mesh>
+      {/* Ponto de interação no chão */}
+      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.8, 1, 32]} />
+        <meshBasicMaterial color="#2f81f7" transparent opacity={0.4} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Raio de trigger (wireframe sphere) */}
+      <mesh>
+        <sphereGeometry args={[conect.triggerRadius || 3, 16, 8]} />
+        <meshBasicMaterial color="#2f81f7" wireframe transparent opacity={0.15} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== Fase 13 — WindObject (gizmo de vento) =====
+function WindMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  useFrame((_, dt) => {
+    if (ref.current) ref.current.rotation.z += dt * (conect.windStrength || 0.5) * 0.5
+  })
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      {/* Setas de vento */}
+      <mesh ref={ref}>
+        <coneGeometry args={[0.3, 1, 4]} />
+        <meshBasicMaterial color="#a0c4ff" wireframe transparent opacity={0.5} />
+      </mesh>
+      <mesh position={[0, -0.5, 0]}>
+        <cylinderGeometry args={[0.05, 0.05, 1, 4]} />
+        <meshBasicMaterial color="#a0c4ff" wireframe transparent opacity={0.3} />
+      </mesh>
+    </group>
+  )
+}
+
+// ===== Fase 13 — CloudObject (gizmo de nuvens) =====
+function CloudMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  const cloudCount = conect.cloudCount || 5
+  const cloudSize = conect.cloudSize || 3
+  const cloudHeight = conect.cloudHeight || 15
+  useFrame((_, dt) => {
+    if (ref.current) ref.current.position.x += dt * (conect.cloudSpeed || 0.1)
+  })
+  const clouds = []
+  for (let i = 0; i < cloudCount; i++) {
+    const x = (Math.random() - 0.5) * 30
+    const z = (Math.random() - 0.5) * 30
+    clouds.push(
+      <mesh key={i} position={[x, cloudHeight + Math.random() * 3, z]} scale={[cloudSize, cloudSize * 0.6, cloudSize]}>
+        <sphereGeometry args={[1, 12, 8]} />
+        <meshBasicMaterial color={conect.cloudColor || '#ffffff'} transparent opacity={conect.cloudOpacity || 0.6} depthWrite={false} />
+      </mesh>
+    )
+  }
+  return (
+    <group ref={(node) => { setMeshRef?.(node); if (node) ref.current = node }}>
+      {clouds}
+    </group>
+  )
+}
+
+// ===== Fase 13 — DayNightCycleObject (gizmo sol/lua) =====
+function DayNightMesh({ conect, setMeshRef }) {
+  const ref = useRef()
+  const sunRef = useRef()
+  useFrame((_, dt) => {
+    if (!conect.autoAdvance) return
+    const cycleDuration = conect.cycleDuration || 120
+    // Avançar tempo
+    conect.currentTime = ((conect.currentTime || 0) + dt / cycleDuration) % 1
+    if (sunRef.current) {
+      // Rotacionar sol ao redor do centro
+      const angle = (conect.currentTime || 0) * Math.PI * 2
+      const radius = 20
+      sunRef.current.position.set(
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius,
+        0
+      )
+    }
+  })
+  const time = conect.currentTime || 0.25
+  const isDay = time > 0.2 && time < 0.7
+  return (
+    <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
+      {/* Sol/Lua */}
+      <mesh ref={sunRef} position={[20, 0, 0]}>
+        <sphereGeometry args={[1.5, 16, 16]} />
+        <meshBasicMaterial color={isDay ? '#ffdd00' : '#cccccc'} />
+      </mesh>
+      {/* Indicador de tempo */}
+      <mesh position={[0, 0, 0]}>
+        <torusGeometry args={[2, 0.1, 8, 32]} />
+        <meshBasicMaterial color={isDay ? (conect.dayColor || '#87ceeb') : (conect.nightColor || '#0a0a2a')} wireframe transparent opacity={0.4} />
+      </mesh>
+    </group>
   )
 }
