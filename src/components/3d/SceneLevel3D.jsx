@@ -36,6 +36,7 @@ import { SpatialPartitionSystem } from '../../utils/spatialPartitionSystem'
 import { createAnimationPlayer } from '../../utils/animationPlayer'
 import { clearPoseCache } from '../../utils/sharedAnimationCache'
 import { createNPCAI } from '../../utils/conects/npcAI'
+import { Pathfinder } from '../../utils/pathfinding'
 import { debugLog } from '../../utils/debug/debugStore'
 import usePerformanceTracker from '../../hooks/usePerformanceTracker'
 
@@ -279,6 +280,9 @@ function ViewModelFPS({ activeScene, isGameMode }) {
 function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }) {
   const { camera, scene } = useThree()
   const physicsRef = useRef(null)
+  // BUG6-FIX: Pathfinder partilhado por todos os NPCs da cena — populated uma vez
+  // com as AABBs dos StaticObject (e StopObject kinemático) registados na física.
+  const pathfinderRef = useRef(null)
   const runtimesRef = useRef(new Map())
   const animPlayersRef = useRef(new Map())
   const npcAIsRef = useRef(new Map())
@@ -892,13 +896,16 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
     // Fase 11 — Expor câmara para FlirScriptAPI.Camera.getPosition()/getFOV()
     window._flirCamera = camera
     // Inicializar rotação da câmara (FPS/BR) — lida pelo GameMode no useFrame
+    // CORREÇÃO BUG1: enabled=true só quando a cena tem CameraTouchZone.
+    // Caso contrário, a rotação (0,0,0) faz a câmara olhar para -Z (vazio) → ecrã preto.
+    const hasTouchZone = (setupScene?.conects || activeScene.conects || []).some(c => c.type === 'CameraTouchZone')
     if (!window._flirCameraRotation) {
-      window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: 1.0, enabled: true }
+      window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: 1.0, enabled: hasTouchZone }
     } else {
       // Reset ao re-entrar no jogo
       window._flirCameraRotation.yaw = 0
       window._flirCameraRotation.pitch = 0
-      window._flirCameraRotation.enabled = true
+      window._flirCameraRotation.enabled = hasTouchZone
     }
 
     // Física
@@ -919,6 +926,39 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
           physicsRef.current.addJoint(conect)
         }
       }
+
+      // BUG6-FIX: Popular Pathfinder com AABBs de StaticObject / StopObject.
+      // Itera physicsRef.current.bodies (Map instanceId → { body, conect, mesh, type, ... })
+      // e marca como bloqueadas todas as células cobertas pela AABB top-down.
+      // Rotações são ignoradas (AABB axis-aligned — aproximação razoável para paredes).
+      const pf = new Pathfinder(1.0)
+      for (const [, entry] of physicsRef.current.bodies) {
+        if (entry.type !== 'StaticObject' && entry.type !== 'StopObject') continue
+        const body = entry.body
+        // cannon-es: CANNON.Box tem `halfExtents` (Vec3). Outras shapes (Sphere, Plane)
+        // não têm AABB útil — Sphere usa radius como fallback, Plane é infinito.
+        const shape = body.shapes && body.shapes[0]
+        if (!shape) continue
+        const pos = body.position
+        let hx = 0.5, hz = 0.5
+        if (shape.halfExtents) {
+          hx = Math.abs(shape.halfExtents.x)
+          hz = Math.abs(shape.halfExtents.z)
+        } else if (shape.radius !== undefined) {
+          hx = hz = Math.abs(shape.radius)
+        } else {
+          continue
+        }
+        // Margem de 0.1m para evitar que NPCs "froxem" contra a parede
+        const margin = 0.1
+        pf.addObstacle(
+          pos.x - hx - margin,
+          pos.z - hz - margin,
+          pos.x + hx + margin,
+          pos.z + hz + margin
+        )
+      }
+      pathfinderRef.current = pf
     })
 
     // Eventos de física
@@ -1016,11 +1056,21 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
             const pm = conectMeshRefs.current.get(player.instanceId)
             return pm ? [pm.position.x, pm.position.y, pm.position.z] : null
           },
+          // BUG6-FIX: getNpcPos lê a posição DINÂMICA do mesh (sincronizado com o
+          // body da física a cada frame), em vez de conect.position (posição inicial
+          // estática que nunca é actualizada quando o NPC se move).
+          getNpcPos: () => {
+            const nm = conectMeshRefs.current.get(conect.instanceId)
+            return nm ? [nm.position.x, nm.position.y, nm.position.z] : null
+          },
           getPathPoints: (pathId) => {
             const path = (setupScene.conects || []).find((c) => c.instanceId === pathId)
             return path?.points || null
           },
-          physicsMove: (id, dir, speed) => physicsRef.current?.movePersonal(id, dir, speed),
+          // BUG6-FIX: usar moveNpc em vez de movePersonal — semântica mais clara
+          // (moveNpc aceita apenas NpcObject; movePersonal também aceita ambos
+          //  via isCharacterType, mas deixar explícito reduz ambiguidade)
+          physicsMove: (id, dir, speed) => physicsRef.current?.moveNpc(id, dir, speed),
           physicsJump: (id) => physicsRef.current?.jumpPersonal(id),
           emitEvent: (en, payload) => {
             const rt = runtimesRef.current.get(conect.instanceId)
@@ -1029,6 +1079,10 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
               else if (en === 'OnLoseSight') rt.triggerEvent('onLoseSight', payload)
             }
           },
+          // BUG6-FIX: passar o ref (não .current) — o Pathfinder é populated em
+          // queueMicrotask (depois do AI ser criado), por isso o AI precisa de
+          // ler .current lazy a cada frame via getPf() em npcAI.js
+          pathfinder: pathfinderRef,
         })
         npcAIsRef.current.set(conect.instanceId, ai)
       }
@@ -1103,6 +1157,8 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       runtimesRef.current.clear()
       for (const ai of npcAIsRef.current.values()) ai.dispose()
       npcAIsRef.current.clear()
+      // BUG6-FIX: limpar Pathfinder entre sessões Play (cenas diferentes têm obstáculos diferentes)
+      pathfinderRef.current = null
       for (const [, s] of timerStatesRef.current) { if (s.interval) clearInterval(s.interval); if (s.audio) s.audio.pause() }
       timerStatesRef.current.clear()
       animPlayersRef.current.clear()

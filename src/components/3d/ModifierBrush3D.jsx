@@ -16,7 +16,7 @@ import * as THREE from 'three'
 import { useStore } from '../../store/useStore'
 
 export default function ModifierBrush3D({ isActive }) {
-  const { gl, camera, raycaster } = useThree()
+  const { gl, camera, raycaster, scene } = useThree()
   const selectedId = useStore((s) => s.selectedId)
   const objects = useStore((s) => s.objects)
   const updateObject = useStore((s) => s.updateObject)
@@ -27,7 +27,6 @@ export default function ModifierBrush3D({ isActive }) {
   const _tmpVec = useRef(new THREE.Vector3())
 
   const selected = objects.find(o => o.id === selectedId)
-  const meshRefs = useStore((s) => s.meshRefs)
 
   useFrame(() => {
     if (cursorRef.current && cursorPos) {
@@ -39,17 +38,15 @@ export default function ModifierBrush3D({ isActive }) {
     if (!isActive || !selectedId) return
     const canvas = gl.domElement
 
+    // CORREÇÃO BUG2: getSelectedMesh agora usa scene do useThree (API correta)
     const getSelectedMesh = () => {
-      // Procurar mesh do objeto selecionado
-      const scene = gl.getRenderTarget()?.scene || gl.domElement?.parentElement?.querySelector('canvas')
-      // Usar window._flirMeshRefs se disponível
+      // Tentar via window._flirMeshRefs (populado em appMode='scene')
       const refs = window._flirMeshRefs
       if (refs?.current?.has(selectedId)) return refs.current.get(selectedId)
-      // Fallback: procurar na scene via traverse
-      const threeScene = gl.info?.programs?.[0]?.renderer?.scene
-      if (threeScene) {
+      // Fallback: traverse da scene do three.js
+      if (scene) {
         let found = null
-        threeScene.traverse((obj) => {
+        scene.traverse((obj) => {
           if (obj.userData?.objectId === selectedId && obj.isMesh) found = obj
         })
         return found
@@ -72,9 +69,12 @@ export default function ModifierBrush3D({ isActive }) {
       const hit = intersects[0]
       setCursorPos(hit.point.clone())
 
-      // Aplicar displace local na geometria
+      // Aplicar displace local na geometria (precisa de customGeometry no objeto)
       const obj = objects.find(o => o.id === selectedId)
-      if (!obj || !obj.customGeometry) return
+      if (!obj || !obj.customGeometry) {
+        // Sem customGeometry: não aplicamos (teria que converter geometria paramétrica para customGeometry)
+        return
+      }
 
       const positions = obj.customGeometry.positions
       const normals = obj.customGeometry.normals
@@ -115,7 +115,7 @@ export default function ModifierBrush3D({ isActive }) {
         }
       }
 
-      // Actualizar geometria no store
+      // Actualizar geometria no store + flag needsUpdate no mesh three.js
       updateObject(selectedId, {
         customGeometry: {
           ...obj.customGeometry,
@@ -123,6 +123,11 @@ export default function ModifierBrush3D({ isActive }) {
           normals: normals ? [...normals] : null,
         }
       })
+      // Forçar recálculo visual (SceneObject usa useMemo em customGeometry)
+      if (mesh.geometry.attributes.position) {
+        mesh.geometry.attributes.position.needsUpdate = true
+        mesh.geometry.computeVertexNormals()
+      }
     }
 
     const onPointerDown = (e) => {

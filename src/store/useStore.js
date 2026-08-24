@@ -493,6 +493,13 @@ export const useStore = create(
 
       deleteObject: (id) => {
         get()._pushHistory()
+        // CORREÇÃO BUG7: Libertar paintTextures do objeto removido (evita memory leak)
+        try {
+          // Import dinâmico para evitar circular dependency
+          import('../utils/texturePaint').then(({ disposePaintTextures }) => {
+            disposePaintTextures(id)
+          }).catch(() => {})
+        } catch {}
         set((s) => ({
           objects: s.objects
             .filter((o) => o.id !== id)
@@ -1486,6 +1493,16 @@ export const useStore = create(
       openBuildersPanel: () => set({ buildersPanelOpen: true }),
       closeBuildersPanel: () => set({ buildersPanelOpen: false }),
       toggleBuildersPanel: () => set((s) => ({ buildersPanelOpen: !s.buildersPanelOpen })),
+
+      // Texturização (correção BUG3 — painel não abria porque state estava em falta)
+      texturingPanelOpen: false,
+      openTexturingPanel: () => set({ texturingPanelOpen: true }),
+      closeTexturingPanel: () => set({ texturingPanelOpen: false }),
+
+      // ModifierBrush3D (correção BUG2 — pincel Displace não era integrado)
+      modifierBrushActive: false,
+      toggleModifierBrush: () => set((s) => ({ modifierBrushActive: !s.modifierBrushActive })),
+      setModifierBrushActive: (v) => set({ modifierBrushActive: v }),
 
       // UV Editor (D5) — abre o editor de UVs para o objeto selecionado
       uvEditorOpen: false,

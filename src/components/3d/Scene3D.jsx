@@ -19,6 +19,7 @@ import * as THREE from 'three'
 import SceneObject from './SceneObject'
 import SkeletonGizmo from './SkeletonGizmo'
 import ShadowOptimizer from './ShadowOptimizer'
+import ModifierBrush3D from './ModifierBrush3D'
 import { RaycastSystem } from '../../utils/raycastSystem'
 import { useStore } from '../../store/useStore'
 import {
@@ -168,6 +169,7 @@ export default function Scene3D() {
   const lights = useStore((s) => s.lights)
   const mode = useStore((s) => s.mode)
   const renderSettings = useStore((s) => s.renderSettings)
+  const modifierBrushActive = useStore((s) => s.modifierBrushActive)
 
   const orbitRef = useRef(null)
   const meshRefs = useRef(new Map())
@@ -324,6 +326,9 @@ export default function Scene3D() {
 
         {/* Raycast para sculpt */}
         <SculptRaycaster meshRefs={meshRefs} orbitRef={orbitRef} />
+
+        {/* CORREÇÃO BUG2: ModifierBrush3D (Displace local) */}
+        <ModifierBrush3D isActive={modifierBrushActive} />
 
         {/* Câmara orbital — sem limites artificiais de distância; maxPolarAngle permite olhar de baixo */}
         <OrbitControls

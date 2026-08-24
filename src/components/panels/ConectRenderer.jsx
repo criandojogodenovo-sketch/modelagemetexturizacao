@@ -63,6 +63,8 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
   }
 
   // ViewObject: renderiza um gizmo de câmara visível no editor (selecionável)
+  // CORREÇÃO BUG1: Esconder em Play Mode (scenePreviewOpen) para evitar o "aliás verde"
+  // que tapa a vista da câmara ativa.
   if (conect.type === 'ViewObject') {
     return <ViewObjectMesh conect={conect} setMeshRef={setMeshRef} />
   }
@@ -596,12 +598,16 @@ function ParticleMesh({ conect, setMeshRef }) {
 
 // ===== ViewObject (câmara visível no editor) =====
 function ViewObjectMesh({ conect, setMeshRef }) {
+  // CORREÇÃO BUG1: Esconder o gizmo do ViewObject em Play Mode (scenePreviewOpen)
+  // para evitar que apareça como "aliás verde" a tapar a vista da câmara ativa.
+  const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
   return (
     <group
       ref={setMeshRef}
       position={conect.position}
       rotation={conect.rotation}
       scale={conect.scale}
+      visible={!scenePreviewOpen}
       userData={{ conectInstanceId: conect.instanceId, isViewObject: true }}
     >
       <mesh castShadow>

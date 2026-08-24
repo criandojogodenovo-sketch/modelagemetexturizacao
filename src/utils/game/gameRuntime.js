@@ -27,21 +27,78 @@ function parseFlirCode(src) {
     var m = cl[idx].t.match(/^fun\s+(\w+)\s*\(([^)]*)\)\s*begincode$/)
     if (m) {
       var body = parseBlock(cl, idx + 1, errors)
-      fns[m[1]] = { name: m[1], params: m[2].split(',').filter(function (p) { return p.trim() }), body: body.s, line: cl[idx].l }
-      idx = body.ni
+      fns[m[1]] = { name: m[1], params: m[2].split(',').filter(function (p) { return p.trim() }), body: body.statements, line: cl[idx].l }
+      idx = body.nextIdx
     } else { idx++ }
   }
   return { functions: fns, errors: errors }
 }
 
+// Parser de bloco: devolve AST statements (com bodies pré-resolvidos para if/elseif/else)
 function parseBlock(lines, si, errors) {
-  var s = [], idx = si, depth = 1
-  while (idx < lines.length && depth > 0) {
-    if (lines[idx].t === 'endcode') { depth--; if (depth === 0) return { s: s, ni: idx + 1 } }
-    else { s.push({ t: lines[idx].t, l: lines[idx].l }) }
-    idx++
+  var statements = [], idx = si
+  while (idx < lines.length) {
+    var t = lines[idx].t
+    if (t === 'endcode') return { statements: statements, nextIdx: idx + 1 }
+    if (t === 'begincode') { idx++; continue } // begincode solto — skip
+    var r = parseStatement(lines, idx, errors)
+    if (r.stmt) statements.push(r.stmt)
+    idx = r.nextIdx
   }
-  return { s: s, ni: idx }
+  return { statements: statements, nextIdx: idx }
+}
+
+// Parser de statement individual — emite AST tipado como o editor (flircode.js)
+function parseStatement(lines, idx, errors) {
+  var line = lines[idx], text = line.t, ln = line.l, m
+  // var name = value
+  if (m = text.match(/^var\s+(\w+)\s*=\s*(.+)$/))
+    return { stmt: { type: 'var', name: m[1], value: m[2], line: ln }, nextIdx: idx + 1 }
+  // if (cond) [begincode]
+  if (m = text.match(/^if\s*\((.+)\)\s*(?:begincode)?$/)) {
+    var bi = consumeBlock(lines, idx, errors)
+    return { stmt: { type: 'if', condition: m[1].trim(), body: bi.body, line: ln }, nextIdx: bi.nextIdx }
+  }
+  // else if (cond) [begincode]
+  if (m = text.match(/^else\s+if\s*\((.+)\)\s*(?:begincode)?$/)) {
+    var bi2 = consumeBlock(lines, idx, errors)
+    return { stmt: { type: 'elseif', condition: m[1].trim(), body: bi2.body, line: ln }, nextIdx: bi2.nextIdx }
+  }
+  // else [begincode]
+  if (m = text.match(/^else\s*(?:begincode)?$/)) {
+    var bi3 = consumeBlock(lines, idx, errors)
+    return { stmt: { type: 'else', body: bi3.body, line: ln }, nextIdx: bi3.nextIdx }
+  }
+  // Chamada de função embutida: name(args)
+  if (m = text.match(/^(\w+)\s*\(([^)]*)\)$/)) {
+    var args = m[2] ? m[2].split(',').map(function (a) { return a.trim() }).filter(function (a) { return a }) : []
+    return { stmt: { type: 'call', name: m[1], args: args, line: ln }, nextIdx: idx + 1 }
+  }
+  // Atribuição: name = value
+  if (m = text.match(/^(\w+)\s*=\s*(.+)$/))
+    return { stmt: { type: 'assign', name: m[1], value: m[2], line: ln }, nextIdx: idx + 1 }
+  // Desconhecido — ignorar silenciosamente (igual ao comportamento anterior)
+  return { stmt: { type: 'unknown', text: text, line: ln }, nextIdx: idx + 1 }
+}
+
+// Consome o bloco { begincode ... endcode } seguinte ao statement em lines[idx]
+function consumeBlock(lines, idx, errors) {
+  var startIdx
+  if (lines[idx].t.endsWith('begincode')) {
+    // begincode na mesma linha — body começa na linha seguinte
+    startIdx = idx + 1
+  } else {
+    // begincode está numa linha separada — procurá-lo
+    startIdx = idx + 1
+    while (startIdx < lines.length && lines[startIdx].t !== 'begincode') startIdx++
+    if (startIdx >= lines.length) {
+      errors.push({ line: lines[idx].l, message: 'begincode não encontrado após ' + lines[idx].t })
+      return { body: [], nextIdx: idx + 1 }
+    }
+    startIdx++ // saltar o begincode em si
+  }
+  var result = parseBlock(lines, startIdx, errors)
+  return { body: result.statements, nextIdx: result.nextIdx }
 }
 
 function evalCond(cond, vars, gc) {
@@ -77,59 +134,57 @@ function createFlirCodeRuntime(src, gc) {
 
   function execStmts(stmts, params) {
     for (var i = 0; i < stmts.length; i++) {
+      // wait() deferral — se um wait está ativo, adiar as statements restantes via setTimeout
+      if (gc._waitUntil && Date.now() < gc._waitUntil) {
+        var remaining = stmts.slice(i)
+        var delay = gc._waitUntil - Date.now()
+        var resume = function () { gc._waitUntil = 0; execStmts(remaining, params) }
+        setTimeout(resume, delay)
+        return // parar execução síncrona aqui
+      }
       try { execS(stmts[i], params) } catch (e) { dbg('Erro: ' + e.message, 'error') }
     }
   }
 
   function execS(s, params) {
-    var m
-    if (m = s.t.match(/^var\s+(\w+)\s*=\s*(.+)$/)) { vars[m[1]] = evalVal(m[2], vars, gc); return }
-    if (m = s.t.match(/^(\w+)\s*=\s*(.+)$/)) { vars[m[1]] = evalVal(m[2], vars, gc); return }
-    if (m = s.t.match(/^if\s*\((.+)\)$/)) {
-      var cond = evalCond(m[1], vars, gc)
-      if (cond) {
-        // Procurar o begincode seguinte e executar o bloco
-        var bi = s.l // linha atual
-        // Procurar begincode nas linhas seguintes
-        for (var j = 0; j < cl.length; j++) {
-          if (cl[j].l > bi && cl[j].t === 'begincode') {
-            // Encontrar endcode correspondente
-            var depth = 1
-            var blockStmts = []
-            for (var k = j + 1; k < cl.length && depth > 0; k++) {
-              if (cl[k].t === 'begincode') depth++
-              else if (cl[k].t === 'endcode') depth--
-              else if (depth === 1) blockStmts.push(cl[k])
-            }
-            // Executar bloco
-            for (var bi2 = 0; bi2 < blockStmts.length; bi2++) {
-              try { execS(blockStmts[bi2], params) } catch (e) { dbg('Erro: ' + e.message, 'error') }
-            }
-            return
-          }
-        }
+    if (s.type === 'var') { vars[s.name] = evalVal(s.value, vars, gc); return }
+    if (s.type === 'assign') { vars[s.name] = evalVal(s.value, vars, gc); return }
+    // if / elseif / else — usa flag _ifChainMatched (igual ao editor flircode.js:544-565)
+    if (s.type === 'if') {
+      if (evalCond(s.condition, vars, gc)) {
+        params._ifChainMatched = true
+        execStmts(s.body, params)
+      } else {
+        params._ifChainMatched = false
       }
       return
     }
-    // else if
-    if (m = s.t.match(/^else\s+if\s*\((.+)\)$/)) {
-      // Processado no contexto do if anterior — ignorar aqui
+    if (s.type === 'elseif') {
+      if (!params._ifChainMatched && evalCond(s.condition, vars, gc)) {
+        params._ifChainMatched = true
+        execStmts(s.body, params)
+      }
       return
     }
-    // else
-    if (s.t === 'else') {
-      // Processado no contexto do if anterior — ignorar aqui
+    if (s.type === 'else') {
+      if (!params._ifChainMatched) {
+        params._ifChainMatched = true
+        execStmts(s.body, params)
+      }
       return
     }
-    if (m = s.t.match(/^(\w+)\s*\(([^)]*)\)$/)) {
-      execBuiltin(m[1], m[2].split(',').map(function (a) { return evalVal(a.trim(), vars, gc) }), params)
+    if (s.type === 'call') {
+      var argVals = s.args.map(function (a) { return evalVal(a, vars, gc) })
+      execBuiltin(s.name, argVals, params)
       return
     }
+    // unknown — ignorar silenciosamente
   }
 
   function execBuiltin(name, args, params) {
     switch (name) {
       case 'print': dbg(args[0], 'log'); break
+      case 'log': dbg(args[0], 'log'); break
       case 'warn': dbg(args[0], 'warn'); break
       case 'error': dbg(args[0], 'error'); break
       case 'move':
@@ -144,7 +199,12 @@ function createFlirCodeRuntime(src, gc) {
       case 'destroy': if (gc.mesh) gc.mesh.visible = false; break
       case 'createObject': gc.spawnObject && gc.spawnObject(args[0], [args[1], args[2], args[3]]); break
       case 'changeScene': dbg('changeScene: ' + args[0], 'log'); break
-      case 'wait': dbg('wait(' + args[0] + 's)', 'log'); break
+      case 'wait':
+        // wait(seconds) — implementa _waitUntil (igual ao editor flircode.js:673-681)
+        // O execStmts verifica _waitUntil antes de cada statement e faz setTimeout para deferir
+        gc._waitUntil = Date.now() + (args[0] || 0) * 1000
+        dbg('wait(' + args[0] + 's)', 'log')
+        break
       case 'setVar': gc.globalVars = gc.globalVars || {}; gc.globalVars[args[0]] = args[1]; break
       case 'getVar': return (gc.globalVars || {})[args[0]]
       case 'setUIValue': gc.setUIValue && gc.setUIValue(args[0], args[1]); break
@@ -226,7 +286,16 @@ function dbg(msg, type) {
 function startGame() {
   var data = window.__GAME_DATA__
   var scene = data.scenes && data.scenes[0]
-  if (!scene) { document.getElementById('splash').innerHTML = '<div style="color:#f85149">Sem cenas</div>'; return }
+  if (!scene) {
+    // CORRECAO BUG8: usar textContent em vez de innerHTML (evita XSS)
+    var splash = document.getElementById('splash')
+    splash.textContent = ''
+    var errDiv = document.createElement('div')
+    errDiv.style.color = '#f85149'
+    errDiv.textContent = 'Sem cenas'
+    splash.appendChild(errDiv)
+    return
+  }
 
   var canvas = document.getElementById('game-canvas')
   var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true })
@@ -550,13 +619,42 @@ function startGame() {
   // UI rendering
   function renderUI() {
     var overlay = document.getElementById('ui-overlay')
-    overlay.innerHTML = ''
+    // CORRECAO BUG8: remover filhos em vez de innerHTML='' (evita reflow + XSS residual)
+    while (overlay.firstChild) overlay.removeChild(overlay.firstChild)
     ;(data.uiScreens || []).forEach(function (screen) {
       if (screen.visible === false) return
       screen.elements.forEach(function (el) {
         var dom = document.createElement(el.type === 'Button' ? 'button' : el.type === 'Input' ? 'input' : 'div')
         dom.className = 'ui-el'
-        dom.style.cssText = 'position:absolute;left:' + (el.position && el.position[0] || 50) + '%;top:' + (el.position && el.position[1] || 50) + '%;width:' + (el.size && el.size[0] || 120) + 'px;height:' + (el.size && el.size[1] || 40) + 'px;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;background:' + (el.color || 'transparent') + ';color:' + (el.textColor || '#e6edf3') + ';font-size:' + (el.fontSize || 14) + 'px;border:' + (el.borderWidth || 0) + 'px solid ' + (el.borderColor || 'transparent') + ';border-radius:' + (el.borderRadius || 0) + 'px;padding:' + (el.padding || 0) + 'px;opacity:' + (el.opacity || 1) + ';pointer-events:auto;user-select:none;font-family:sans-serif;box-sizing:border-box;'
+        // CORRECAO BUG8: sanitizar valores de CSS para evitar CSS injection
+        // (el.color, el.textColor, el.borderColor podem conter "); url(javascript:..." etc)
+        var sanitizeCss = function (val, fallback) {
+          if (!val || typeof val !== 'string') return fallback || ''
+          // Remover ; } { ( ) e quebras de linha — previne fechar a string cssText e injetar regras
+          var cleaned = val.replace(/[;}{()\\]/g, '').replace(/[\r\n]/g, '')
+          // Limitar comprimento para evitar DoS
+          return cleaned.slice(0, 50)
+        }
+        dom.style.position = 'absolute'
+        dom.style.left = (el.position && el.position[0] || 50) + '%'
+        dom.style.top = (el.position && el.position[1] || 50) + '%'
+        dom.style.width = (el.size && el.size[0] || 120) + 'px'
+        dom.style.height = (el.size && el.size[1] || 40) + 'px'
+        dom.style.transform = 'translate(-50%,-50%)'
+        dom.style.display = 'flex'
+        dom.style.alignItems = 'center'
+        dom.style.justifyContent = 'center'
+        dom.style.background = sanitizeCss(el.color, 'transparent')
+        dom.style.color = sanitizeCss(el.textColor, '#e6edf3')
+        dom.style.fontSize = (el.fontSize || 14) + 'px'
+        dom.style.border = (el.borderWidth || 0) + 'px solid ' + sanitizeCss(el.borderColor, 'transparent')
+        dom.style.borderRadius = (el.borderRadius || 0) + 'px'
+        dom.style.padding = (el.padding || 0) + 'px'
+        dom.style.opacity = (el.opacity || 1)
+        dom.style.pointerEvents = 'auto'
+        dom.style.userSelect = 'none'
+        dom.style.fontFamily = 'sans-serif'
+        dom.style.boxSizing = 'border-box'
         if (el.type === 'Button' || el.type === 'Text' || el.type === 'Label') dom.textContent = el.label || el.text || ''
         if (el.type === 'Input') { dom.placeholder = el.placeholder || ''; dom.value = el.value || ''; dom.oninput = function () { el.value = dom.value; gc.triggerUIEvent('onChange', { element: el, value: dom.value }) } }
         if (el.type === 'Button') dom.onclick = function () {
@@ -619,8 +717,10 @@ function startGame() {
     world.step(1 / 60, delta, 3)
     for (var id in bodies) { var b = bodies[id]; var m = meshMap[id]; if (m) { m.position.copy(b.position); m.quaternion.copy(b.quaternion) } }
 
-    // FlirCode onTick
-    for (var rid in runtimes) { runtimes[rid].triggerEvent('tick', { deltaTime: delta }) }
+    // FlirCode onTick — saltar se um wait() está ativo (para evitar re-entrada no mesmo wait)
+    if (!gc._waitUntil || Date.now() >= gc._waitUntil) {
+      for (var rid in runtimes) { runtimes[rid].triggerEvent('tick', { deltaTime: delta }) }
+    }
 
     // PersonalObject movement — camera-relative (estilo Godot, igual ao editor)
     var player = (scene.conects || []).find(function (c) { return c.type === 'PersonalObject' })

@@ -6,6 +6,102 @@ Engine web de modelagem, texturização, animação e edição de cenas 3D — f
 
 ---
 
+## 🐛 Correções de Bugs Críticos (Sessão 10 — Agosto 2026)
+
+### BUG 1 (P0): Câmara ViewObject fica preta no Play Mode — CORRIGIDO
+
+**Causa raiz**: `window._flirCameraRotation.enabled` era setado a `true` INCONDICIONALMENTE ao entrar em Play Mode, mesmo sem `CameraTouchZone`. A rotação `(0,0,0)` fazia a câmara olhar para -Z (vazio) → ecrã preto.
+
+**Solução**:
+- `SceneLevel3D.jsx:894-905`: `enabled` agora só é `true` se a cena tiver `CameraTouchZone`
+- `ConectRenderer.jsx:ViewObjectMesh`: gizmo do ViewObject fica invisível em Play Mode (`visible={!scenePreviewOpen}`)
+
+**Teste**: Criar cena com ViewObject → Play Mode → ecrã mostra a cena (não preto). Remover ViewObject → Play Mode → ecrã continua a mostrar a cena.
+
+### BUG 2 (P1): Pincéis de Escultura 3D não funcionam — CORRIGIDO
+
+**Causa raiz**:
+- `TerrainSculpt3D.jsx`: quando `heightmap` é null (terreno recém-criado), `applyBrush` e `updateGeometry` faziam early-return silencioso
+- `ModifierBrush3D.jsx`: `getSelectedMesh()` usava APIs inexistentes (`gl.getRenderTarget()?.scene`)
+- `ModifierBrush3D` nunca era importado/montado
+
+**Solução**:
+- `TerrainSculpt3D.jsx`: gera `Float32Array((seg+1)²)` vazio quando heightmap é null
+- `ModifierBrush3D.jsx`: usa `useThree(scene)` + traverse para encontrar mesh selecionado
+- `Scene3D.jsx`: importa e monta `<ModifierBrush3D isActive={modifierBrushActive} />`
+- `useStore.js`: adicionado `modifierBrushActive` + `toggleModifierBrush`
+
+### BUG 3 (P1): Aba de Texturização não abre — CORRIGIDO
+
+**Causa raiz**: `openTexturingPanel` era chamado no MainMenu mas a action não existia no store. `TexturingPanel` não era importado no App.jsx.
+
+**Solução**:
+- `useStore.js`: adicionado `texturingPanelOpen` + `openTexturingPanel` + `closeTexturingPanel`
+- `App.jsx`: importado `TexturingPanel` e renderizado `{texturingPanelOpen && <TexturingPanel onClose={closeTexturingPanel} />}`
+
+### BUG 4 (P1): Aba de Construtores não abre — CORRIGIDO
+
+**Causa raiz**: `BuildersPanel.jsx` usava `open` prop para a class CSS, mas `App.jsx` só passava `onClose`. Como `open` era undefined, a class `.open` não era aplicada e o painel ficava transladado para fora do viewport (`translateX(-100%)`).
+
+**Solução** (1 linha):
+- `BuildersPanel.jsx:139`: `${open ? 'open' : ''}` → `${onClose ? 'open' : ''}`
+
+### BUG 5 (P2): FlirCode exportado — else e wait() não funcionam — CORRIGIDO
+
+**Causa raiz**: O parser FlirCode no `gameRuntime.js` era uma re-implementação simplificada que tinha 3 bugs:
+1. `if` era no-op (`execS` referenciava `cl`, variável local de `parseFlirCode`)
+2. `else`/`else if` não implementados (comentário "ignorar aqui")
+3. `wait()` apenas fazia `dbg()` — sem mecanismo de espera real
+
+**Solução**:
+- Parser reescrito como AST com `parseBlock`/`parseStatement`/`consumeBlock`
+- `execS` agora despacha por `s.type` (if/elseif/else/var/assign/call)
+- `if`/`elseif`/`else` usam `params._ifChainMatched` (flag partilhada)
+- `wait(ms)` implementado via `gc._waitUntil = Date.now() + ms*1000`
+- Loop `animate()` verifica `_waitUntil` e pausa execução durante a espera
+
+**Testes**: 6/6 smoke tests PASS (if true, if false→else, if/elseif/else chain, else must not run, wait, log alias).
+
+### BUG 6 (P2): NPC AI real — pathfinding A* — CORRIGIDO
+
+**Causa raiz**:
+- `physicsSystem.js:movePersonal` rejeitava `NpcObject` (`entry.type !== 'PersonalObject'`)
+- `npcAI.js:30` lia `npc.position` (config estática) em vez da posição dinâmica do body
+- Chase/patrol/flee moviam-se em linha reta, atravessando paredes
+
+**Solução**:
+- Criado `src/utils/pathfinding.js` (263 linhas): classe `Pathfinder` com A* (8-dir, heurística octile, binary min-heap, no corner-cutting)
+- `physicsSystem.js`: `movePersonal`/`jumpPersonal`/`updatePersonalState` agora aceitam NpcObject; adicionado `moveNpc(instanceId, direction, speed)`
+- `npcAI.js` reescrito: `getNpcPos()` lê posição dinâmica do body; chase usa A* com refresh a cada 30 frames; patrol usa A* entre waypoints; flee mantém linha reta
+- `SceneLevel3D.jsx`: popula Pathfinder com AABBs de StaticObject/StopObject no setup da cena
+
+**Limitações conhecidas**: StaticObject rotations ignorados (AABB axis-aligned); Pathfinder populado uma vez no setup (objetos spawned via FlirScript não são adicionados).
+
+### BUG 7 (P2): Memory leaks — poseCache e paintTextures — CORRIGIDO
+
+**Causa raiz**:
+- `sharedAnimationCache.js`: `poseCache` crescia indefinidamente em editor mode (só era limpo em game mode); `sortedClipsCache` nunca era limpo
+- `texturePaint.js`: `disposePaintTextures` e `clearPaintTextures` existiam mas nunca eram chamados — cada CanvasTexture 1024² × 4 canais ≈ 16 MB por objeto sem cleanup
+
+**Solução**:
+- `sharedAnimationCache.js`: LRU eviction com `POSE_CACHE_MAX = 500` e `SORTED_CLIPS_MAX = 50`; `POSE_CACHE_KEYS` array para tracking
+- `useStore.js:deleteObject`: chama `disposePaintTextures(id)` via import dinâmico quando objeto é removido
+
+### BUG 8 (P3): Segurança marketplace — CORRIGIDO
+
+**Causa raiz**:
+- `db.js`: connection string Neon hardcoded com password `npg_Yr7nld2jTpSW`
+- `neonConfig.js`: mesma connection string exposta no cliente (bundlado para o browser)
+- `register.js`/`login.js`: sha256 sem salt (rainbow tables trivial)
+- `gameRuntime.js`: 2 innerHTML + 1 cssText concatenado com input do utilizador (CSS injection)
+
+**Solução**:
+- `db.js`: connection string vem EXCLUSIVAMENTE de `process.env.NEON_DATABASE_URL` (sem fallback hardcoded)
+- `neonConfig.js`: removida `connectionString` do cliente — apenas `apiBaseUrl`
+- `register.js`: PBKDF2 com salt aleatório (10000 iterations, sha512, keylen 64) — formato `pbkdf2$iterations$digest$salt$hash`
+- `login.js`: verifica PBKDF2 (com compatibilidade para hashes legados sha256)
+- `gameRuntime.js`: innerHTML substituído por `textContent` + `createElement`; `cssText` substituído por `style.prop` individual com `sanitizeCss()` (remove `;}{()\\`)
+
 ---
 
 ## 📋 Estado Real da Engine (Auditoria Honesta — Agosto 2026, Sessão 9)

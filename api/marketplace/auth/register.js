@@ -19,13 +19,20 @@ module.exports = async (req, res) => {
   }
 
   try {
-    // Hash simples (em produção: bcrypt/argon2)
-    const passwordHash = crypto.createHash('sha256').update(password).digest('hex')
+    // CORRECAO BUG8: Hash com salt aleatorio (PBKDF2 — nativo do Node, sem deps)
+    // Em producao recomenda-se bcrypt/argon2, mas PBKDF2 com salt e muito melhor que sha256 puro.
+    const salt = crypto.randomBytes(16).toString('hex')
+    const iterations = 10000
+    const keylen = 64
+    const digest = 'sha512'
+    const derivedKey = crypto.pbkdf2Sync(password, salt, iterations, keylen, digest)
+    // Formato: pbkdf2$iterations$digest$salt$hash (para verificacao no login)
+    const passwordHash = `pbkdf2$${iterations}$${digest}$${salt}$${derivedKey.toString('hex')}`
 
-    // Verificar se email/username já existe
+    // Verificar se email/username ja existe
     const existing = await query('SELECT id FROM users WHERE email = $1 OR username = $2', [email, username])
     if (existing.rows.length > 0) {
-      return res.status(409).json({ error: 'Email ou username já registado' })
+      return res.status(409).json({ error: 'Email ou username ja registado' })
     }
 
     // Criar utilizador
@@ -35,7 +42,7 @@ module.exports = async (req, res) => {
     )
     const user = result.rows[0]
 
-    // Gerar token de sessão
+    // Gerar token de sessao
     const token = crypto.randomBytes(32).toString('hex')
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 dias
     await query(

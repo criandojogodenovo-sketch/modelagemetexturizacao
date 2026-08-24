@@ -1,29 +1,29 @@
 /**
- * neonConfig.js — Configuração do servidor Neon (PostgreSQL) para o marketplace.
+ * neonConfig.js — Configuracao do cliente para o marketplace.
  *
- * URL: postgresql://neondb_owner:npg_Yr7nld2jTpSW@ep-fragrant-pond-ayedmxhc-pooler.c-5.us-east-2.aws.neon.tech/neondb
+ * CORRECAO BUG8: REMOVIDA a connection string hardcoded do Neon.
+ * O cliente NUNCA deve ter acesso direto a base de dados — todas as
+ * operacoes passam pelas serverless functions em /api/marketplace/.
+ * A connection string real esta apenas em process.env.NEON_DATABASE_URL
+ * no servidor (Vercel).
  *
- * Estrutura da base de dados:
+ * Estrutura da base de dados (documentacao apenas — nao exposta ao cliente):
  *  - users: id, email, username, password_hash, created_at, avatar_url
  *  - assets: id, name, type, description, price, download_url, thumbnail_url, author_id, downloads, rating, created_at
  *  - games: id, title, description, author_id, project_data, thumbnail_url, downloads, rating, created_at
  *  - templates: id, name, description, category, project_data, thumbnail_url, author_id, downloads, created_at
  *  - purchases: id, user_id, asset_id, price, purchased_at
- *
- * Nota: Esta é a configuração do cliente. A API real precisa de um backend
- * (Node.js/Express ou serverless functions) que conecta ao Neon e expõe
- * endpoints REST. Por agora, apenas a configuração + esquema SQL.
  */
 
 export const NEON_CONFIG = {
-  // URL de conexão (pooler — para uso serverless)
-  connectionString: 'postgresql://neondb_owner:npg_Yr7nld2jTpSW@ep-fragrant-pond-ayedmxhc-pooler.c-5.us-east-2.aws.neon.tech/neondb',
+  // CORRECAO BUG8: Sem connectionString no cliente — apenas API REST
   sslmode: 'require',
   // Para o cliente (browser), usamos uma API REST que fala com o Neon
   apiBaseUrl: '/api/marketplace', // proxy para serverless functions
 }
 
-// Esquema SQL para criar as tabelas no Neon
+// Esquema SQL para criar as tabelas no Neon (apenas para documentacao —
+// a inicializacao real e feita server-side em api/marketplace/db.js)
 export const NEON_SCHEMA = `
 -- Users
 CREATE TABLE IF NOT EXISTS users (
@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS games (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Templates (modelos de projeto reutilizáveis)
+-- Templates (modelos de projeto reutilizaveis)
 CREATE TABLE IF NOT EXISTS templates (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS purchases (
   UNIQUE(user_id, asset_id)
 );
 
--- Sessions (para autenticação)
+-- Sessions (para autenticacao)
 CREATE TABLE IF NOT EXISTS sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES users(id),
@@ -103,10 +103,10 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 /**
  * API client para o marketplace (fala com serverless functions).
- * Estas funções são stubs — precisam de um backend real para funcionar.
+ * Estas funcoes sao stubs — precisam de um backend real para funcionar.
  */
 export const marketplaceAPI = {
-  // === Autenticação ===
+  // === Autenticacao ===
   async register(email, username, password) {
     // POST /api/marketplace/auth/register
     return fetch('/api/marketplace/auth/register', {

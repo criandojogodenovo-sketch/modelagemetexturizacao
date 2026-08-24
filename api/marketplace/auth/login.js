@@ -19,20 +19,42 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const passwordHash = crypto.createHash('sha256').update(password).digest('hex')
-
-    const result = await query(
-      'SELECT id, email, username FROM users WHERE email = $1 AND password_hash = $2',
-      [email, passwordHash]
+    // CORRECAO BUG8: Verificar password com PBKDF2+salt (compativel com register.js)
+    // Buscar utilizador por email primeiro (precisamos do password_hash com salt)
+    const userResult = await query(
+      'SELECT id, email, username, password_hash FROM users WHERE email = $1',
+      [email]
     )
 
-    if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'Credenciais inválidas' })
+    if (userResult.rows.length === 0) {
+      return res.status(401).json({ error: 'Credenciais invalidas' })
     }
 
-    const user = result.rows[0]
+    const user = userResult.rows[0]
+    const storedHash = user.password_hash
 
-    // Gerar token de sessão
+    // Verificar formato do hash (suportar legado sha256 e novo pbkdf2)
+    let passwordValid = false
+    if (storedHash.startsWith('pbkdf2$')) {
+      // Formato: pbkdf2$iterations$digest$salt$hash
+      const parts = storedHash.split('$')
+      const iterations = parseInt(parts[1], 10)
+      const digest = parts[2]
+      const salt = parts[3]
+      const expectedHash = parts[4]
+      const derivedKey = crypto.pbkdf2Sync(password, salt, iterations, 64, digest)
+      passwordValid = (derivedKey.toString('hex') === expectedHash)
+    } else {
+      // Legado: sha256 sem salt (apenas para compatibilidade — deve ser migrado)
+      const legacyHash = crypto.createHash('sha256').update(password).digest('hex')
+      passwordValid = (legacyHash === storedHash)
+    }
+
+    if (!passwordValid) {
+      return res.status(401).json({ error: 'Credenciais invalidas' })
+    }
+
+    // Gerar token de sessao
     const token = crypto.randomBytes(32).toString('hex')
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
     await query(
@@ -40,6 +62,8 @@ module.exports = async (req, res) => {
       [user.id, token, expiresAt]
     )
 
+    // Nao devolver password_hash
+    delete user.password_hash
     res.json({ token, user })
   } catch (err) {
     console.error('[Login] Error:', err)

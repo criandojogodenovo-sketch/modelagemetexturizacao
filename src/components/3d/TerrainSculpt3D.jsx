@@ -36,7 +36,14 @@ export default function TerrainSculpt3D({
   const [cursorPos, setCursorPos] = useState(null)
   const [isDragging, setIsDragging] = useState(false)
   const cursorRef = useRef()
-  const hmRef = useRef(heightmap)
+  // CORREÇÃO BUG2: Se heightmap é null, gerar Float32Array((seg+1)²) vazio
+  // para que a escultura funcione em terrenos recém-criados (sem heightmap prévio).
+  const initialHm = useMemo(() => {
+    if (heightmap) return heightmap
+    const cells = (seg + 1) * (seg + 1)
+    return new Float32Array(cells)
+  }, [heightmap, seg])
+  const hmRef = useRef(initialHm)
   const lastApplyRef = useRef(0)
 
   // Performance Core 3.5 — Registar terreno no RaycastSystem (BVH se aplicável)
@@ -58,8 +65,15 @@ export default function TerrainSculpt3D({
     RaycastSystem.markDirty(terrainId)
   }, [terrainMesh])
 
-  // Actualizar hmRef quando heightmap muda externamente
-  useEffect(() => { hmRef.current = heightmap }, [heightmap])
+  // Actualizar hmRef quando heightmap muda externamente (ou usar initialHm se null)
+  useEffect(() => {
+    if (heightmap) {
+      hmRef.current = heightmap
+    } else if (!hmRef.current || hmRef.current.length !== (seg + 1) * (seg + 1)) {
+      // Gerar heightmap vazio se não existe ou tamanho mudou
+      hmRef.current = new Float32Array((seg + 1) * (seg + 1))
+    }
+  }, [heightmap, seg])
 
   // Reportar drag state ao parent (para desactivar OrbitControls)
   useEffect(() => {
@@ -73,7 +87,8 @@ export default function TerrainSculpt3D({
     if (!hm) return
     const pos = terrainMesh.geometry.attributes.position
     if (!pos) return
-    const heightScale = 5 // mesmo que TerrainMesh usa
+    // CORREÇÃO BUG2: ler heightScale do conect via userData (fallback 5)
+    const heightScale = terrainMesh.userData?.heightScale || 5
     const segLocal = seg
 
     for (let i = 0; i < pos.count; i++) {

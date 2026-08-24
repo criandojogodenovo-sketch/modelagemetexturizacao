@@ -2702,3 +2702,920 @@ Simplifications / Fallbacks Used:
 - UVEditor: sem gizmo overlay (drag direto com matemática por modo); ilhas display-only
   (sem packing/rearranjo na v1)
 - UVEditor unwraps reutilizam a ação existente applyMeshOp('unwrap', {method})
+
+---
+Task ID: BUG1-INVEST
+Agent: general-purpose
+Task: Investigar bug câmara ViewObject preta no Play Mode (P0)
+
+Work Log:
+- Lido worklog.md (contexto: AUDIT-1/2/3/4 + Bug #3 fix parcial DEFAULT_CAMERA_FAR=2000 nos fallbacks).
+- Verificada existência de `/home/z/my-project/src/utils/cameraController.js` (430 linhas, EXISTS — não é missing como afirmado em worklogs anteriores).
+  - Mas **NÃO é importado** por SceneLevel3D.jsx (confirmado via grep de imports: só `DEFAULT_CAMERA_FAR` de `navigationUtils.js` é importado, linha 29).
+  - O editor implementa câmara INLINE no GameMode useFrame (linhas 1385-1472) usando `window._flirCameraRotation` directamente.
+- Lido `SceneLevel3D.jsx` em chunks relevantes:
+  - Linhas 75-96 (SceneBackgroundSolid): `scene.background = new THREE.Color('#0d1117')` por default (background.color vindo de useStore.js:62).
+  - Linhas 880-902 (GameMode setup useEffect): inicializa `window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: 1.0, enabled: true }` — **enabled: true INCONDICIONALMENTE** mesmo sem CameraTouchZone.
+  - Linhas 1095-1202 (cleanup useEffect): `window._flirCameraRotation = null` no Stop (linha 1125).
+  - Linhas 1207-1516 (useFrame): bloco de câmara 1385-1472 — verifica `camRotation.enabled` em 4 sítios (1416, 1423, 1447, 1465) e faz override da rotação do ViewObject/gameCamera sempre que `enabled=true`.
+  - Linhas 1640-1645 (Canvas): `camera={{ position: [8, 6, 10], fov: 50, near: 0.1, far: 2000 }}`, `gl={{ alpha: false }}` — sem alpha → canvas NÃO é transparente, mostra clear color.
+  - Linhas 1745-1751 (OrbitControls): só renderizado quando `!isGameMode` (não interfere em Play Mode).
+- Lido `taxonomy.js` linhas 475-528 e 1497-1521:
+  - ViewObject defaults: `cameraRole: 'primary'`, `followMode: 'none'`, `followTarget: null`, `position: [5, 4, 6]`, `rotation: [-0.5, 0.7, 0]`, `fov: 60`, `near: 0.1`, `far: 2000`, `dofEnabled: false`.
+  - **Importante**: `position: [5, 4, 6]` e `rotation: [-0.5, 0.7, 0]` são sane defaults — posição Y=4 está ACIMA do solo (y=0), não underground. Rotação [-0.5, 0.7, 0] apontaria a câmara de volta para a origem da cena.
+- Lido `useStore.js` linhas 1162-1194: `gameCamera` default `position: [5, 4, 6]`, `rotation: [0, 0, 0]`, `fov: 50`, `near: 0.1`, `far: 2000`. Background default `#0d1117` (linha 62).
+- Lido `gameRuntime.js` linhas 240-270 (exported runtime, para comparação): aqui `camState.enabled = hasTZ` é setado CONDICIONALMENTE (linha 258) — o exported runtime NÃO tem o bug, só o editor.
+- Lido `ConectRenderer.jsx` linhas 597-636 (ViewObjectMesh): gizmo renderizado incondicionalmente em Play Mode (sem check de scenePreviewOpen). Inclui esfera indicadora `#3fb950` GREEN quando `cameraRole='primary'` (linha 625) — esta é a "something green" que o utilizador vê.
+- Lido `navigationUtils.js` linha 21: `DEFAULT_CAMERA_FAR = 2000`.
+
+Stage Summary:
+
+# BUG1-INVEST — ROOT CAUSE ANALYSIS: Câmara ViewObject preta no Play Mode
+
+## Sintomas observados pelo utilizador
+1. Adicionar ViewObject + entrar Play Mode → "algo verde aparece" (gizmo do ViewObject, ver §6 abaixo).
+2. Sair e re-entrar Play Mode → ecrã preto.
+3. Apagar ViewObject e usar câmara default → ecrã permanece preto.
+
+## ROOT CAUSE PRINCIPAL
+
+**`window._flirCameraRotation.enabled` é setado a `true` INCONDICIONALMENTE na entrada do Play Mode, ignorando a presença de CameraTouchZone na cena.**
+
+### Localização exacta do bug
+
+**Ficheiro**: `/home/z/my-project/src/components/3d/SceneLevel3D.jsx`
+
+**Linhas 894-902** (GameMode setup `useEffect`, ao entrar em Play Mode):
+```js
+// Inicializar rotação da câmara (FPS/BR) — lida pelo GameMode no useFrame
+if (!window._flirCameraRotation) {
+  window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: 1.0, enabled: true }  // ← BUG
+} else {
+  // Reset ao re-entrar no jogo
+  window._flirCameraRotation.yaw = 0
+  window._flirCameraRotation.pitch = 0
+  window._flirCameraRotation.enabled = true  // ← BUG
+}
+```
+
+O flag `enabled` deveria ser `true` APENAS quando a cena contém pelo menos um conect do tipo `CameraTouchZone` (zona de toque para rodar a câmara estilo FPS/BR). Sem CameraTouchZone, o utilizador não tem input para rodar a câmara, pelo que o flag deve ser `false` — permitindo que a rotação definida no ViewObject/gameCamera seja respeitada.
+
+### Cadeia causal — porque é que o ecrã fica preto
+
+**Passo 1** (entrada Play Mode): `camRotation.enabled = true` é setado sempre (linha 896 ou 901).
+
+**Passo 2** (useFrame, linhas 1386-1454): o bloco de câmara verifica `camRotation.enabled` em 4 sítios. No caso mais comum (ViewObject existe, `followMode='none'`, sem `followTarget`), cai no `else` da linha 1445:
+
+```js
+// Linhas 1445-1454
+} else {
+  camera.position.set(...(activeView.position || [5, 4, 6]))   // (5, 4, 6)
+  if (camRotation.enabled) {                                  // TRUE sempre
+    camera.rotation.set(camRotation.pitch, camRotation.yaw, 0, 'YXZ')  // (0, 0, 0, 'YXZ')
+  } else if (activeView.rotation) {
+    camera.rotation.set(...activeView.rotation)               // [-0.5, 0.7, 0] ← NUNCA executado
+  } else {
+    camera.lookAt(0, 0, 0)                                    // ← NUNCA executado
+  }
+}
+```
+
+**Resultado**: a câmara fica em `(5, 4, 6)` com rotação `(0, 0, 0, 'YXZ')` — a olhar na direcção **-Z do mundo** (para `z = -∞`). Como o conteúdo da cena tipicamente está centrado na origem `(0, 0, 0)` (que está ATRÁS-ESQUERDA-ABAIXO da câmara), nada aparece no frustum → ecrã preto (background `#0d1117` muito escuro).
+
+A rotação do ViewObject `[-0.5, 0.7, 0]` (que apontaria correctamente a câmara para a origem) é IGNORED porque `camRotation.enabled=true` tem precedência.
+
+### Mesma falha em fallback para `gameCamera` (ViewObject apagado)
+
+**Linhas 1455-1472**:
+```js
+} else if (activeScene.gameCamera) {
+  const gc = activeScene.gameCamera
+  ...
+  camera.position.set(...(gc.position || [5, 4, 6]))  // (5, 4, 6)
+  if (camRotation.enabled) {                          // STILL TRUE
+    camera.rotation.set(camRotation.pitch, camRotation.yaw, 0, 'YXZ')  // (0, 0, 0)
+  } else if (gc.rotation) {
+    camera.rotation.set(...gc.rotation)
+  } else {
+    camera.lookAt(0, 0, 0)  // ← NUNCA executado
+  }
+}
+```
+
+Mesma sintomatologia → confirma o sintoma #3 do utilizador: "mesmo depois de apagar o ViewObject o ecrã fica preto".
+
+### Resposta às perguntas do briefing
+
+| # | Pergunta | Resposta |
+|---|---|---|
+| 1 | Onde é inicializada a câmara? Defaults pos/near/far? | `<Canvas camera={{ position: [8, 6, 10], fov: 50, near: 0.1, far: DEFAULT_CAMERA_FAR (2000) }}>` em `SceneLevel3D.jsx:1644`. `gameCamera` default em `useStore.js:1175` → `position: [5, 4, 6], rotation: [0, 0, 0], fov: 50, near: 0.1, far: 2000`. ViewObject default em `taxonomy.js:1502-1514` → `position: [5, 4, 6], rotation: [-0.5, 0.7, 0], fov: 60, near: 0.1, far: 2000`. |
+| 2 | Posição default do ViewObject? Underground (y<0)? | `position: [5, 4, 6]` (taxonomy.js:1503). Y=4 está ACIMA do solo. NÃO está underground nem dentro do terreno. |
+| 3 | O que acontece a `camera.position.set`/`rotation.set` quando ViewObject não tem rotação? | O ViewObject TEM rotação `[-0.5, 0.7, 0]` por default, mas essa rotação é IGNORED porque `camRotation.enabled=true` força `camera.rotation.set(0, 0, 0, 'YXZ')` (linhas 1447-1448). A câmara olha para -Z (longe da origem), não para o céu nem para o solo. |
+| 4 | Default `background` da cena? Transparente ou preto? | `#0d1117` (useStore.js:62, quase preto). Aplicado em `SceneBackgroundSolid` (linha 92) → `scene.background = new THREE.Color('#0d1117')`. Com `gl={{ alpha: false }}` (linha 1645), o canvas NÃO é transparente. Quando a câmara olha para o vazio, vê-se o background `#0d1117` → parece preto ao utilizador. |
+| 5 | `camRotation.enabled` é setado a true sem input? | **SIM** — `SceneLevel3D.jsx:896` e `:901` setam `enabled: true` INCONDICIONALMENTE ao entrar em Play Mode, mesmo quando NÃO existe CameraTouchZone na cena. **Esta é a causa principal do bug.** O módulo `cameraController.js` (linhas 257-259) faz correctamente `camState.enabled = hasTZ`, mas o editor NÃO usa este módulo — implementa a lógica inline. |
+| 6 | Múltiplas câmaras? Qual é usada? | Apenas UMA câmara: a default do `<Canvas>` R3F, acedida via `useThree()`. OrbitControls (linha 1746) só é renderizado quando `!isGameMode` — não interfere em Play Mode. `ViewModelFPS` parenta uma arma à câmara apenas em first/third person (linha 222-223). Sem câmara duplicada. |
+| 7 | SceneLevel3D reutiliza a mesma câmara entre Play Modes ou faz reset? | **Reutiliza** a mesma câmara R3F. `window._flirCameraRotation` é reset a `{ yaw: 0, pitch: 0, enabled: true }` em cada entrada (linhas 895-901) e a `null` no cleanup (linha 1125). Não há re-criação da câmara Three.js — apenas a rotação externa é reset. |
+
+### Porque é que algo "verde" aparece na 1ª entrada Play Mode
+
+`ConectRenderer.jsx` linhas 597-636 renderizam o gizmo do ViewObject **incondicionalmente em Play Mode** (sem check `scenePreviewOpen`). O gizmo inclui (linha 620-628):
+```jsx
+{conect.cameraRole && (
+  <mesh position={[0, 0.4, 0]}>
+    <sphereGeometry args={[0.1, 8, 8]} />
+    <meshBasicMaterial color={
+      conect.cameraRole === 'player' ? '#2f81f7'
+      : conect.cameraRole === 'primary' ? '#3fb950'   // ← GREEN
+      : '#d29922' // secondary
+    } />
+  </mesh>
+)}
+```
+
+Default `cameraRole='primary'` → esfera verde `#3fb950` (GitHub green). O gizmo está posicionado em `[5, 4, 6]` (mesma posição da câmara) com a cone wireframe a estender-se em `-Z` local até `z=-1.5` (world z≈4.5, dentro do frustum da câmara em -Z). Resultado: a esfera verde + parte do cone wireframe aparecem no frustum da câmara → "algo verde" visível.
+
+### Porque é que o ecrã vai a preto na 2ª entrada Play Mode
+
+Na 2ª entrada, o mesmo bug aplica-se: `camRotation.enabled=true` → rotação `(0, 0, 0, 'YXZ')`. Mas a diferença de percepção pode dever-se a:
+- Possivelmente o utilizador mexeu ligeiramente o rato/dedo na 1ª sessão, alterando `yaw/pitch` e mostrando algo.
+- Na 2ª entrada, `yaw=0, pitch=0` é reset (linhas 899-900), fazendo a câmara voltar a apontar -Z (longe da origem).
+- Ou: a posição da câmara pode ter sido levemente alterada pela física ou por um `lerp` pendente (linha 1432, 1437, 1441) caso houvesse targetMesh.
+
+A sintomatologia consistente é: **câmara em [5, 4, 6] olhando -Z** = ecrã preto.
+
+## SUGGESTED MINIMAL FIX (não implementado — investigação apenas)
+
+**Fix #1 (mínimo, recomendado)**: em `SceneLevel3D.jsx:894-902`, trocar `enabled: true` por `enabled: false` em ambos os ramos, e setar `enabled=true` APENAS se a cena tiver CameraTouchZone:
+
+```js
+// Verificar se a cena tem CameraTouchZone
+const hasTZ = (setupScene?.conects || []).some(c => c.type === 'CameraTouchZone')
+if (!window._flirCameraRotation) {
+  window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: 1.0, enabled: hasTZ }
+} else {
+  window._flirCameraRotation.yaw = 0
+  window._flirCameraRotation.pitch = 0
+  window._flirCameraRotation.enabled = hasTZ  // só true se há CameraTouchZone
+}
+```
+
+**Fix #2 (alternativa robusta)**: importar e usar o módulo `cameraController.js` (já existe em `/home/z/my-project/src/utils/cameraController.js`, linhas 126-247) em vez da lógica inline das linhas 1385-1472. O `cameraController.updateCamera()` já faz a verificação correcta via `hasTouchZone` option e respeita `activeView.rotation` quando não há touch zone activa. Isto também resolve a divergência editor/runtime apontada em AUDIT-2 (worklog linhas 1432-1434, 1704, 1778, 2490).
+
+**Fix #3 (defensivo, complementar)**: no bloco `else if (activeView.rotation)` (linha 1449) e `else if (gc.rotation)` (linha 1467), aplicar mesmo quando `camRotation.enabled=true` mas `yaw=0 && pitch=0` (sem input ainda) — para que a rotação do ViewObject/gameCamera tenha precedência sobre a "rotação zero" do camRotation. Esta é menos limpa que Fix #1 mas evita regressos do bug se `enabled` for setado noutro sítio.
+
+## NOTAS ADICIONAIS
+
+- **Bug #3 do worklog anterior** (linha 443) atribuiu o problema a `far=200` em templates FPS/RPG. Embora `far=200` seja curto, NÃO é a causa deste bug — `DEFAULT_CAMERA_FAR=2000` já está aplicado em todos os fallbacks (linhas 1398, 1459). A causa real é a rotação da câmara, não o far plane.
+- **O módulo `cameraController.js` existe** (worklog linha 1432 estava errado a afirmar "MISSING ENTIRELY"). Existe mas **não é importado** por SceneLevel3D.jsx — apenas `DEFAULT_CAMERA_FAR` de `navigationUtils.js` é importado.
+- **O runtime exportado (`gameRuntime.js`)** NÃO tem este bug — em gameRuntime.js:258 faz correctamente `camState.enabled = hasTZ`. Apenas o editor (Play Mode in-app) tem o bug. Isto significa que jogos exportados funcionam correctamente, mas o utilizador não consegue testar correctamente no editor.
+- **cameraRole 'primary' default** (taxonomy.js:498) significa que o utilizador coloca ViewObject e ele É automaticamente a câmara activa. Não há necessidade de marcar `isActive=true` ou `cameraRole='player'`.
+
+## PRÓXIMOS PASSOS RECOMENDADOS
+
+1. Aplicar **Fix #1** (1 linha de mudança efectiva em 2 ramos) — resolve o bug imediatamente.
+2. Validar com teste manual: criar ViewObject → Play Mode → deve ver a cena a partir de [5, 4, 6] olhando para origem. Sair e re-entrar → mesmo comportamento. Apagar ViewObject → câmara default gameCamera também deve ver origem.
+3. (Opcional, médio prazo) Aplicar **Fix #2** — refactor para usar `cameraController.js` unificado, eliminando duplicação e divergência editor/runtime.
+4. (Opcional, baixa prioridade) Considerar adicionar `if (!scenePreviewOpen) return null` no `ViewObjectMesh` em `ConectRenderer.jsx` (linha 598) para esconder o gizmo do ViewObject durante Play Mode — actualmente o gizmo é renderizado e pode ser visível dentro do frustum da câmara quando esta ocupa a mesma posição.
+
+---
+
+---
+Task ID: BUG5678-INVEST
+Agent: sub-agent (general-purpose)
+Task: Investigar BUG 5, 6, 7, 8 — FlirCode exportado + NPC AI + memory leaks + marketplace security
+
+Metodologia:
+- Lido worklog.md (2704 linhas) para contexto; lidos na íntegra os 6 ficheiros alvo
+  (gameRuntime.js, flircode.js, npcAI.js, physicsSystem.js, sharedAnimationCache.js,
+  texturePaint.js) + 3 ficheiros marketplace (db.js, register.js, login.js) + neonConfig.js
+  + secções relevantes de SceneLevel3D.jsx (useFrame loop, NPC AI setup, cleanup unmount).
+- Grep cruzado para: cl/J, _waitUntil, _waitQueue, createNPCAI callers, disposePaintTextures
+  callers, clearPoseCache callers, referências à URL Neon em todo o repo.
+
+================================================================================
+## BUG 5 — FlirCode exportado: else e wait() não funcionam
+================================================================================
+
+### 5.1 — `if (cond)` é no-op no exportado
+
+**Ficheiro:** `/home/z/my-project/src/utils/game/gameRuntime.js`
+**Linhas:** 88–113 (`execS` → branch `if`)
+
+**Root cause:**
+`createFlirCodeRuntime(src, gc)` chama `parseFlirCode(src)` (linha 68), que retorna apenas
+`{ functions, errors }` (linha 34) — NÃO retorna o array `cl` (linhas limpas, criado localmente
+em `parseFlirCode` linha 20). No entanto, dentro de `execS` (linha 84), o branch do `if`
+referencia diretamente `cl`:
+```
+line 92:  var bi = s.l // linha atual
+line 94:  for (var j = 0; j < cl.length; j++) { ... }
+```
+Como `cl` não está no closure scope de `execS` (é declarado dentro de `parseFlirCode`, que é
+função top-level separada), aceder a `cl` lança `ReferenceError: cl is not defined`. Esse erro é
+engolido pelo `try/catch` em `execStmts` (linha 80) que só faz `dbg('Erro: ...')`. Resultado: o
+corpo do `if` NUNCA é executado — parece um no-op.
+
+Adicionalmente, mesmo que `cl` estivesse acessível, o algoritmo (linhas 94–110) procura o
+PRÓXIMO `begincode` após `s.l`, mas `s.l` é o número de linha original do source (1-based), e
+`cl[].l` também guarda linhas originais — a comparação `cl[j].l > bi` funciona, mas o algoritmo
+não sabe qual `begincode` pertence a este `if` específico; pode apanhar o bloco errado quando
+há `if`s aninhados.
+
+**Suggested fix (1-2 frases):**
+Reescrever o parser do runtime para produzir um AST com `body` pré-resolvido por bloco (como
+faz `flircode.js` — ver `parseBlock`/`parseStatement`, linhas 117–282), passando o AST ao
+runtime em vez de re-scanear `cl`. Alternativa mínima: passar `cl` como argumento a
+`createFlirCodeRuntime` (ex: `parseFlirCode` retorna também `cl`) e guardar `cl` num closure
+da factory — isso já desbloqueia o caso simples.
+
+### 5.2 — `else` / `else if` não implementados
+
+**Ficheiro:** `/home/z/my-project/src/utils/game/gameRuntime.js`
+**Linhas:** 115–123
+
+**Root cause:**
+O `execS` tem branches explícitas para `else if` (linha 115) e `else` (linha 120) com comentário
+"Processado no contexto do if anterior — ignorar aqui". Isto é mentira: o branch do `if` (5.1)
+nem chega a executar com sucesso, e mesmo se executasse, não há qualquer estado partilhado
+(flag `_ifChainMatched` ou equivalente) entre statements irmãos. No editor (`flircode.js`
+linhas 534–567) o `if`/`elseif`/`else` usam `params._ifChainMatched` para short-circuit. O
+runtime nunca implementa isto.
+
+**Suggested fix:**
+Portar a abordagem do editor: parser emite `{type:'if', body:[...]}`, `{type:'elseif', body,
+condition}`, `{type:'else', body}` como statements irmãos no body do bloco pai, e o executor
+usa `params._ifChainMatched = true/false` (igual a flircode.js:546–548, 554, 562).
+
+### 5.3 — `wait(seconds)` é no-op
+
+**Ficheiro:** `/home/z/my-project/src/utils/game/gameRuntime.js`
+**Linha:** 147
+
+**Root cause:**
+```
+case 'wait': dbg('wait(' + args[0] + 's)', 'log'); break
+```
+Apenas faz log. Não existe qualquer `_waitUntil`, `_waitQueue`, ou mecanismo de defer. O editor
+(`flircode.js` linhas 498–516 + 673–682) implementa `_waitUntil = Date.now() + delayMs` e o
+`execStatements` verifica no início de cada statement se `Date.now() < _waitUntil` e, se sim,
+faz `setTimeout(() => execStatements(remaining, params), delay)` para adiar as statements
+seguintes. O runtime exportado simplesmente não tem este mecanismo.
+
+**Suggested fix:**
+Portar `case 'wait'` do editor (set `gc._waitUntil`) + portar a guarda em `execStmts` (verificar
+`_waitUntil` antes de cada statement e deferir o resto via `setTimeout`).
+
+### Comparação editor vs runtime (porque divergem)
+
+O runtime exportado (`gameRuntime.js` linhas 18–210) é uma re-implementação INLINE e SIMPLIFICADA
+do parser FlirCode — não é o mesmo código. O editor (`flircode.js`) tem:
+- AST real com `body` pré-resolvido por bloco (parseBlock/parseStatement)
+- Suporte completo a if/elseif/else via flag `_ifChainMatched`
+- Suporte a switch/case/default, repeat_n, repeat_inc, repeat_dec
+- Suporte a aritmética (`5+3`, `var+5`), concatenação de strings (`"a"+var+"b"`), `this`
+- Suporte a classes (`class X extends Y`) com hierarquia e override de funções
+- `wait()` real com `_waitUntil` + `setTimeout`
+
+O runtime exportado não tem NADA disto — só tem `var`, `if` (partido), `assign`, `call`, e
+`wait` (cosmético). Esta divergência é o "root cause" dos 3 sub-bugs. (Worklog l.2105 já tinha
+identificado esta divergência como "MASSIVA".)
+
+================================================================================
+## BUG 6 — NPC AI: pathfinding A* + patrulha/perseguição
+================================================================================
+
+### 6.1 — `movePersonal` rejeita NpcObject
+
+**Ficheiro:** `/home/z/my-project/src/utils/conects/physicsSystem.js`
+**Linhas:** 285–293 (`movePersonal`)
+
+**Root cause:**
+```
+line 287:  if (!entry || entry.type !== 'PersonalObject') return
+```
+O guard rejeita qualquer body que não seja `PersonalObject`. Mas em `addConect` (linhas 184–194)
+o NpcObject é tratado IGUAL ao PersonalObject: `isCharacter = PersonalObject || NpcObject`,
+mass=1, linearDamping=0.4, fixedRotation=true — ou seja, o body existe e é dinâmico. Quando o
+`npcAI.js` chama `physicsMove(npc.instanceId, dir, speed)` (linhas 73, 81, 87), o helper em
+SceneLevel3D.jsx (linha 1023) faz `physicsRef.current?.movePersonal(id, dir, speed)` → cai no
+guard da linha 287 → early return silencioso. NPC NUNCA se move. `jumpPersonal` (linha 295–297)
+e `updatePersonalState` (linha 320–322) têm o mesmo bug.
+
+**Suggested fix:**
+Em `movePersonal`, `jumpPersonal`, `updatePersonalState`, alterar o guard para:
+`if (!entry || (entry.type !== 'PersonalObject' && entry.type !== 'NpcObject')) return`
+— ou criar uma função `moveCharacter` que aceita ambos os tipos.
+
+### 6.2 — `npcPos` é a posição inicial estática
+
+**Ficheiro:** `/home/z/my-project/src/utils/conects/npcAI.js`
+**Linha:** 30
+
+**Root cause:**
+```
+line 30:  const npcPos = npc.position
+```
+`npc` é o objeto Conect (configuração estática do store); `npc.position` é a posição inicial
+definida no editor. Quando a física move o body do NPC, o `npc.position` NÃO é atualizado
+(SceneLevel3D.jsx:1220 copia `entry.body.position → mesh.position`, NÃO para `conect.position`).
+Logo, mesmo se `movePersonal` fosse corrigido, o cálculo de `dx = playerPos[0] - npcPos[0]`
+(dz idem) usaria SEMPRE a posição inicial — o NPC perseguiria a partir da origem e não do local
+onde realmente está. O mesmo afeta patrol (linhas 66–68) e flee (linhas 83–85).
+
+**Suggested fix:**
+Adicionar helper `getNpcPos` em `createNPCAI` (callback que lê `conectMeshRefs.current.get(id)?.position`)
+e usá-lo em vez de `npc.position`. SceneLevel3D.jsx:1012 já tem padrão idêntico para `getPlayerPos`.
+
+### 6.3 — Sem pathfinding A* (só linha reta)
+
+**Ficheiro:** `/home/z/my-project/src/utils/conects/npcAI.js`
+**Linhas:** 62–88 (patrol/chase/flee branches)
+
+**Root cause:**
+NÃO existe qualquer pathfinding. Patrol (linhas 62–75) anda em linha reta para o próximo
+waypoint. Chase (linhas 76–81) anda em linha reta para o player. Flee (linhas 82–88) anda em
+linha reta no sentido oposto. Não há grid, não há A*, não há steering/obstacle avoidance. NPCs
+atravessam paredes, StaticObjects, terrain.
+
+**Suggested fix:**
+Para versão mínima: usar raycasting contra `physicsRef.current.bodies` (StaticObject bodies têm
+AABB) para detetar obstáculo à frente; se obstruído, escolher direção alternativa (sliding).
+Para versão completa: implementar A* sobre uma grelha 2D (top-down) com células marcadas como
+obstáculo onde houver StaticObject/TerrainObject — usar `world.bodies` para popular a grelha
+uma vez por cena. Cache de path por (npc, target) com TTL de ~0.5s.
+
+### 6.4 — NPC AI é instanciado e chamado por frame (NÃO é um bug, é OK)
+
+Confirmado via grep em `SceneLevel3D.jsx`:
+- Linha 1010–1034: `for (const conect of setupScene.conects)` → `if (conect.type === 'NpcObject')`
+  → `createNPCAI(conect, {...})` → `npcAIsRef.current.set(id, ai)`
+- Linha 1350: `for (const ai of npcAIsRef.current.values()) ai.update(delta)` (no loop useFrame)
+- Linhas 1104–1105: cleanup no unmount (`ai.dispose()` + clear)
+
+Ou seja: o wiring está correcto, o bug é puramente 6.1 + 6.2 + 6.3.
+
+### 6.5 — Onde estão os dados de obstáculos
+
+**Ficheiro:** `/home/z/my-project/src/utils/conects/physicsSystem.js`
+**Linhas:** 168 (TerrainObject), 197–199 (StaticObject)
+
+- `StaticObject` (linha 197): `body.type = CANNON.Body.STATIC; body.mass = 0` — guardado em
+  `bodies.set(conect.instanceId, { body, conect, mesh })` (linha ~214, fora do excerto mostrado).
+  AABB acessível via `entry.body.aabb` ou via `body.shapes[0].boundingSphereRadius`/`boxDimensions`.
+- `TerrainObject` (linhas 154–170): plano infinito, sem AABB útil.
+- StopObject (linha 200): KINEMATIC.
+
+Para A*, sugerir: iterar `physicsRef.current.bodies` filtrando `entry.type === 'StaticObject'`,
+construir AABB 2D (top-down) sobre uma grelha.
+
+================================================================================
+## BUG 7 — Memory leaks: poseCache e paintTextures
+================================================================================
+
+### 7.1 — `poseCache` (Map) em sharedAnimationCache.js
+
+**Ficheiro:** `/home/z/my-project/src/utils/sharedAnimationCache.js`
+**Linhas:** 20 (declaração), 96 (key), 120 (set), 151–153 (clearPoseCache)
+
+**Root cause (parcial):**
+A chave é `clipName + '_' + time.toFixed(4)` (linha 96) — ~10000 chaves únicas por segundo de
+animação. `clearPoseCache()` é exportado e CHAMADO em SceneLevel3D.jsx:1212 no início de cada
+`useFrame`. MAS o `useFrame` (linha 1208) tem `if (!isGameMode) return` (linha 1209) ANTES de
+`clearPoseCache()` (linha 1212). Ou seja:
+- Em modo de jogo (Play): poseCache é limpo a cada frame → OK.
+- Em modo editor (pré-visualização de animações via AnimationPlayer externo ao useFrame, ou
+  preview de clip no AnimationPanel): NÃO é limpo → cresce ilimitadamente enquanto o editor
+  estiver aberto e estiver a passar animações.
+
+**Sub-leak secundário:** `sortedClipsCache` (linha 24) NUNCA é limpo automaticamente. Cada
+`clipName` novo cria uma entrada permanente; só `clearClipCache(clipName)` (linha 158, chamada
+em ZERO locais — confirmado via grep) remove. Cenas carregadas, objects removidos, ou clips
+editados no AnimationPanel deixam entradas órfãs.
+
+**Suggested fix:**
+1. Mover `clearPoseCache()` para ANTES do `if (!isGameMode) return` no useFrame — fica a limpar
+   sempre, custo trivial.
+2. Chamar `clearClipCache()` (sem args = clear total) no cleanup de unmount do SceneLevel3D.jsx
+   (linhas 1101–1136, junto a `physicsRef.current?.dispose()`).
+3. Chamar `clearClipCache(clipName)` no store action que remove/edita um clip.
+
+### 7.2 — `paintTextures` (Map) em texturePaint.js
+
+**Ficheiro:** `/home/z/my-project/src/utils/texturePaint.js`
+**Linhas:** 40 (declaração), 60 (key = `${objectId}:${channel}`), 80 (CanvasTexture criado),
+90 (set), 125–132 (disposePaintTextures)
+
+**Root cause:**
+`disposePaintTextures(objectId)` está DEFINIDO (linhas 125–132) — faz `entry.texture.dispose()`
++ `paintTextures.delete(key)` — mas NÃO é chamado em NENHUM lado do codebase (grep confirma:
+apenas a definição existe). O mesmo para `clearPaintTextures(objectId)` (linhas 137–147).
+Cada textura pintada é uma `THREE.CanvasTexture` 1024×1024 (≈4 MB raw RGBA, mais mipmaps).
+Com 4 canais (color/roughness/metallic/normal), são ≈16 MB por objeto pintado. Sem dispose:
+- Remover objeto da cena → texturas ficam na Map e na GPU.
+- Fechar o projeto / trocar de cena / unmount do SceneLevel3D → todas persistem.
+- Sessão longa de edição com muitos meshes pintados → GPU OOM.
+
+O cleanup de unmount em SceneLevel3D.jsx:1101–1154 faz dispose de runtimes, npcAIs, timers,
+physics, portals, mesh reparenting — mas NÃO chama `disposePaintTextures` nem
+`clearPoseCache`/`clearClipCache`.
+
+**Suggested fix:**
+1. No store action que remove um objeto, chamar `disposePaintTextures(objectId)` antes/depois.
+2. No cleanup de unmount do SceneLevel3D.jsx (linhas 1101–1154), iterar
+   `paintTextures.keys()`, agrupar por objectId, e chamar `disposePaintTextures(id)` para cada
+   um (ou expor `disposeAllPaintTextures()` em texturePaint.js).
+3. Opcional: expor `clearAllPaintTextures()` para um botão "Limpar caches" no UI.
+
+### 7.3 — Local onde colocar cleanup
+
+| Cache | Component unmount | Object removal | Scene load |
+|-------|-------------------|----------------|-----------|
+| poseCache | SceneLevel3D.jsx:1101–1154 (NÃO limpa) | n/a (per-frame) | n/a |
+| sortedClipsCache | SceneLevel3D.jsx:1101–1154 (NÃO limpa) | store removeObject (NÃO limpa) | store loadScene (NÃO limpa) |
+| paintTextures | SceneLevel3D.jsx:1101–1154 (NÃO limpa) | store removeObject (NÃO limpa) | store loadScene (NÃO limpa) |
+
+================================================================================
+## BUG 8 — Segurança marketplace
+================================================================================
+
+### 8.1 — URL Neon hardcoded (credentials expostas)
+
+**Localizações:**
+
+1. **`/home/z/my-project/api/marketplace/db.js` linhas 11–12** (server-side, fallback):
+   ```js
+   const connectionString = process.env.NEON_DATABASE_URL ||
+     'postgresql://neondb_owner:npg_Yr7nld2jTpSW@ep-fragrant-pond-ayedmxhc-pooler.c-5.us-east-2.aws.neon.tech/neondb'
+   ```
+   O `||` fallback ativa quando a env var não está definida (desenvolvimento local, ou
+   deploy esquecido). Em produção Vercel, se a env var faltar, o processo arranca com estas
+   credenciais hardcoded — e qualquer pessoa com acesso ao repo tem owner da DB.
+
+2. **`/home/z/my-project/src/utils/neonConfig.js` linhas 4 e 20** (CLIENT-SIDE, sem fallback):
+   - Linha 4: comentário no topo do ficheiro
+   - Linha 20: `connectionString: 'postgresql://...npg_Yr7nld2jTpSW@...'`
+   Este ficheiro é importado por `src/components/panels/MarketplacePanel.jsx:17`, ou seja,
+   entra no bundle client-side (Vite). Qualquer utilizador que abra o DevTools no browser vê
+   as credenciais owner da DB de produção. É o bug mais grave do relatório.
+
+Confirmado via grep: as credenciais `npg_Yr7nld2jTpSW` aparecem em 4 linhas (db.js:6,12;
+neonConfig.js:4,20) e a env var `NEON_DATABASE_URL` em db.js:6,11 + health.js:17 +
+MarketplacePanel.jsx:370.
+
+**Suggested fix:**
+- Em `db.js`: REMOVER o fallback hardcoded — se `process.env.NEON_DATABASE_URL` falta, lançar
+  erro em startup (`throw new Error('NEON_DATABASE_URL not set')`) em vez de arrancar com
+  credenciais hardcoded.
+- Em `neonConfig.js`: REMOVER o campo `connectionString` completamente. O cliente nunca deve
+  conhecer a connection string — só `/api/marketplace` (já está em `apiBaseUrl`). Apagar
+  também o comentário da linha 4.
+- Rotacionar a password `npg_Yr7nld2jTpSW` no painel Neon (já está comprometida no git history).
+
+### 8.2 — Password hasheada com sha256 puro (sem salt, sem KDF)
+
+**Localizações:**
+
+1. **`/home/z/my-project/api/marketplace/auth/register.js` linha 23**:
+   ```js
+   const passwordHash = crypto.createHash('sha256').update(password).digest('hex')
+   ```
+
+2. **`/home/z/my-project/api/marketplace/auth/login.js` linha 22**:
+   ```js
+   const passwordHash = crypto.createHash('sha256').update(password).digest('hex')
+   ```
+
+**Root cause:**
+sha256 é uma função de hash criptográfica, NÃO uma função de derivação de chave (KDF). É
+determinística (sem salt), rápida (GPU faz bilihões/s), e sem factor de trabalho. Implicações:
+- Rainbow tables: o hash de "password123" é o mesmo em todas as DBs → lookup instantâneo.
+- Sem salt: dois utilizadores com a mesma password têm o mesmo hash → leak de padrões.
+- Sem stretching: brute force offline é trivial se a DB vazar.
+
+O próprio código tem comentário "em produção: bcrypt/argon2" (register.js:22) — confirma que
+o autor sabia.
+
+**Suggested fix:**
+Substituir por `bcrypt` (npm install bcrypt) ou `argon2` (npm install argargon2):
+```js
+const bcrypt = require('bcrypt')
+const passwordHash = await bcrypt.hash(password, 12) // register
+const ok = await bcrypt.compare(password, row.password_hash) // login
+```
+Migrar hashes existentes: no próximo login de cada utilizador, se `password_hash` tiver 64
+chars hex (sha256), re-hashear com bcrypt e gravar. Para utilizadores inativos, forçar reset
+de password.
+
+### 8.3 — innerHTML usage em gameRuntime.js
+
+**Ficheiro:** `/home/z/my-project/src/utils/game/gameRuntime.js`
+
+Grep por `\.innerHTML\s*=` retorna 2 chamadas reais + 3 comentários:
+
+1. **Linha 229** — `document.getElementById('splash').innerHTML = '<div style="color:#f85149">Sem cenas</div>'`
+   String literal estática, sem interpolação de input externo. **Seguro** (mas poderia usar
+   `textContent` para style consistency).
+
+2. **Linha 553** — `overlay.innerHTML = ''`
+   Limpeza. **Seguro.**
+
+3. **Linhas 567, 569, 595** — comentários "Post-Audit 4.0 — A3/S1" documentando que innerHTML
+   FOI substituído por `createElement + appendChild + setAttribute` para Checkbox, Slider e
+   Image (linhas 571–602). **Já corrigido.**
+
+Conclusão: o bug descrito ("3 innerHTML calls") reflete um estado ANTERIOR do código. O
+Audit 4.0 já aplicou fixes (DOM API segura). NÃO há innerHTML com input do utilizador.
+
+**Sub-bug (não coberto pelo Audit 4.0) — `style.cssText` com concatenação:**
+
+**Ficheiro:** `/home/z/my-project/src/utils/game/gameRuntime.js`
+**Linhas:** 559
+
+```js
+dom.style.cssText = '...;left:' + (el.position && el.position[0] || 50) + '%;...;background:'
+  + (el.color || 'transparent') + ';color:' + (el.textColor || '#e6edf3') + ';...;border:'
+  + (el.borderWidth || 0) + 'px solid ' + (el.borderColor || 'transparent') + ';...'
+```
+
+`el.color`, `el.textColor`, `el.borderColor`, `el.fontSize`, `el.borderRadius`, `el.padding`,
+`el.opacity` são concatenados diretamente em `cssText`. Em jogos exportados (.flirengine), estes
+vêm do `window.__GAME_DATA__.uiScreens[].elements[]` — controlados pelo autor do jogo. Não é
+XSS (cssText não executa JS), mas permite CSS injection: `el.color = 'red; } body { background:
+url(https://evil.com/track.png)'` exfiltra dados via CSS `url()`, ou quebra o layout. Baixa
+gravidade (autor controla o próprio jogo), mas se o marketplace permitir partilhar jogos, um
+jogo malicioso poderia afectar a página de preview.
+
+**Suggested fix:**
+Sanitizar valores antes de concatenar em cssText — ou usar `dom.style.background = el.color`
+etc. (API style property, que escapa automaticamente). Alternativa: whitelist de padrões
+(`/^#[0-9a-f]{3,8}$/i` para cores, `/^\d+(\.\d+)?(px|%)?$/` para tamanhos).
+
+### 8.4 — neonConfig.js existe (confirmado)
+
+**Ficheiro:** `/home/z/my-project/src/utils/neonConfig.js` (164 linhas, 6530 bytes)
+
+Conteúdo: `NEON_CONFIG` (com a connection string hardcoded, linha 20), `NEON_SCHEMA` (SQL), e
+`marketplaceAPI` (stubs de fetch para `/api/marketplace/*`). Importado por
+`src/components/panels/MarketplacePanel.jsx:17`. Como está no `src/`, é bundlado para o cliente.
+
+================================================================================
+## RESUMO EXECUTIVO (top prioridades)
+
+| Bug | Severidade | Ficheiro:Linha | Root cause |
+|-----|-----------|---------------|------------|
+| 5.1 | P0 | gameRuntime.js:88-113 | `cl` fora de scope no `if`; ReferenceError engolido |
+| 5.2 | P0 | gameRuntime.js:115-123 | `else`/`else if` nunca implementados |
+| 5.3 | P0 | gameRuntime.js:147 | `wait()` só faz `dbg()` — sem `_waitUntil` |
+| 5.* | P0 | gameRuntime.js:18-210 | Divergência massiva editor vs runtime (worklog l.2105) |
+| 6.1 | P0 | physicsSystem.js:287 | `movePersonal` rejeita NpcObject |
+| 6.2 | P0 | npcAI.js:30 | `npcPos` é posição inicial estática |
+| 6.3 | P1 | npcAI.js:62-88 | Sem A* (linha reta, atravessa paredes) |
+| 7.1 | P1 | sharedAnimationCache.js:24,151 | `poseCache` não limpo fora de game mode; `sortedClipsCache` nunca limpo |
+| 7.2 | P0 | texturePaint.js:125 | `disposePaintTextures` definido mas NUNCA chamado |
+| 8.1 | P0 | neonConfig.js:20 + db.js:12 | URL Neon hardcoded no bundle client-side |
+| 8.2 | P0 | register.js:23 + login.js:22 | sha256 puro sem salt/KDF |
+| 8.3 | — | gameRuntime.js:229,553,559 | innerHTML já corrigido (Audit 4.0); `cssText` concat em l.559 é sub-bug |
+
+### Próximos passos recomendados (não executados — só investigação)
+
+1. **BUG 5**: Portar `parseFlirCode` + `createFlirCodeRuntime` de `flircode.js` para
+   `gameRuntime.js` (ou importar `flircode.js` diretamente no bundle exportado via esbuild —
+   worklog l.2105 sugere unificação).
+2. **BUG 6**: Patch `physicsSystem.js:287` (1 linha); adicionar `getNpcPos` em npcAI.js;
+   planear A* simples sobre grelha 2D de StaticObject AABBs.
+3. **BUG 7**: Adicionar `clearPoseCache()`/`clearClipCache()` no unmount de SceneLevel3D;
+   chamar `disposePaintTextures(objectId)` no store action de remoção.
+4. **BUG 8**: Apagar fallback em db.js (e mandar o processo rebentar sem env var); remover
+   `connectionString` de neonConfig.js; trocar sha256 por bcrypt com salt cost 12; rotacionar
+   password Neon comprometida.
+
+Build/Lint status: N/A (investigação only, sem alterações de código).
+
+---
+Task ID: BUG234-INVEST
+Agent: sub-agent (general-purpose)
+Task: Investigar BUGs 2, 3, 4 — Pincéis Escultura 3D + Abas Texturização/Construtores
+
+Work Log:
+- Lido worklog.md para contexto; verificado estado actual do projeto
+- BUG 2: Inspecionado TerrainSculpt3D.jsx (329 linhas), ModifierBrush3D.jsx (182 linhas),
+  SceneLevel3D.jsx (TerrainSculptBridge linhas 156-201, render em linha 1754),
+  ConectRenderer.jsx TerrainMesh (linhas 280-364), taxonomy.js (TerrainObject defaults linhas 622-644),
+  raycastSystem.js (intersectMesh linhas 264-291), Scene3D.jsx SculptRaycaster (linhas 60-114)
+- BUG 3: Inspecionado MainMenu.jsx (159 linhas), TexturingPanel.jsx (existe, 733+ linhas),
+  App.jsx (254 linhas — SEM TexturingPanel), store/useStore.js (SEM openTexturingPanel/texturingPanelOpen),
+  VerticalRail.jsx, MoreToolsGrid.jsx
+- BUG 4: Inspecionado VerticalRail.jsx (linha 36 + 84-87), MoreToolsGrid.jsx (linha 52 + 233-237),
+  App.jsx (linha 230: BuildersPanel sem `open` prop), store/useStore.js (openBuildersPanel existe ✓),
+  BuildersPanel.jsx (linha 139: usa `${open ? 'open' : ''}`), comparado com painéis que funcionam
+  (MarketplacePanel, InstancingPanel, TerrainEditor, ConectsWindow, AnimationStudio, ShaderEditor —
+  todos usam `${onClose ? 'open' : ''}`), CSS global.css linhas 639-664 (.panel.left = translateX(-100%),
+  .panel.left.open = translateX(0))
+
+==================== FINDINGS ====================
+
+## BUG 2: Pincéis de Escultura 3D (TerrainSculpt3D + ModifierBrush3D) não funcionam
+
+### Sub-bug 2A: ModifierBrush3D nunca é montado (Causa raiz)
+- **Ficheiro**: `/home/z/my-project/src/components/3d/ModifierBrush3D.jsx` (todo o ficheiro, 182 linhas)
+- **Causa raiz**: O componente `ModifierBrush3D` NÃO é importado nem renderizado em nenhum local da
+  codebase. `grep -r "ModifierBrush3D" src/` mostra apenas a própria definição do ficheiro e a menção
+  em `useRaycastSystem.js` (apenas comentário). SceneLevel3D.jsx importa e monta `TerrainSculpt3D`
+  (via `TerrainSculptBridge`, linha 21 e 1754), mas `ModifierBrush3D` não tem ponto de montagem.
+  Consequentemente, o pincel de Displace 3D nunca recebe eventos pointer e nunca aplica stroke.
+- **Causa secundária (mesmo que fosse montado)**: linhas 42-58 de ModifierBrush3D.jsx — a função
+  `getSelectedMesh()` usa APIs inexistentes: `gl.getRenderTarget()?.scene` e
+  `gl.info?.programs?.[0]?.renderer?.scene` (este último não existe no WebGLRenderer). Só funciona
+  via `window._flirMeshRefs`, que é populado por `GameMode` em SceneLevel3D.jsx (linha 313) — mas só
+  em `appMode === 'scene'`. Em modo modelagem (Viewport/Scene3D), `window._flirMeshRefs` é null e
+  fallback parte silenciosamente.
+- **Fix sugerido (mínimo)**: Importar `ModifierBrush3D` em SceneLevel3D.jsx e montá-lo dentro do
+  `<Canvas>` condicionalmente (`<ModifierBrush3D isActive={mode === 'sculpt' && !!selectedId} />`),
+  e em Scene3D.jsx para cobrir modo modelagem. Substituir `getSelectedMesh()` por
+  `useThree(s => s.scene)` + `scene.getObjectByProperty('userData.objectId', selectedId)` ou usar
+  `meshRefs` passados via props/contexto em vez de `window._flirMeshRefs`.
+
+### Sub-bug 2B: TerrainSculpt3D no-ops quando TerrainObject não tem heightmap explícito
+- **Ficheiro**: `/home/z/my-project/src/components/3d/TerrainSculpt3D.jsx`
+  - Linha 62: `useEffect(() => { hmRef.current = heightmap }, [heightmap])`
+  - Linhas 70-91: `updateGeometry` retorna early se `hmRef.current` for null (linha 73: `if (!hm) return`)
+  - Linhas 138-140: `applyBrush` retorna early se `hmRef.current` for null (linha 140: `if (!hm) return`)
+- **Causa raiz**: `TerrainSculptBridge` (SceneLevel3D.jsx linha 190) passa
+  `heightmap={terrainConect.heightmap ? new Float32Array(terrainConect.heightmap) : null}`. Quando um
+  TerrainObject é criado via drag-and-drop do catálogo de Conects, os defaults (taxonomy.js linhas
+  631-637) incluem apenas `width, depth, segments, heightScale, heightmapSeed` — **NÃO incluem
+  `heightmap`**. O `TerrainMesh` em ConectRenderer.jsx (linhas 291-307) gera heights procedurais
+  (fallback) quando `conect.heightmap` é vazio, mas o `TerrainSculpt3D` recebe `heightmap=null`,
+  pelo que `hmRef.current` fica null e `applyBrush`/`updateGeometry` fazem early-return silenciosamente.
+  O utilizador arrasta sobre o terreno mas nada acontece — sem erro, sem feedback.
+- **Causa secundária**: Linha 76 do TerrainSculpt3D.jsx: `const heightScale = 5` hardcoded. ConectRenderer
+  TerrainMesh usa `conect.heightScale || 5` (linha 288). Se o utilizador ajustar `heightScale` do terreno
+  para valor ≠ 5, a escultura aplica heights com escala errada (heightmap visual fica deslocado).
+- **Fix sugerido (mínimo)**: Em `TerrainSculpt3D`, ao montar com `heightmap` null, gerar um Float32Array
+  zero-inicializado de tamanho `(seg+1)*(seg+1)` (ou ler `positions.getY(i) / heightScale` da geometria
+  atual do mesh) e chamar `onHeightmapChange(newHm)` imediatamente para persistir no conect. Usar
+  `conect.heightScale` em vez de hardcoded `5` (passar como prop ou ler do mesh).
+
+### Notas sobre o pipeline que FUNCIONA:
+- TerrainSculpt3D **é** montado via `TerrainSculptBridge` (SceneLevel3D.jsx linhas 156-201, render em 1754)
+- O raycast usa `RaycastSystem.intersectMesh` (raycastSystem.js linhas 264-291) que faz fallback
+  automático para `THREE.Raycaster.intersectObject` quando BVH não está ativo (terreno é
+  `isStatic:false`, não tem BVH). Raycast funciona.
+- `pos.needsUpdate = true` + `computeVertexNormals()` + `computeBoundingSphere()` estão corretos
+  (linhas 85-88).
+- `terrainSculptActive` é toggled por botão em SceneEditorPanel.jsx (linha 113) e TerrainEditor.jsx
+  (linha 371). Estado no store (useStore.js linhas 1641-1645). Não depende de `mode === 'sculpt'`;
+  usa flag separada `terrainSculptActive`.
+- `OrbitControls` é desativado durante drag via `enabled={!isTerrainSculptDragging}` (linha 1749)
+  + `onDragStateChange` callback (linhas 65-67). Há uma race pequena (OrbitControls captura primeiro
+  pointerdown antes de isTerrainSculptDragging virar true), mas não bloqueia a escultura.
+
+---
+
+## BUG 3: Aba de Texturização não existe/abre
+
+- **Ficheiro**: `/home/z/my-project/src/components/ui/MainMenu.jsx`
+  - Linha 32: `const openTexturingPanel = useStore((s) => s.openTexturingPanel)` — store NÃO define
+    esta action (ver abaixo) → `openTexturingPanel` é `undefined`.
+  - Linhas 118-124: `<button className="mm-item" onClick={handle(openTexturingPanel)}>` —
+    `handle` (linha 35-38) retorna `() => { fn(); if (onClose) onClose() }`. No click, `fn()` é
+    `undefined()` → lança `TypeError: fn is not a function`. React event handlers engolem o erro
+    silenciosamente → "nada acontece".
+- **Ficheiro**: `/home/z/my-project/src/store/useStore.js` — `grep "openTexturingPanel|texturingPanelOpen"`
+  retorna 0 matches. A action e o estado **não existem** no store. Compare-se com outros painéis:
+  `openBuildersPanel` (linha 1486), `openMarketplace`, `openSettingsPanel`, `openPostProcessing` —
+  todos têm `xxxPanelOpen: false` + `openXxxPanel: () => set({ xxxPanelOpen: true })` + `closeXxxPanel`.
+- **Ficheiro**: `/home/z/my-project/src/App.jsx`
+  - Linhas 20-60 (imports): `TexturingPanel` **não é importado**.
+  - Linhas 215-244 (render condicional dos painéis): NÃO existe
+    `{texturingPanelOpen && <TexturingPanel onClose={closeTexturingPanel} />}`.
+- **Ficheiro**: `/home/z/my-project/src/components/panels/TexturingPanel.jsx` — existe (733+ linhas),
+  funcional, usa `<aside className="texturing-panel open">` (linha 233 e 298) com `open` HARDCODED
+  no className. Se fosse montado, seria visível (CSS `.texturing-panel.open { transform: translateX(0) }`
+  em global.css linha 4490). O painel em si está pronto; falta apenas o wiring.
+- **Causa raiz**: A action `openTexturingPanel` e o estado `texturingPanelOpen` não foram adicionados
+  ao store, e `App.jsx` não renderiza o `TexturingPanel`. O botão em `MainMenu.jsx` chama uma função
+  undefined → TypeError silencioso.
+- **Fix sugerido (mínimo)**:
+  1. Em `useStore.js` (perto da linha 1485, junto a `openBuildersPanel`), adicionar:
+     `texturingPanelOpen: false, openTexturingPanel: () => set({ texturingPanelOpen: true }),
+     closeTexturingPanel: () => set({ texturingPanelOpen: false })` (e nas re-entradas de reset/restore
+     em linhas ~1626, ~1743 se aplicável).
+  2. Em `App.jsx`: importar `TexturingPanel` (linha 47附近); ler
+     `const texturingPanelOpen = useStore((s) => s.texturingPanelOpen)` e
+     `const closeTexturingPanel = useStore((s) => s.closeTexturingPanel)`; renderizar
+     `{texturingPanelOpen && <TexturingPanel onClose={closeTexturingPanel} />}` entre linhas 229-233.
+
+---
+
+## BUG 4: Aba de Construtores não abre
+
+- **Ficheiro**: `/home/z/my-project/src/components/panels/BuildersPanel.jsx`
+  - Linha 139: `<aside className={`panel left ${open ? 'open' : ''}`}>` — usa a prop `open` (não `onClose`)
+    para decidir se adiciona a class CSS `open`.
+- **Ficheiro**: `/home/z/my-project/src/App.jsx`
+  - Linha 230: `{buildersPanelOpen && <BuildersPanel onClose={closeBuildersPanel} />}` — passa apenas
+    `onClose`, **NÃO** passa `open`. Em todos os outros painéis (MarketplacePanel, InstancingPanel,
+    TerrainEditor, ConectsWindow, AnimationStudio, ShaderEditor) o padrão é
+    `<aside className={`xxx-panel ${onClose ? 'open' : ''}`}>` (verificado por grep).
+- **Ficheiro**: `/home/z/my-project/src/styles/global.css`
+  - Linhas 639-656: `.panel.left { transform: translateX(-100%); }` (escondido off-screen por default),
+    `.panel.left.open { transform: translateX(0); }` (visível).
+- **Causa raiz**: Como `App.jsx` não passa `open`, BuildersPanel recebe `open = undefined` (falsy) →
+  className final é `"panel left"` (sem `.open`) → CSS aplica `transform: translateX(-100%)` →
+  painel está montado no DOM mas **totalmente transladado para fora do viewport** (invisível). O
+  utilizador clica em "Construtores", `buildersPanelOpen` vira true, o painel monta, mas permanece
+  invisível. O backdrop (linha 138: `{open && <div className="drawer-backdrop show" ... />}`) também
+  não renderiza (mesma condição falsa).
+- Confirmação de que o resto do pipeline funciona:
+  - Store (useStore.js linhas 1485-1488): `buildersPanelOpen`, `openBuildersPanel`, `closeBuildersPanel`
+    todos definidos ✓
+  - App.jsx linha 230 renderiza condicionalmente ✓ (apenas falta o prop `open`/class CSS)
+  - VerticalRail.jsx linha 36 (button "Construtores") + linhas 84-87
+    (`case 'openBuilders': useStore.getState().openBuildersPanel()`) ✓
+  - MoreToolsGrid.jsx linha 52 (importa `openBuildersPanel`) + linhas 233-237 (button chama
+    `handle(() => openBuildersPanel())`) ✓
+- **Fix sugerido (mínimo)**: Em `BuildersPanel.jsx` linha 139, trocar `${open ? 'open' : ''}` por
+  `${onClose ? 'open' : ''}` (mesmo padrão dos outros painéis que funcionam). Opcionalmente linha 138
+  mudar `{open && <div className="drawer-backdrop show" ... />}` para `{onClose && <div ... />}` para
+  mostrar o backdrop. Alternativa equivalente: em `App.jsx` linha 230 passar `open={buildersPanelOpen}`
+  — mas isso diverge do padrão adoptado pelos outros painéis.
+
+==================== RESUMO EXECUTIVO ====================
+
+| Bug | Componente | Causa | Fix (1 linha) |
+|-----|-----------|-------|--------------|
+| 2A | ModifierBrush3D.jsx | Nunca importado/montado | Importar em SceneLevel3D/Scene3D + montar condicionalmente; refactor getSelectedMesh |
+| 2B | TerrainSculpt3D.jsx L70/140 | hmRef.current=null quando conect.heightmap undefined | Inicializar heightmap zero ao montar se null; usar conect.heightScale |
+| 3  | MainMenu.jsx L32 + store + App.jsx | openTexturingPanel não existe no store; TexturingPanel não renderizado | Adicionar action+state ao store; importar e renderizar em App.jsx |
+| 4  | BuildersPanel.jsx L139 | Usa `open` em vez de `onClose` para class CSS | Trocar `${open ? 'open' : ''}` → `${onClose ? 'open' : ''}` |
+
+Build/Lint status: N/A (investigação only, sem alterações de código).
+
+---
+Task ID: BUG5-FIX
+Agent: sub-agent (general-purpose)
+Task: Corrigir FlirCode exportado — else e wait() não funcionam no gameRuntime.js
+
+Root cause (do BUG5678-INVEST):
+- Sub-bug 5.1: `execS` (linha 84) referia `cl` — variável local de `parseFlirCode` (linha 20),
+  fora do closure de `execS`. Lança `ReferenceError` engolido pelo try/catch em `execStmts`
+  → corpo do `if` nunca executava (no-op).
+- Sub-bug 5.2: branches `else if`/`else` (linhas 115-123) tinham comentário "ignorar aqui"
+  sem qualquer estado partilhado. Sem flag `_ifChainMatched` como o editor (flircode.js:544-565).
+- Sub-bug 5.3: `case 'wait'` (linha 147) só fazia `dbg()`. Sem `_waitUntil`, sem defer.
+
+Ficheiros modificados:
+- `/home/z/my-project/src/utils/game/gameRuntime.js` (apenas este — fix auto-contido sem
+  importar flircode.js que depende de APIs do browser não presentes no export HTML)
+
+Fix aplicado:
+1. **Parser reescrito como AST**: `parseBlock` agora devolve `{statements, nextIdx}` em vez
+   de `{s, ni}` com arrays de `{t, l}`. Adicionadas `parseStatement` (emite objetos tipados
+   `{type:'if'|'elseif'|'else'|'var'|'assign'|'call'|'unknown', ...}`) e `consumeBlock`
+   (procura `begincode` na mesma linha ou na seguinte, recursive parseBlock para o body).
+   Bodies são pré-resolvidos — não há re-scan de `cl` em runtime.
+2. **`execS` reescrito** para dispatch por `s.type`:
+   - `if`: `evalCond(s.condition)` → se true, `params._ifChainMatched = true` + execStmts(body).
+     Se false, `_ifChainMatched = false`.
+   - `elseif`: executa só se `!_ifChainMatched && evalCond`. Marca true se executar.
+   - `else`: executa só se `!_ifChainMatched`. Marca true.
+   - `call`: evalVal dos args e execBuiltin.
+   Porta exacta do padrão do editor (flircode.js:534-567).
+3. **`wait()` implementado**:
+   - `case 'wait'`: `gc._waitUntil = Date.now() + (args[0]||0) * 1000` (igual flircode.js:680).
+   - `execStmts` verifica no início de cada iteração: se `_waitUntil > now`, faz
+     `setTimeout(() => { _waitUntil = 0; execStmts(remaining, params) }, delay)` e retorna.
+     Pattern idêntico a flircode.js:498-516.
+   - **Animate loop** (linha 682-685): antes de disparar `tick`, verifica
+     `if (!gc._waitUntil || Date.now() >= gc._waitUntil)` — skipa ticks durante wait
+     para evitar re-entrada no mesmo wait e acúmulo de setTimeouts.
+4. **`log` builtin adicionado** como alias de `print` (linha 187) para suportar a semântica
+   do smoke test do task description ("log yes", "log else", "log before/after").
+
+Build status: ✓ `npm run build` completo em 1.63s, 0 erros (apenas warnings pré-existentes
+de dynamic imports three.js / gainmap-js / db.js / multiplayerManager — não relacionados).
+
+Smoke test executado (6 cenários, todos PASS):
+- if (1 == 1) print("yes") → log "yes" ✓
+- if (1 == 2) ... else print("else") → log "else" ✓
+- if/elseif/else chain (1==2 → 2==2 → default) → log "second" apenas ✓
+- if true + else → else NÃO executa ✓
+- print("before"); wait(0.3); print("after") → log "before" imediato, "after" após 300ms ✓
+- log("...") alias funciona ✓
+
+Notas:
+- Divergência editor vs runtime ainda existe para switch/case, repeat_n/repeat_inc/repeat_dec,
+  classes, aritmética (`5+3`), concatenação de strings. Não abordados neste fix (fora do
+  scope do BUG5). Mantidas as funções `evalCond`/`evalVal` existentes — sem aritmética.
+- O `gc._waitUntil` é partilhado entre todos os eventos do mesmo runtime (beginPlay + tick).
+  Se um wait em beginPlay estiver ativo, ticks são skipados (desejável). Limitação: se
+  onTick contiver wait, ele re-escreve _waitUntil a cada invocação — aceitável para runtime
+  simplificado, igual ao editor.
+
+---
+Task ID: BUG6-FIX
+Agent: sub-agent (general-purpose)
+Task: Implementar NPC AI pathfinding A* + patrulha/perseguição funcional
+
+Root cause (do BUG5678-INVEST secção 6.1–6.3):
+- 6.1: `movePersonal` (physicsSystem.js:287) rejeitava NpcObject (`entry.type !== 'PersonalObject'`
+  → early return silencioso). NPC AI chamava `physicsMove(id, dir, speed)` → `movePersonal` →
+  no-op. NPCs paralisados. Mesmo bug em `jumpPersonal` e `updatePersonalState`.
+- 6.2: `npcPos = npc.position` (npcAI.js:30) lia a posição inicial estática do Conect config;
+  o body da física move-se mas `conect.position` nunca é actualizado. Cálculo de distância
+  ao jogador e direcção de movimento partiam sempre da origem.
+- 6.3: Chase/patrol/flee moviam-se em linha recta — sem A*, sem grid, sem steering.
+  NPCs atravessavam paredes e StaticObjects.
+- Bonus: `entry._collideHandler = collideHandler` (physicsSystem.js:259) referia-se a uma
+  variável `entry` inexistente neste scope → `ReferenceError` em strict mode (ES modules).
+  Não impediu `world.addBody` (linha 214, antes do throw), mas lançava erro em cada
+  `addConect` e impossibilitava o cleanup do collide handler em `dispose`.
+
+Ficheiros criados:
+- `/home/z/my-project/src/utils/pathfinding.js` (263 linhas)
+  - Classe `Pathfinder` com A* (8 direcções, heurística octile, min-heap binário
+    para fronteira aberta — O(log n) push/pop em vez de O(n) scan do Map).
+  - `addObstacle(minX, minZ, maxX, maxZ)` marca células cobertas pela AABB.
+  - `findPath(startX, startZ, goalX, goalZ, maxIterations=1000)` → `[{x,z}, ...] | null`.
+    Proíbe cortes de quina em diagonais (ambas as células laterais têm de estar livres).
+    Fallback: se start/goal caem em obstáculo, procura célula livre mais próxima (até r=6).
+  - `simplifyPath(path)` remove waypoints colineares (cross product zero).
+  - Helpers exportados: `worldToCell(x, z, cellSize)`, `cellToWorld(cx, cz, cellSize)`.
+
+Ficheiros modificados:
+- `/home/z/my-project/src/utils/conects/physicsSystem.js`
+  - Linha 259: `entry._collideHandler = collideHandler` (ReferenceError) →
+    `const createdEntry = bodies.get(conect.instanceId); if (createdEntry) createdEntry._collideHandler = collideHandler`
+  - Adicionado helper `isCharacterType(type)` (PersonalObject | NpcObject).
+  - `movePersonal`, `jumpPersonal`, `updatePersonalState`: guard passa a
+    `!isCharacterType(entry.type)` → aceita ambos os tipos. PersonalObject continua
+    a funcionar (retrocompatibilidade 100%).
+  - Adicionado `moveNpc(instanceId, direction, speed)` — alias explícito para NPCs
+    (aceita apenas NpcObject). Exportado no return object.
+  - `update()`: deteção de grounded por raycast passa a cobrir NpcObject também
+    (para suporte futuro a jumps de NPCs).
+- `/home/z/my-project/src/utils/conects/npcAI.js` (reescrito, 240 linhas)
+  - Helper `getNpcPos()` (callback) substitui `npc.position` — lê `conectMeshRefs.current.get(id).position`,
+    que é sincronizado com o body da física a cada frame via `mesh.position.copy(entry.body.position)`
+    (SceneLevel3D.jsx:1223). Fallback para `npc.position` se helper não existir.
+  - Helper `pathfinder` aceita Pathfinder directo OU ref-like `{ current }` para lazy binding
+    (o Pathfinder é populado em `queueMicrotask` APÓS o AI ser criado — AI precisa de
+    ler `.current` a cada frame).
+  - Patrol: A* entre posição actual do NPC e próximo waypoint do PathObject. Recalcula
+    quando o path termina ou chega ao fim. Fallback para linha recta se findPath falhar.
+  - Chase: A* para o jogador, refrescado a cada `PATH_REFRESH_FRAMES=30` (~0.5s a 60fps)
+    ou quando não há path. Fallback para linha recta se sem rota.
+  - Flee: linha recta oposta ao jogador (não usa A* — fugir não é navegação para um goal).
+  - Waypoints seguidos sequencialmente com arrive-tolerance de 0.35m.
+  - Eventos `OnSeePlayer` / `OnLoseSight` mantidos; reset de path ao ganhar/perder sight.
+- `/home/z/my-project/src/components/3d/SceneLevel3D.jsx`
+  - Import de `Pathfinder`.
+  - Adicionado `pathfinderRef = useRef(null)` em `GameMode`.
+  - No `queueMicrotask` que regista conects com física: itera `physicsRef.current.bodies`,
+    filtra `entry.type === 'StaticObject' || 'StopObject'`, lê `body.shapes[0].halfExtents`
+    (CANNON.Box) ou `.radius` (Sphere), e marca AABB top-down no Pathfinder com margem 0.1m
+    (evita "froxar" contra paredes). Rotações ignoradas (AABB axis-aligned — aproximação).
+    `pathfinderRef.current = pf` no fim.
+  - `createNPCAI(conect, {...})` recebe:
+      - `getNpcPos: () => { const nm = conectMeshRefs.current.get(conect.instanceId); return nm ? [nm.position.x, nm.position.y, nm.position.z] : null }`
+      - `physicsMove: (id, dir, speed) => physicsRef.current?.moveNpc(id, dir, speed)` (era `movePersonal`)
+      - `pathfinder: pathfinderRef` (passa o ref, não `.current` — AI lê `.current` lazy)
+  - Cleanup no unmount: `pathfinderRef.current = null` (entre sessões Play, cenas diferentes têm obstáculos diferentes).
+
+Como o AI agora funciona:
+1. **idle**: NPC parado (sem mudança).
+2. **patrol**: NPC calcula A* do ponto actual até ao próximo waypoint do PathObject,
+   segue os waypoints sequencialmente. Ao chegar, avança `patrolIndex` e recalcula para
+   o próximo. Contorna paredes e StaticObjects em vez de atravessá-los.
+3. **chase**: Quando jogador entra no `detectionRadius`, NPC dispara `OnSeePlayer` e
+   começa a perseguir via A*. Rota é refrescada a cada 30 frames (~0.5s) para acompanhar
+   jogador em movimento. Quando jogador sai do `loseSightRadius`, dispara `OnLoseSight`,
+   reseta path e volta a comportamento base (idle/patrol conforme `npc.behavior`).
+4. **flee**: NPC foge em linha recta oposta ao jogador (sem A* — fugir não é navegação
+   para um goal; A* seria contraproducente).
+
+Build status: ✓ `npm run build` completo em 1.64s, 0 erros. Apenas warnings pré-existentes
+(eval em flircode.js, chunks > 2MB, dynamic imports three.js/gainmap/db.js/multiplayer —
+não relacionados com este fix).
+
+Smoke test Pathfinder (6 cenários, todos PASS):
+- Path trivial sem obstáculos → waypoints start→goal ✓
+- Parede no meio → A* contorna, nenhum waypoint dentro da AABB ✓
+- Goal cercado por 4 paredes → retorna `null` (sem rota) ✓
+- `simplifyPath` remove waypoints colineares (6→3) ✓
+- Helpers `worldToCell` / `cellToWorld` (centro da célula) ✓
+- Start dentro de obstáculo → fallback para célula livre mais próxima ✓
+- Lazy binding: `{ current: null }` → `{ current: Pathfinder }` lido correctamente ✓
+
+`git diff --check`: 0 erros de whitespace.
+
+Limitações conhecidas (não no scope deste fix):
+- Rotações dos StaticObjects são ignoradas (AABB axis-aligned). Aceitável para paredes
+  ortogonais; pode sub-estimar obstáculos rodados 45°. Para precisão total, seria
+  necessário calcular AABB rotacionada ou marcar células via ray-cast.
+- Pathfinder é populated uma única vez no setup da cena. Se um StaticObject for
+  spawnado via FlirScript `spawnObject` durante o Play, o Pathfinder não inclui esse
+  obstáculo. (Solução futura: expor `pathfinderRef.current.addObstacle(...)` no gameContext.)
+- NPC AI só funciona no editor (SceneLevel3D.jsx) — o export HTML (gameRuntime.js)
+  ainda não instancia `createNPCAI` (vide AUDIT-4-004). Bug diferente, não no scope.

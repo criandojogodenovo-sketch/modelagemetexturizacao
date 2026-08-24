@@ -20,8 +20,14 @@ import * as THREE from 'three'
 const poseCache = new Map()
 let currentFrame = 0
 
+// CORREÇÃO BUG7: Limite de tamanho para poseCache (LRU eviction)
+// Sem limite, em editor mode o cache cresce indefinidamente (cada time.toFixed(4) é uma key nova)
+const POSE_CACHE_MAX = 500 // ~500 poses únicas, suficiente para 30fps em 16s de animação
+const POSE_CACHE_KEYS = [] // lista de keys por ordem de inserção (LRU)
+
 // Pré-ordenar keyframes por tempo e boneId (uma vez por clip)
 const sortedClipsCache = new Map()
+const SORTED_CLIPS_MAX = 50 // limite de clips no cache
 
 function getSortedKeyframes(clipName, keyframes) {
   if (sortedClipsCache.has(clipName)) {
@@ -35,6 +41,11 @@ function getSortedKeyframes(clipName, keyframes) {
   }
   for (const [boneId, kfs] of byBone) {
     kfs.sort((a, b) => a.time - b.time)
+  }
+  // CORREÇÃO BUG7: Limite de tamanho para sortedClipsCache (LRU)
+  if (sortedClipsCache.size >= SORTED_CLIPS_MAX) {
+    const firstKey = sortedClipsCache.keys().next().value
+    if (firstKey !== undefined) sortedClipsCache.delete(firstKey)
   }
   sortedClipsCache.set(clipName, byBone)
   return byBone
@@ -117,7 +128,13 @@ export function getCachedPose(clipName, keyframes, time) {
     })
   }
 
+  // CORREÇÃO BUG7: LRU eviction — se cache excede o limite, remover entrada mais antiga
+  if (poseCache.size >= POSE_CACHE_MAX) {
+    const oldestKey = POSE_CACHE_KEYS.shift()
+    if (oldestKey !== undefined) poseCache.delete(oldestKey)
+  }
   poseCache.set(cacheKey, pose)
+  POSE_CACHE_KEYS.push(cacheKey)
   return pose
 }
 
@@ -150,6 +167,7 @@ export function applyPose(pose, bones) {
  */
 export function clearPoseCache() {
   poseCache.clear()
+  POSE_CACHE_KEYS.length = 0
 }
 
 /**

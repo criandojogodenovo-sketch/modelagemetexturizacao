@@ -135,8 +135,8 @@ export default function BuildersPanel({ open, onClose }) {
 
   return (
     <>
-      {open && <div className="drawer-backdrop show" onClick={onClose} />}
-      <aside className={`panel left ${open ? 'open' : ''}`}>
+      {onClose && <div className="drawer-backdrop show" onClick={onClose} />}
+      <aside className={`panel left ${onClose ? 'open' : ''}`}>
         <div className="panel-header">
           <span>Construtores</span>
           {onClose && (

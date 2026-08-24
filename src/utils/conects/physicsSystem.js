@@ -256,7 +256,9 @@ export function createPhysicsSystem(options = {}) {
     }
     body.addEventListener('collide', collideHandler)
     // Guardar referência para cleanup no dispose
-    entry._collideHandler = collideHandler
+    // BUG6-FIX: ler a entry acabada de criar (referência directa em vez de variável inexistente)
+    const createdEntry = bodies.get(conect.instanceId)
+    if (createdEntry) createdEntry._collideHandler = collideHandler
 
     return body
   }
@@ -282,19 +284,38 @@ export function createPhysicsSystem(options = {}) {
     entry.body.applyForce(new CANNON.Vec3(force[0], force[1], force[2]), entry.body.position)
   }
 
+  // Helper interno: tipos de corpo "character" (PersonalObject + NpcObject).
+  // BUG6-FIX: NPC AI usa o mesmo pipeline de movimento que o jogador — o guard
+  // anterior (`entry.type !== 'PersonalObject'`) fazia movePersonal retornar early
+  // silenciosamente para todos os NpcObject, paralisando-os no mundo.
+  function isCharacterType(type) {
+    return type === 'PersonalObject' || type === 'NpcObject'
+  }
+
   function movePersonal(instanceId, direction, speed) {
     const entry = bodies.get(instanceId)
-    if (!entry || entry.type !== 'PersonalObject') return
+    // BUG6-FIX: aceitar NpcObject em paralelo com PersonalObject
+    if (!entry || !isCharacterType(entry.type)) return
     // Aplicar velocidade horizontal diretamente
-    const vel = entry.body.velocity
     entry.body.velocity.x = direction[0] * speed
     entry.body.velocity.z = direction[2] * speed
     // Manter Y (gravidade/salto)
   }
 
+  // BUG6-FIX: alias explícito para NPCs — semântica idêntica a movePersonal,
+  // mas aceita apenas NpcObject. Permite chamar moveNpc(id, dir, speed) sem
+  // ambiguidade (mantém movePersonal para retrocompatibilidade com o jogador).
+  function moveNpc(instanceId, direction, speed) {
+    const entry = bodies.get(instanceId)
+    if (!entry || entry.type !== 'NpcObject') return
+    entry.body.velocity.x = direction[0] * speed
+    entry.body.velocity.z = direction[2] * speed
+  }
+
   function jumpPersonal(instanceId) {
     const entry = bodies.get(instanceId)
-    if (!entry || entry.type !== 'PersonalObject') return
+    // BUG6-FIX: aceitar NpcObject
+    if (!entry || !isCharacterType(entry.type)) return
     // FASE 9: Coyote time + salto duplo configurável
     const coyoteTime = entry.conect.coyoteTime ?? 0.15
     const maxJumps = entry.conect.maxJumps ?? 1
@@ -319,7 +340,8 @@ export function createPhysicsSystem(options = {}) {
   // FASE 9: Atualizar coyote timer — chamado a cada frame
   function updatePersonalState(instanceId, deltaTime) {
     const entry = bodies.get(instanceId)
-    if (!entry || entry.type !== 'PersonalObject') return
+    // BUG6-FIX: aceitar NpcObject
+    if (!entry || !isCharacterType(entry.type)) return
     if (entry._coyoteTimer === undefined) entry._coyoteTimer = 0
     if (entry._jumpsUsed === undefined) entry._jumpsUsed = 0
     // Reset jumps quando toca o chão
@@ -354,8 +376,9 @@ export function createPhysicsSystem(options = {}) {
         SpatialPartitionSystem.update(instanceId, body.position.x, body.position.y, body.position.z)
       }
 
-      // Detetar "grounded" para PersonalObject (raycast para baixo)
-      if (type === 'PersonalObject') {
+      // Detetar "grounded" para PersonalObject ou NpcObject (raycast para baixo)
+      // BUG6-FIX: NpcObject também precisa de detetar chão para futuras ações de salto
+      if (type === 'PersonalObject' || type === 'NpcObject') {
         // Reutilizar objectos pré-alocados (evita 3 allocations por frame)
         _rayFrom.set(body.position.x, body.position.y, body.position.z)
         _rayTo.set(body.position.x, body.position.y - 1.1, body.position.z)
@@ -474,6 +497,7 @@ export function createPhysicsSystem(options = {}) {
     setGravity,
     applyForce,
     movePersonal,
+    moveNpc,
     jumpPersonal,
     updatePersonalState,
     addJoint,

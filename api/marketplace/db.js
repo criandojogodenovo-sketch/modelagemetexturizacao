@@ -3,17 +3,22 @@
  *
  * Usado por todas as serverless functions do marketplace.
  *
- * A connection string vem da env var NEON_DATABASE_URL (configurada na Vercel).
- * Fallback para hardcoded (desenvolvimento local) apenas se a env var não existir.
+ * CORREÇÃO BUG8: A connection string vem EXCLUSIVAMENTE da env var
+ * NEON_DATABASE_URL. NÃO há fallback hardcoded — se a env var não existir,
+ * as funções do marketplace devolvem erro 500 com mensagem clara.
+ * Isto evita exposição de credenciais no código-fonte.
  */
 const { Pool } = require('pg')
 
-const connectionString = process.env.NEON_DATABASE_URL ||
-  'postgresql://neondb_owner:npg_Yr7nld2jTpSW@ep-fragrant-pond-ayedmxhc-pooler.c-5.us-east-2.aws.neon.tech/neondb'
+const connectionString = process.env.NEON_DATABASE_URL
+
+if (!connectionString) {
+  console.error('[Neon] ERRO: NEON_DATABASE_URL não definida. Configure a env var na Vercel.')
+}
 
 const pool = new Pool({
-  connectionString,
-  ssl: { rejectUnauthorized: false },
+  connectionString: connectionString || 'postgresql://invalid:invalid@localhost/invalid',
+  ssl: connectionString ? { rejectUnauthorized: false } : false,
   max: 3, // pooler Neon — poucas conexões
 })
 
