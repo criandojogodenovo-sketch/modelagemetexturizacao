@@ -34,7 +34,7 @@
  *  - setAnimationTime(time)
  */
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import * as THREE from 'three'
 import { createSceneObject, defaultMaterial, PRIMITIVES } from '../utils/primitives'
 import { findMaterial } from '../utils/materialLibrary'
@@ -1808,6 +1808,37 @@ export const useStore = create(
         renderSettings: state.renderSettings,
         projectName: state.projectName,
       }),
+      // CORREÇÃO BUG2/CRASH: Storage customizado com error handling.
+      // Quando o projeto excede a quota do localStorage (~5MB), o setItem
+      // lança QuotaExceededError que causa crash da app inteira (página preta).
+      // Com createJSONStorage + storage customizado, capturamos o erro.
+      storage: createJSONStorage(() => ({
+        getItem: (name) => {
+          try {
+            const str = localStorage.getItem(name)
+            return str ? JSON.parse(str) : null
+          } catch (e) {
+            console.warn('[store] localStorage.getItem falhou:', e)
+            return null
+          }
+        },
+        setItem: (name, value) => {
+          try {
+            localStorage.setItem(name, JSON.stringify(value))
+          } catch (e) {
+            // QuotaExceededError — projeto demasiado grande para localStorage
+            console.warn('[store] localStorage cheio, projeto não persistido:', e?.name)
+            // Não re-lançar — a app continua a funcionar em memória
+          }
+        },
+        removeItem: (name) => {
+          try {
+            localStorage.removeItem(name)
+          } catch (e) {
+            console.warn('[store] localStorage.removeItem falhou:', e)
+          }
+        },
+      })),
       version: 4,
     }
   )

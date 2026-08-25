@@ -8,6 +8,8 @@
  *  - Booleanas: operações entre objetos
  *  - Esculpir: pincel de esculpir
  *  - Materiais: biblioteca de materiais predefinidos
+ *  - Rig: editor de esqueleto (skeleton + bones)
+ *  - Peso: pintura de pesos (weight paint)
  *  - Animação: skeleton, keyframes, clips
  *  - Cena: fundo, grelha, luzes
  *
@@ -36,6 +38,7 @@ import {
   IconLibrary,
   IconAnimation,
   IconGroup,
+  IconBone,
 } from '../ui/Icons'
 import Outliner from './Outliner'
 import SceneSettings from './SceneSettings'
@@ -45,6 +48,8 @@ import BooleansPanel from './BooleansPanel'
 import SculptPanel from './SculptPanel'
 import MaterialLibraryPanel from './MaterialLibraryPanel'
 import AnimationPanel from './AnimationPanel'
+import SkeletonEditor from './SkeletonEditor'
+import WeightPaintPanel from './WeightPaintPanel'
 
 const TABS = [
   { id: 'tools', label: 'Ferramentas', icon: IconLayers },
@@ -53,6 +58,8 @@ const TABS = [
   { id: 'boolean', label: 'Booleanas', icon: IconBoolean },
   { id: 'sculpt', label: 'Escanpir', icon: IconSculpt },
   { id: 'materials', label: 'Materiais', icon: IconLibrary },
+  { id: 'rig', label: 'Rig', icon: IconBone },
+  { id: 'weight', label: 'Peso', icon: IconSculpt },
   { id: 'animation', label: 'Animação', icon: IconAnimation },
   { id: 'scene', label: 'Cena', icon: IconSettings },
 ]
@@ -230,6 +237,8 @@ export default function LeftPanel({ open, onClose }) {
           {activeTab === 'boolean' && <BooleansPanel />}
           {activeTab === 'sculpt' && <SculptPanel />}
           {activeTab === 'materials' && <MaterialLibraryPanel />}
+          {activeTab === 'rig' && <SkeletonEditor />}
+          {activeTab === 'weight' && <WeightPaintPanel />}
           {activeTab === 'animation' && <AnimationPanel />}
           {activeTab === 'scene' && <SceneSettings />}
         </div>

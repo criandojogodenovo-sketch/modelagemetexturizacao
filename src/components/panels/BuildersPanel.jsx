@@ -74,9 +74,14 @@ export default function BuildersPanel({ open, onClose }) {
     setHouse({ ...house, style: newStyle, roofColor: defaultRoof })
   }
   const handleHouse = () => {
-    const obj = generateHouse(house)
-    useStore.getState().addImportedObject(obj)
-    toast(`Casa "${obj.name}" criada!`, 'success')
+    try {
+      const obj = generateHouse(house)
+      useStore.getState().addImportedObject(obj)
+      toast(`Casa "${obj.name}" criada!`, 'success')
+    } catch (err) {
+      console.error('[BuildersPanel] handleHouse:', err)
+      toast(`Erro ao gerar casa: ${err.message}`, 'error')
+    }
   }
 
   // === Car ===
@@ -84,9 +89,14 @@ export default function BuildersPanel({ open, onClose }) {
     type: 'sedan', color: '#c0392b', wheelSize: 0.4,
   })
   const handleCar = () => {
-    const obj = generateCar(car)
-    useStore.getState().addImportedObject(obj)
-    toast(`Carro "${obj.name}" criado!`, 'success')
+    try {
+      const obj = generateCar(car)
+      useStore.getState().addImportedObject(obj)
+      toast(`Carro "${obj.name}" criado!`, 'success')
+    } catch (err) {
+      console.error('[BuildersPanel] handleCar:', err)
+      toast(`Erro ao gerar carro: ${err.message}`, 'error')
+    }
   }
 
   // === Tree ===
@@ -94,9 +104,14 @@ export default function BuildersPanel({ open, onClose }) {
     type: 'oak', height: 5, trunkRadius: 0.25, foliageColor: '#3a7d2c',
   })
   const handleTree = () => {
-    const obj = generateTree(tree)
-    useStore.getState().addImportedObject(obj)
-    toast(`Árvore "${obj.name}" criada!`, 'success')
+    try {
+      const obj = generateTree(tree)
+      useStore.getState().addImportedObject(obj)
+      toast(`Árvore "${obj.name}" criada!`, 'success')
+    } catch (err) {
+      console.error('[BuildersPanel] handleTree:', err)
+      toast(`Erro ao gerar árvore: ${err.message}`, 'error')
+    }
   }
 
   // === Furniture ===
@@ -104,9 +119,14 @@ export default function BuildersPanel({ open, onClose }) {
     type: 'chair', color: '#7a4a2b',
   })
   const handleFurniture = () => {
-    const obj = generateFurniture(furniture)
-    useStore.getState().addImportedObject(obj)
-    toast(`Móvel "${obj.name}" criado!`, 'success')
+    try {
+      const obj = generateFurniture(furniture)
+      useStore.getState().addImportedObject(obj)
+      toast(`Móvel "${obj.name}" criado!`, 'success')
+    } catch (err) {
+      console.error('[BuildersPanel] handleFurniture:', err)
+      toast(`Erro ao gerar móvel: ${err.message}`, 'error')
+    }
   }
 
   // === Interior ===
@@ -114,9 +134,14 @@ export default function BuildersPanel({ open, onClose }) {
     roomWidth: 6, roomDepth: 5, roomHeight: 3, style: 'modern',
   })
   const handleInterior = () => {
-    const obj = generateInterior(interior)
-    useStore.getState().addImportedObject(obj)
-    toast(`Interior "${obj.name}" criado!`, 'success')
+    try {
+      const obj = generateInterior(interior)
+      useStore.getState().addImportedObject(obj)
+      toast(`Interior "${obj.name}" criado!`, 'success')
+    } catch (err) {
+      console.error('[BuildersPanel] handleInterior:', err)
+      toast(`Erro ao gerar interior: ${err.message}`, 'error')
+    }
   }
 
   // === City ===
@@ -124,13 +149,18 @@ export default function BuildersPanel({ open, onClose }) {
     blocks: 3, buildingsPerBlock: 4, streetWidth: 6,
   })
   const handleCity = () => {
-    const { objects } = generateCity(city)
-    let i = 0
-    for (const obj of objects) {
-      useStore.getState().addImportedObject(obj)
-      i++
+    try {
+      const { objects } = generateCity(city)
+      let i = 0
+      for (const obj of objects) {
+        useStore.getState().addImportedObject(obj)
+        i++
+      }
+      toast(`Cidade gerada: ${i} objetos (casas + lâmpadas)`, 'success')
+    } catch (err) {
+      console.error('[BuildersPanel] handleCity:', err)
+      toast(`Erro ao gerar cidade: ${err.message}`, 'error')
     }
-    toast(`Cidade gerada: ${i} objetos (casas + lâmpadas)`, 'success')
   }
 
   return (

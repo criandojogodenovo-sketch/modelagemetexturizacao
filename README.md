@@ -6,6 +6,88 @@ Engine web de modelagem, texturização, animação e edição de cenas 3D — f
 
 ---
 
+## 🚨 Correções de Bugs Urgentes (Sessão 11 — Setembro 2026)
+
+### BUG 1 (P0): Terreno fica vertical no Play Mode — CORRIGIDO
+
+**Causa raiz**: `SceneLevel3D.jsx:1277` fazia `mesh.quaternion.copy(entry.body.quaternion)` em todos os meshes sincronizados com a física. Para `TerrainObject`, a rotação `-π/2` já está *baked* na geometria (PlaneGeometry → XZ via `rotateX(-π/2)` em `ConectRenderer.jsx:288`), e o body Cannon aplicava o mesmo `-π/2` no `physicsSystem.js:166`. Resultado: rotação total = `-π` → plano XY (vertical).
+
+Adicionalmente, `gameRuntime.js` (jogos exportados) **não tinha branch para `TerrainObject`** — o terreno era silenciosamente dropped no jogo exportado.
+
+**Solução**:
+- `SceneLevel3D.jsx:1281`: skip `mesh.quaternion.copy()` para `TerrainObject` (posição continua a ser sincronizada)
+- `gameRuntime.js`: adicionado branch completo para `TerrainObject` com `PlaneGeometry` + `rotateX(-π/2)` + heightmap + `MeshStandardMaterial` PBR
+
+### BUG 2 (P0): Página fica preta ao clicar em "Gerar" nos Construtores — CORRIGIDO
+
+**Causa raiz**: O erro não vinha dos builders em si, mas sim de uma cascata:
+1. `BuildersPanel` chama `addImportedObject(obj)` que faz `selectedId = obj.id`
+2. `RightPanel` re-renderiza e mostra `MaterialEditor` para o objeto selecionado
+3. `MaterialEditor.jsx:156` chamava `m.opacity.toFixed(2)` — mas os builders geram materiais **sem** `opacity` → `undefined.toFixed()` → TypeError
+4. Sem ErrorBoundary, o React desmonta a árvore inteira → **página preta**
+5. Adicionalmente, o `QuotaExceededError` do `localStorage.setItem` (em projetos grandes) também causava crash
+
+**Solução** (3 camadas de defesa):
+- `MaterialEditor.jsx`: `(m.opacity ?? 1).toFixed(2)`, `(m.roughness ?? 0.7)`, `(m.metalness ?? 0)` — fallbacks para propriedades undefined
+- `BuildersPanel.jsx`: todos os 6 handlers (`handleHouse`, `handleCar`, `handleTree`, `handleFurniture`, `handleInterior`, `handleCity`) envolvidos em `try/catch` com toast de erro
+- `useStore.js`: `createJSONStorage` com storage customizado que captura `QuotaExceededError` (não crash, apenas warning na consola)
+- `main.jsx`: envolvido com `<ErrorBoundary>` — captura qualquer erro de render e mostra ecrã de erro com botão "Recarregar"
+
+**Teste no browser** (Playwright):
+- Criar Novo Projeto → abrir Construtores → Gerar Casa ✓
+- Gerar Carro ✓ | Gerar Árvore ✓ | Gerar Móvel ✓ | Gerar Interior ✓
+- Gerar Cidade (gera múltiplos objetos) ✓
+- Canvas continua presente (1) após todos os testes
+- `QuotaExceededError` aparece no console mas é capturado pelo try/catch + ErrorBoundary → sem crash
+
+### BUG 3 (P1): Menu hambúrguer e botão "3 pontos" desaparecidos — VERIFICADO
+
+**Causa raiz**: Após merges anteriores, o `LeftPanel.jsx` perdeu as tabs `rig` e `weight` (commit `786d407` restaurou a partir de uma versão anterior ao Rigging). Adicionalmente, `VerticalRail.jsx:83` tinha o botão "Config" a chamar `toggleMainMenu()` em vez de `openSettingsPanel()`.
+
+**Solução**:
+- `LeftPanel.jsx`: restauradas tabs `{id: 'rig', label: 'Rig', icon: IconBone}` e `{id: 'weight', label: 'Peso', icon: IconSculpt}` + imports de `SkeletonEditor` e `WeightPaintPanel`
+- `VerticalRail.jsx:83`: corrigido `case 'openSettingsPanel': openSettingsPanel()` (antes chamava `toggleMainMenu()`)
+
+**Resultado**: Todas as 10 tabs do LeftPanel visíveis: Ferramentas, Editar, Modificadores, Booleanas, Escanpir, Materiais, Rig, Peso, Animação, Cena
+
+### BUG 4 (P0): Câmera desaparece ao sair do Play Mode — CORRIGIDO
+
+**Causa raiz**: O cleanup do `useEffect` do GameMode (`SceneLevel3D.jsx:1155-1258`) restaurava scenes, mesh parents, mesh.visible — mas **não restaurava a câmara Three.js**. Durante Play Mode, o `useFrame` muta `camera.position`, `camera.quaternion`, `camera.fov`, `camera.near`, `camera.far` + `updateProjectionMatrix()`. Ao sair, a câmara ficava na última pose de Play → "câmera desaparece" (vista perdida).
+
+**Solução**:
+- Adicionado `cameraSnapshotRef` em `GameMode`
+- No setup: snapshot de `camera.position.clone()`, `quaternion.clone()`, `fov`, `near`, `far`, `aspect`
+- No cleanup: `camera.position.copy(snapshot.position)`, `camera.quaternion.copy(snapshot.quaternion)`, `camera.fov = snapshot.fov`, `updateProjectionMatrix()`
+
+### FEATURE: ErrorBoundary (prevenir páginas pretas futuras)
+
+- Criado `src/components/ui/ErrorBoundary.jsx` — captura erros de render React e mostra ecrã de erro com botões "Tentar continuar" e "Recarregar página"
+- Integrado em `src/main.jsx` envolvendo o `<App />` inteiro
+- Qualquer erro de render (undefined.toFixed, undefined.map, etc.) agora é capturado em vez de desmontar a app
+
+### FEATURE: Storage customizado (prevenir QuotaExceededError crash)
+
+- `useStore.js`: `createJSONStorage` com storage customizado que envolve `getItem`/`setItem`/`removeItem` em `try/catch`
+- `QuotaExceededError` agora é capturado silenciosamente (warning na consola) em vez de crashar a app
+- O projeto continua a funcionar em memória mesmo se não puder ser persistido
+
+### Testes no Browser (Playwright/agent-browser)
+
+Screenshots guardados em `download/screenshots/`:
+- `01-homepage.png` — página inicial carrega
+- `02-new-project.png` — novo projeto criado
+- `03-texturing-panel.png` — aba Texturização abre
+- `04-builders-panel.png` — aba Construtores abre
+- `09-after-fix-generate-house.png` — Gerar Casa funciona
+- `10-after-fix-generate-city.png` — Gerar Cidade funciona
+- `14-final-all-builders-clean.png` — todos os 6 builders funcionam sem crash
+- `16-settings-panel.png` — SettingsPanel abre via botão Config
+- `17-rig-tab.png` — aba Rig visível e funcional
+
+**Verificação final**: `document.querySelectorAll('canvas').length` = 1 em todos os testes → app nunca fica preta.
+
+---
+
 ## 🐛 Correções de Bugs Críticos (Sessão 10 — Agosto 2026)
 
 ### BUG 1 (P0): Câmara ViewObject fica preta no Play Mode — CORRIGIDO

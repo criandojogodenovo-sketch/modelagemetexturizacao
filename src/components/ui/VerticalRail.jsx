@@ -58,6 +58,7 @@ export default function VerticalRail() {
   const openMarketplace = useStore((s) => s.openMarketplace)
   const openInstancingPanel = useStore((s) => s.openInstancingPanel)
   const toggleMainMenu = useStore((s) => s.toggleMainMenu)
+  const openSettingsPanel = useStore((s) => s.openSettingsPanel)
   const toggleLeftDrawer = useStore((s) => s.toggleLeftDrawer)
 
   const handleSection = (section) => {
@@ -80,7 +81,7 @@ export default function VerticalRail() {
       case 'openMarketplace': openMarketplace(); break
       case 'openInstancingPanel': openInstancingPanel(); break
       case 'toggleMainMenu': toggleMainMenu(); break
-      case 'openSettingsPanel': toggleMainMenu(); break
+      case 'openSettingsPanel': openSettingsPanel(); break
       case 'openBuilders':
         // Fase 2 — Abrir painel de Construtores Profissionais
         useStore.getState().openBuildersPanel()

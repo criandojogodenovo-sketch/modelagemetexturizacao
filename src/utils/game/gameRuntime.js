@@ -569,6 +569,37 @@ function startGame() {
     } else if (conect.type === 'FogObject') {
       if (conect.fogType === 'exponential') scene3d.fog = new THREE.FogExp2(conect.color || 0xa0a0a0, conect.density || 0.02)
       else scene3d.fog = new THREE.Fog(conect.color || 0xa0a0a0, conect.near || 5, conect.far || 50)
+    } else if (conect.type === 'TerrainObject') {
+      // CORREÇÃO BUG1: Adicionar suporte a TerrainObject no runtime exportado
+      // (antes era silently dropped — terreno não aparecia no jogo exportado)
+      var seg = conect.segments || 64
+      var terrainGeo = new THREE.PlaneGeometry(conect.width || 50, conect.depth || 50, seg, seg)
+      // Aplicar heightmap se existir (senão fica plano horizontal)
+      if (conect.heightmap && conect.heightmap.length > 0) {
+        var pos = terrainGeo.attributes.position
+        var heightScale = conect.heightScale || 5
+        for (var k = 0; k < pos.count; k++) {
+          var h = conect.heightmap[k] || 0
+          pos.setZ(k, h * heightScale)
+        }
+        pos.needsUpdate = true
+      }
+      terrainGeo.rotateX(-Math.PI / 2) // plano XZ (horizontal no chão)
+      terrainGeo.computeVertexNormals()
+      var terrainMat = new THREE.MeshStandardMaterial({
+        color: conect.color || 0x4a7c3a,
+        roughness: 0.85,
+        metalness: 0.0,
+        flatShading: false,
+      })
+      var terrainMesh = new THREE.Mesh(terrainGeo, terrainMat)
+      terrainMesh.position.set.apply(terrainMesh, conect.position || [0, 0, 0])
+      terrainMesh.receiveShadow = true
+      terrainMesh.castShadow = false
+      scene3d.add(terrainMesh)
+      meshMap[conect.instanceId] = terrainMesh
+      terrainMesh._name = conect.name
+      terrainMesh._conect = conect
     } else if (conect.type === 'SoundObject' && conect.autoplay && conect.url) {
       try { var audio = new Audio(conect.url); audio.volume = conect.volume || 1; audio.loop = conect.loop || false; audio.play() } catch (e) { }
     }

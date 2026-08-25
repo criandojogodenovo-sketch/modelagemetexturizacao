@@ -344,7 +344,7 @@ Work Log:
    - ShadowOptimizer: desliga castShadow em meshes além da distância (meshRefs, não scene.traverse)
    - Otimização: só reavalia quando câmara se move >5 unidades ou nº meshes muda
    - directionalLight: shadow-mapSize agora lê de renderSettings (era hardcoded 2048)
-   
+  
    TESTE FPS (100-400 cubos):
    - Sem otim, 2048: 38 FPS
    - Com culling, 1024: 38 FPS
@@ -356,12 +356,12 @@ Work Log:
    - applyVertexAO: aplica como vertex colors (multiplica cor existente por factor AO)
    - SceneObject: aplica quando vertexAOEnabled e vertCount > 50
    - Material: vertexColors: true quando AO ativo
-   
+  
    TESTE (cubo com subdivision, 561 vértices):
    - Sem AO: cor uniforme
-   - Com AO: VLM confirma 'darker in crevices, corners' 
+   - Com AO: VLM confirma 'darker in crevices, corners'
    - FPS: 16 com AO vs 17 sem AO (sem impacto, dentro margem erro)
-   
+  
    Limitação: geometrias convexas (esfera) calculam AO ~1.0 (sem oclusão)
    Efeito visível em modelos com cantos/concavidades
 
@@ -3619,3 +3619,673 @@ Limitações conhecidas (não no scope deste fix):
   obstáculo. (Solução futura: expor `pathfinderRef.current.addObstacle(...)` no gameContext.)
 - NPC AI só funciona no editor (SceneLevel3D.jsx) — o export HTML (gameRuntime.js)
   ainda não instancia `createNPCAI` (vide AUDIT-4-004). Bug diferente, não no scope.
+
+---
+Task ID: BUG-URGENT-INVEST
+Agent: general-purpose (sub)
+Task: Investigar 4 bugs urgentes + AUDIT abas inexistentes (Rig e outras)
+
+Metodologia:
+- Lido worklog.md (3622 linhas) para contexto — especialmente BUG1-INVEST (câmara
+  ViewObject preta no Play Mode), FIX-BUG4-BUG6 (snapshot/restore), P7 (Rigging +
+  Weight Painting + Skinning).
+- Lidos na íntegra: SceneLevel3D.jsx (1842 linhas, foco em useFrame + cleanup
+  GameMode), ConectRenderer.jsx (TerrainMesh), physicsSystem.js (addConect
+  TerrainObject), gameRuntime.js (exported runtime), BuildersPanel.jsx + os 6
+  proceduralBuilders/*.js + _helpers.js, SceneObject.jsx, App.jsx, LeftPanel.jsx,
+  TopBar.jsx, BottomBar.jsx, VerticalRail.jsx, MainMenu.jsx, MoreToolsGrid.jsx,
+  AnimationPanel.jsx, SkeletonEditor.jsx, WeightPaintPanel.jsx, MaterialEditor.jsx,
+  useStore.js (snapshot + open* setters).
+- git log/diff para identificar regressões entre commits (especialmente o
+  "Restaurar ficheiros apagados" 786d407 que regrediu Rigging/Weight Painting).
+- Teste isolado em Node.js dos 6 builders (todos OK, sem crash) para confirmar que
+  o problema NÃO está nos builders em si.
+- Teste isolado em browser (agent-browser + HTML inline) reproduzindo a cadeia
+  builder → addImportedObject → RightPanel → MaterialEditor para confirmar BUG 2.
+
+================================================================================
+## BUG 1 — Terreno fica vertical ao executar o jogo (Play Mode)
+================================================================================
+
+### Sintomas observados pelo utilizador
+- Colocar TerrainObject + ViewObject e entrar em Play Mode → o terreno aparece
+  VERTICAL (em pé, no plano XY) em vez de HORIZONTAL (deitado no plano XZ).
+
+### ROOT CAUSE — Rotação dupla acumulada (geometria + body Cannon)
+
+**Cadeia causal:**
+
+1. **ConectRenderer.jsx:288** — `TerrainMesh` cria a geometria com
+   `new THREE.PlaneGeometry(width, depth, seg, seg)` (default = plano XY,
+   normal=+Z) e aplica `g.rotateX(-Math.PI / 2)` para a deitar no plano XZ
+   (normal=+Y). Esta rotação é **baked into the geometry** (modifica o buffer
+   de posições diretamente). → Geometria fica HORIZONTAL. ✓
+
+2. **physicsSystem.js:154-170** — `addConect(TerrainObject)` cria um
+   `CANNON.Plane` (default normal=+Z) e aplica
+   `planeBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2)`
+   para o plano apontar para +Y (chão). → Body Cannon fica HORIZONTAL. ✓
+
+3. **SceneLevel3D.jsx:1273-1279** — useFrame do GameMode, em cada frame:
+   ```js
+   for (const [id, entry] of physicsRef.current.bodies) {
+     const mesh = meshRefs.current.get(id) || conectMeshRefs.current.get(id)
+     if (mesh) {
+       mesh.position.copy(entry.body.position)
+       mesh.quaternion.copy(entry.body.quaternion)  // ← BUG
+     }
+   }
+   ```
+   Copia o `quaternion` do body Cannon para o mesh. Mas a geometria do mesh já
+   tem rotação -PI/2 baked → **rotação dupla**:
+   - Geometria: -PI/2 (baked)
+   - Mesh.quaternion: -PI/2 (copiado do body)
+   - Total: -PI → plano XY (vertical, normal=+/-Z) em vez de XZ (horizontal).
+
+### Porquê só no Play Mode
+- `useFrame` retorna cedo em `if (!isGameMode) return` (linha 1265). Sem
+  Play Mode, a física não corre e o `mesh.quaternion` nunca é sobrescrito —
+  a rotação baked da geometria (-PI/2) prevalece e o terreno fica horizontal.
+- Em Play Mode, a cada frame, `mesh.quaternion.copy(body.quaternion)` aplica
+  a rotação do body Cannon por cima da baked → rotação dupla → vertical.
+
+### Verificação no exported runtime (gameRuntime.js)
+- `gameRuntime.js:493-511` (setupMesh) trata apenas tipos primitivos
+  (cube, sphere, cylinder, cone, plane, torus).
+- `gameRuntime.js:528-581` (loop conects) NÃO tem branch para `TerrainObject`
+  (só Rigid/Static/Stop/Personal/Npc/Luminous/Sky/Fog/Sound). → No exported
+  runtime, TerrainObject é **silently dropped** (não renderiza, nem tem física).
+  Bug diferente — não foi reportado pelo utilizador mas é um gap paralelo.
+
+### LOCALIZAÇÃO EXACTA DO BUG
+**Ficheiro**: `/home/z/my-project/src/components/3d/SceneLevel3D.jsx`
+**Linhas 1273-1279** (useFrame do GameMode, dentro de `if (physicsRef.current)`):
+```js
+for (const [id, entry] of physicsRef.current.bodies) {
+  const mesh = meshRefs.current.get(id) || conectMeshRefs.current.get(id)
+  if (mesh) {
+    mesh.position.copy(entry.body.position)
+    mesh.quaternion.copy(entry.body.quaternion)  // ← APLICA ROTAÇÃO DUPLA
+  }
+}
+```
+
+**Ficheiro contribuinte**: `/home/z/my-project/src/utils/conects/physicsSystem.js`
+**Linhas 154-170**: o body Cannon do TerrainObject tem `quaternion = rot(X, -PI/2)`
+para endireitar o CANNON.Plane, mas isto assume que a geometria Three.js NÃO tem
+rotação baked — o que é falso (ConectRenderer.jsx:288 já baka a mesma rotação).
+
+### SUGGESTED FIX (não implementado — investigação apenas)
+
+**Fix A (mínimo, recomendado)**: em `SceneLevel3D.jsx:1273-1279`, saltar a cópia
+do quaternion para TerrainObject (cuja geometria já tem rotação baked):
+
+```js
+for (const [id, entry] of physicsRef.current.bodies) {
+  const mesh = meshRefs.current.get(id) || conectMeshRefs.current.get(id)
+  if (mesh) {
+    mesh.position.copy(entry.body.position)
+    // Não copiar quaternion para TerrainObject — geometria já tem rotateX(-PI/2) baked
+    if (entry.conect?.type !== 'TerrainObject') {
+      mesh.quaternion.copy(entry.body.quaternion)
+    }
+  }
+}
+```
+
+**Fix B (mais correcto, médio prazo)**: em `physicsSystem.js:166`, NÃO rodar o
+`planeBody.quaternion`. Como a geometria do mesh já tem a rotação baked
+(-PI/2 em X), e Cannon.js plane sem rotação tem normal=+Z (plano XY), o
+plano físico seria "vertical" — mas isto não importa porque para um plano
+infinito, o que conta é a normal usada na colisão. Alternativamente, mudar
+para `CANNON.Heightfield` ou um mesh collider (mas quebra a API existente).
+
+**Fix C (robusto, longo prazo)**: usar `THREE.PlaneGeometry` SEM
+`rotateX(-PI/2)` baked na geometria, e aplicar a rotação ao mesh via
+`mesh.rotation.x = -Math.PI / 2`. Assim, `mesh.quaternion.copy(body.quaternion)`
+do useFrame funcionaria como esperado (a rotação do body substitui a do mesh,
+ambas iguais). Requer mudança simultânea em ConectRenderer.jsx:288 e
+TerrainSculpt3D.jsx (que aplica brush diretamente à geometria).
+
+### Notas adicionais
+- O mesmo padrão de bug afectaria qualquer outro conect cuja geometria tenha
+  rotação baked E tenha física (BoxGeometry sem rotação baked não tem problema
+  porque é simétrica). Actualmente, TerrainObject é o único nesta situação.
+- O `gameRuntime.js` (exported) tem um bug PARALELO mas diferente: não
+  renderiza TerrainObject de todo (silently dropped no loop conects).
+
+================================================================================
+## BUG 2 — Página fica preta ao clicar em "Gerar" nos Construtores
+================================================================================
+
+### Sintomas observados pelo utilizador
+- Abrir aba Construtores, selecionar um builder (Cidade, Carro, Casa, Árvore,
+  Móvel, Interior), clicar em "Gerar" → página FICA PRETA (crash sem error
+  boundary → React desmonta toda a árvore).
+
+### ROOT CAUSE — `m.opacity.toFixed(2)` em MaterialEditor quando opacity é undefined
+
+**Cadeia causal:**
+
+1. User clica "Gerar" → `handleHouse`/`handleCar`/etc em
+   `BuildersPanel.jsx:76-134` chama `generateX(params)` que retorna um objeto
+   via `makeObject()` (`_helpers.js:93-105`):
+   ```js
+   material: { vertexColors: true, ...material }   // sem `opacity`!
+   ```
+   Todos os 6 builders NÃO setam `opacity` no material:
+   - houseBuilder.js:126 → `{ color, roughness: 0.7, metalness: 0.0 }`
+   - carBuilder.js:150-158 → `{ color, roughness: 0.15, metalness: 0.8,
+     clearcoat: 1.0, ... }` (sem opacity)
+   - treeBuilder.js:89-95 → `{ color, roughness: 0.85, metalness: 0.0,
+     sheen: 0.3, sheenColor }` (sem opacity)
+   - furnitureBuilder.js:126-132 → `{ color, roughness, metalness, sheen,
+     sheenColor }` (sem opacity)
+   - interiorBuilder.js:156-160 → `{ color: '#cccccc', roughness: 0.8,
+     metalness: 0.0 }` (sem opacity)
+   - cityBuilder.js:114-120 (street lamp) → `{ color, roughness, metalness,
+     emissive, emissiveIntensity }` (sem opacity)
+
+2. `useStore.addImportedObject(objData)` (useStore.js:429-435) faz:
+   - `get()._pushHistory()` — snapshot JSON de objects.
+   - `set((s) => ({ objects: [...s.objects, objData], selectedId: objData.id }))`
+   - **Seleciona o novo objeto** → `selectedId = objData.id`.
+
+3. Zustand notifica subscritores. RightPanel re-renderiza (depende de
+   `selectedId` via `useSelectedObject()`). Como `selected` passa a ser o
+   novo objeto, RightPanel renderiza `<ObjectProperties obj={selected} />`
+   (RightPanel.jsx:50) que por sua vez renderiza `<MaterialEditor obj={obj} />`
+   (RightPanel.jsx:145).
+
+4. **MaterialEditor.jsx:156** tenta renderizar:
+   ```jsx
+   <label>Opacidade: {m.opacity.toFixed(2)}</label>
+   ```
+   onde `m = obj.material` (linha 38). Como `m.opacity` é `undefined` (builders
+   não setam), `undefined.toFixed(2)` lança:
+   ```
+   TypeError: Cannot read properties of undefined (reading 'toFixed')
+   ```
+
+5. Não existe Error Boundary em nenhuma parte do app (verificado via
+   `grep -rn "ErrorBoundary|componentDidCatch|getDerivedStateFromError"` →
+   0 matches). Sem error boundary, o erro propaga até à raiz React,
+   que desmonta toda a árvore → **página fica preta/branca**.
+
+### Verificação empírica
+- Teste isolado em browser via agent-browser + HTML inline reproduzindo a
+  cadeia: confirmado que `m.opacity.toFixed(2)` lança `TypeError` quando
+  `opacity` é undefined. Todos os 6 builders têm este padrão.
+- Teste isolado em Node.js dos 6 builders (carregando-os via dynamic import
+  após symlink para node_modules): TODOS geram objetos válidos sem crash.
+  Output: cada builder produz `customGeometry.positions` (600-16000 floats),
+  `uvs: []` (array vazio — truthy!), `colors: [...]`. NENHUM builder seta
+  `opacity` no material.
+
+### Outros campos potencialmente perigosos em MaterialEditor.jsx
+Verifiquei todos os acessos a `m.X` no MaterialEditor.jsx:
+- `m.color` (linha 98, value={m.color}) — builders setam sempre. OK.
+- `m.roughness.toFixed(2)` (linha 118) — builders setam sempre. OK.
+- `m.metalness.toFixed(2)` (linha 137) — builders setam sempre. OK.
+- **`m.opacity.toFixed(2)` (linha 156) — CRASH para builders.**
+- `m.wireframe` (linha 175, checked={m.wireframe}) — undefined é falsy, OK.
+- `m.flatShading` (linha 183) — undefined é falsy, OK.
+- `m.emissive || '#000000'` (linha 196) — fallback OK.
+- `m.emissiveIntensity ?? 0` (linha 203) — nullish coalescing OK.
+- `m.repeat[0]`, `m.repeat[1]`, `m.offset[0]`, `m.offset[1]` (linhas 258-298)
+  — só dentro de `{m.map && (...)}`. Builders não setam map → bloco não
+  renderiza. OK.
+
+### LOCALIZAÇÃO EXACTA DO BUG
+**Ficheiro**: `/home/z/my-project/src/components/panels/MaterialEditor.jsx`
+**Linha 156** (dentro de CollapseSection "Material"):
+```jsx
+<label>Opacidade: {m.opacity.toFixed(2)}</label>
+```
+
+**Linha 162** (slider value):
+```jsx
+<input type="range" min="0" max="1" step="0.01" value={m.opacity} ... />
+```
+(o `value={m.opacity}` com undefined não crash, mas renderiza `value="undefined"`
+que é inválido — corrige-se a par do Fix).
+
+### SUGGESTED FIX (não implementado — investigação apenas)
+
+**Fix #1 (mínimo, recomendado)**: em `MaterialEditor.jsx:156` e `:162`:
+
+```jsx
+<label>Opacidade: {(m.opacity ?? 1).toFixed(2)}</label>
+<input type="range" min="0" max="1" step="0.01"
+  value={m.opacity ?? 1}
+  onChange={(e) => set({ opacity: Number(e.target.value), transparent: Number(e.target.value) < 1 })}
+  ...
+/>
+```
+
+Default `opacity = 1` (alinhado com `SceneObject.jsx:275` que faz
+`opacity: m.opacity ?? 1` ao construir o MeshStandardMaterial).
+
+**Fix #2 (defensivo, complementar)**: em `_helpers.js:makeObject` (linha 101),
+adicionar defaults ao material:
+```js
+material: { opacity: 1, transparent: false, wireframe: false, flatShading: false, vertexColors: true, ...material }
+```
+Assim, todos os objetos gerados pelos builders teriam `opacity: 1` mesmo se
+o builder não setar. Protege contra regressões futuras (e contra qualquer
+outro componente que aceda `obj.material.opacity` sem fallback).
+
+**Fix #3 (robusto, longo prazo)**: adicionar um Error Boundary em App.jsx
+envolvendo RightPanel + MaterialEditor (ou em toda a app). Isto garantiria
+que outros bugs futuros não causassem "página preta" — mostraria um fallback
+UI com o erro. Recomendado para uma engine deste porte.
+
+### Notas adicionais
+- O bug NÃO é específico a nenhum builder — afecta TODOS os 6 (Carro, Casa,
+  Árvore, Móvel, Interior, Cidade). Cidade é particularmente catastrófico
+  porque `generateCity` retorna 52 objetos, e cada um é adicionado via
+  `addImportedObject` individualmente. O 1º objeto já crasheia a página
+  (MaterialEditor selectedId = 1º objeto → crash).
+- A página também pode ficar preta se o utilizador gerar um objeto e depois
+  clicar nele no outliner (selectedId muda → RightPanel re-renderiza → crash).
+- Workaround imediato: o utilizador pode clicar noutro objeto (não-builder)
+  ou fechar o RightPanel (se possível) para evitar o crash. Mas depois não
+  consegue editar as propriedades do objeto gerado.
+
+================================================================================
+## BUG 3 — Menu hambúrguer e botão "3 pontos" desapareceram
+================================================================================
+
+### Sintomas observados pelo utilizador
+- Os elementos UI que davam acesso rápido a tabs (3 pontos, hamburger menu)
+  desapareceram.
+
+### Investigação
+
+**TopBar.jsx** (painel superior) — estado actual (commit HEAD):
+- Linhas 379-385: botão "Mais" (3 pontos) → `<Icon name="more-horizontal" size={16} />`
+  dentro de `className="icon drawer-toggle topbar-more-btn"`. **EXISTS e VISÍVEL.**
+- Linhas 404-410: botão Menu principal (hamburger) → `<Icon name="menu" size={18} />`
+  dentro de `className="icon"`. **EXISTS e VISÍVEL.**
+- Ambos chamam handlers válidos: `setMoreMenuOpen(true)` e `toggleMainMenu()`
+  respectivamente.
+
+**VerticalRail.jsx** (rail esquerdo) — estado actual:
+- Renderizado em `App.jsx:191` (`{!scenePreviewOpen && appMode !== 'flirscript' && appMode !== 'ui' && <VerticalRail />}`)
+- Linhas 27-49: 4 secções (modeling, scene, ui, flirscript) + 9 tools (conects,
+  builders, mechanics, dialogue, shader, animation, terrain, instancing,
+  marketplace) + 2 bottom (menu, settings).
+- **BUG secundário em VerticalRail.jsx:83**:
+  ```js
+  case 'openSettingsPanel': toggleMainMenu(); break  // ← AÇÃO ERRADA!
+  ```
+  O botão "Config" (settings) na secção RAIL_BOTTOM chama `toggleMainMenu`
+  em vez de `openSettingsPanel`. Clicar em Config abre o MainMenu em vez do
+  SettingsPanel. Store action `openSettingsPanel` existe (useStore.js:1666).
+
+### Verificação via git history
+
+Commit `9c6634c "feat: Rigging + Weight Painting + AnimationBoost + Skeleton
+Gizmo"` (última versão COM Rig/Weight tabs) → commit `786d407 "fix: Restaurar
+ficheiros apagados + remover todos os emojis restantes"`:
+
+**`git diff 9c6634c..786d407 -- src/components/panels/TopBar.jsx`** revela:
+- Em 9c6634c: o botão hamburger tinha `📋` (emoji) como conteúdo.
+- Em 786d407: o conteúdo foi removido (`></button>` — botão vazio). Isto é,
+  a substituição de emojis por `<Icon name="X" />` ESQUECEU de adicionar o
+  `<Icon name="menu" />` ao botão hamburger. Botão ficou vazio (sem ícone
+  visível) — para o utilizador, "desapareceu".
+
+**`git diff 9c6634c..786d407 -- src/components/panels/LeftPanel.jsx`** revela
+(regressão definitiva):
+```diff
+-  IconBone,
+ } from '../ui/Icons'
+-import SkeletonEditor from './SkeletonEditor'
+-import WeightPaintPanel from './WeightPaintPanel'
+
+ const TABS = [
+   ...
+-  { id: 'rig', label: 'Esqueleto', icon: IconBone },
+-  { id: 'weight', label: 'Peso', icon: IconSculpt },
+   { id: 'animation', label: 'Animação', icon: IconAnimation },
+   ...
+ ]
+...
+-          {activeTab === 'rig' && <SkeletonEditor />}
+-          {activeTab === 'weight' && <WeightPaintPanel />}
+           {activeTab === 'animation' && <AnimationPanel />}
+```
+
+### ROOT CAUSE — Regressão no commit 786d407 (Restaurar ficheiros apagados)
+
+O commit `786d407` foi uma "correcção" que restaurou ficheiros apagados pelo
+commit `8dba9e2` ("limpeza repo pai"). No entanto, a restauração foi feita a
+partir do commit `d7a93f0` ("Fase 5: Multiplayer + ..."), que era ANTERIOR ao
+commit `9c6634c` ("feat: Rigging + Weight Painting + AnimationBoost + Skeleton
+Gizmo"). Resultado:
+
+1. **TopBar.jsx** — botão hamburger ficou vazio (emoji `📋` removido sem
+   substituir por `<Icon name="menu" />`). **Depois corrigido** num commit
+   intermédio (TopBar.jsx actual tem `<Icon name="menu" size={18} />`). Mas
+   o utilizador pode estar a ver uma versão desactualizada OU o bug pode ter
+   sido parcialmente corrigido sem testar.
+2. **LeftPanel.jsx** — tabs `rig` (Esqueleto) e `weight` (Peso) REMOVIDAS,
+   imports de SkeletonEditor e WeightPaintPanel REMOVIDOS. **AINDA NÃO
+   CORRIGIDO** no commit HEAD (verificado via `git log 786d407..HEAD --
+   src/components/panels/LeftPanel.jsx` → 0 commits).
+
+### Estado actual dos ficheiros relacionados
+- **SkeletonEditor.jsx** (204 linhas) — EXISTE no disco, mas NÃO é importado
+  em lado nenhum (`grep -rn "SkeletonEditor" /home/z/my-project/src/` retorna
+  apenas o ficheiro próprio). **Código morto.**
+- **WeightPaintPanel.jsx** (214 linhas) — EXISTE no disco, mas NÃO é importado
+  em lado nenhum. **Código morto.**
+- **AnimationPanel.jsx** (230 linhas) — importado por LeftPanel.jsx:47,
+  renderizado quando `activeTab === 'animation'`. Funciona. Tem secção
+  "Esqueleto (Rigging)" (linha 58) que permite adicionar ossos básicos — mas
+  não é o SkeletonEditor completo (que tem preset Humanoide, hierarquia
+  pai/filho, etc.).
+- **VerticalRail.jsx** — tem botão "Animação" (linha 40) que abre
+  AnimationStudio (modal), não SkeletonEditor.
+- **MoreToolsGrid.jsx** — tem categoria "Rigging" (linha 213) com botão
+  "Adicionar Osso" (linha 215-217) que chama `addBone`. Acesso limitado
+  ao Rigging, sem acesso ao SkeletonEditor ou WeightPaintPanel.
+- **MainMenu.jsx** — NÃO tem botão Rig/Esqueleto/WeightPaint.
+- **BottomBar.jsx** — 6 botões (Menu, Cubo, Transform, Editar, Mais, Props).
+  Nenhum para Rig/WeightPaint.
+
+### LOCALIZAÇÃO EXACTA DO BUG (regressão)
+**Ficheiro**: `/home/z/my-project/src/components/panels/LeftPanel.jsx`
+- Linhas 19-39 (imports): faltam `IconBone`, `SkeletonEditor`, `WeightPaintPanel`.
+- Linhas 49-58 (TABS array): faltam `{ id: 'rig', label: 'Esqueleto', icon: IconBone }`
+  e `{ id: 'weight', label: 'Peso', icon: IconSculpt }`.
+- Linhas 228-234 (renderização condicional): faltam
+  `{activeTab === 'rig' && <SkeletonEditor />}` e
+  `{activeTab === 'weight' && <WeightPaintPanel />}`.
+
+**Ficheiro contribuinte**: `/home/z/my-project/src/components/ui/VerticalRail.jsx`
+- Linha 83: `case 'openSettingsPanel': toggleMainMenu(); break` (BUG secundário:
+  Settings button abre MainMenu em vez de SettingsPanel).
+
+### SUGGESTED FIX (não implementado — investigação apenas)
+
+**Fix A (restaurar Rig/Weight tabs em LeftPanel.jsx)**: aplicar o diff inverso
+do commit 786d407 — restaurar imports + 2 tabs + 2 renderizações condicionais.
+
+**Fix B (corrigir VerticalRail.jsx:83)**: trocar
+`case 'openSettingsPanel': toggleMainMenu()` por
+`case 'openSettingsPanel': useStore.getState().openSettingsPanel()`.
+
+**Fix C (acrescentar botão Rig no VerticalRail)**: adicionar entrada
+`{ id: 'rig', icon: 'bone', label: 'Rig (Esqueleto)', action: 'openRigPanel' }`
+em RAIL_TOOLS e criar `openRigPanel` no store (poderia abrir o SkeletonEditor
+como modal). Opcional, depende de se querer Rig como tab do LeftPanel ou como
+modal separado.
+
+### Esclarecimento sobre o report do utilizador
+O utilizador reporta "Menu hambúrguer e botão '3 pontos' desapareceram". No
+estado ACTUAL do código (HEAD), ambos existem e estão visíveis. As hipóteses
+são:
+1. O utilizador está a ver uma versão desactualizada do deploy (pré-correção
+   do ícone hamburger).
+2. O utilizador confunde "tabs desapareceram" (Rig/Peso) com "menu hamburger
+   desapareceu" — a regressão real é das TABS Rig/Peso, não dos botões.
+3. Há um bug CSS não identificado que os esconde em alguma condição.
+
+A regressão DEFINITIVA e verificável é a perda das tabs Rig/Weight — deve
+ser restaurada independentemente da interpretação do report.
+
+================================================================================
+## BUG 4 — Câmera desaparece ao sair do Play Mode
+================================================================================
+
+### Sintomas observados pelo utilizador
+- Após sair do Play Mode (clicar "Parar" ou carregar Escape), a câmara
+  "desaparece" — o utilizador fica sem vista da cena ou com vista em
+  posição/rotação inesperada.
+
+### ROOT CAUSE — Cleanup do GameMode NÃO restaura estado da câmara Three.js
+
+**Cadeia causal:**
+
+1. **Entrar em Play Mode** → `GameMode` setup useEffect corre (linhas
+   880-909 de SceneLevel3D.jsx):
+   - Inicializa `window._flirCameraRotation = { yaw: 0, pitch: 0,
+     sensitivity: 1.0, enabled: hasTouchZone }`.
+   - Cria `physicsRef`, `gameContext`, etc.
+
+2. **Durante Play Mode** → `GameMode.useFrame` (linha 1264) corre a cada
+   frame e manipula `camera` (do `useThree()`, linha 281) directamente:
+   - Linhas 1471, 1484, 1488, 1493, 1497, 1502: `camera.position.set(...)`
+     (segue player, ViewObject position, ou gameCamera position).
+   - Linhas 1473, 1476, 1485, 1489, 1494, 1498, 1504, 1506, 1508, 1522,
+     1524, 1526: `camera.rotation.set(...)` ou `camera.lookAt(...)`.
+   - Linhas 1517-1518: `camera.fov = targetFov; camera.near = targetNear;
+     camera.far = targetFar; camera.updateProjectionMatrix()`.
+  
+   Ou seja, durante Play Mode, `camera.position`, `camera.quaternion`,
+   `camera.fov`, `camera.near`, `camera.far` são todos mutados.
+
+3. **Sair do Play Mode** → `closeScenePreview()` (useStore.js:1343) faz
+   apenas `set({ scenePreviewOpen: false })`. Nenhuma lógica de restauração.
+
+4. **Cleanup do GameMode useEffect** (linhas 1155-1258 de SceneLevel3D.jsx)
+   corre quando `isGameMode` passa a `false`. O cleanup restaura:
+   - `window._flirGameContext = null` (linha 1178)
+   - `window._flirCamera = null` (linha 1179)
+   - `window._flirInventory = null` (linha 1180)
+   - `window._flirCameraRotation = null` (linha 1181) ← reset do estado
+     de input, mas NÃO da câmara Three.js
+   - `window._flirKeys = null` (linha 1182)
+   - Mesh parents (linhas 1199-1204)
+   - `mesh.visible` (linhas 1219-1230)
+   - Snapshot de TODAS as scenes no store (linhas 1240-1254)
+   - **NÃO RESTAURA: `camera.position`, `camera.quaternion`, `camera.fov`,
+     `camera.near`, `camera.far`, `camera.updateProjectionMatrix()`**.
+
+5. **Depois de sair**: `useFrame` retorna cedo em `if (!isGameMode) return`
+   (linha 1265). OrbitControls re-renderiza (porque `!isGameMode` torna-se
+   true, linha 1802). OrbitControls faz `makeDefault` e attacha à câmara
+   existente. Mas a câmara está em posição/rotação/fov do último frame de
+   Play Mode — se o utilizador estava em third-person segindo o PersonalObject,
+   a câmara pode estar a apontar para longe da origem; se followMode='first',
+   a câmara pode estar dentro de um mesh; etc.
+
+### Porquê "câmara desaparece"
+- Se a câmara ficou em posição subterrânea (Y < 0) durante o Play (por exemplo,
+  seguindo um player que caiu), o utilizador vê o inferior da cena (preto).
+- Se a câmara ficou apontada para -Z (longe da origem, sintoma descrito em
+  BUG1-INVEST quando `camRotation.enabled=true` mas sem touch input), o
+  utilizador vê apenas o background (`#0d1117`, quase preto).
+- Se `camera.fov` foi alterado (e.g., para 60 do ViewObject default em vez
+  de 50 do Canvas default), a perspective muda.
+- OrbitControls assume target = (0, 0, 0) por defeito. Se a câmara está em
+  (5, 4, 6) olhando para -Z (afastando-se de origem), o utilizador não vê
+  nada relevante.
+
+### Verificação do snapshot/restore existente
+- O Bug #4 anterior (linha 460 do worklog) foi sobre isolamento Editor/Runtime
+  (snapshot de scenes). Foi corrigido em FIX-BUG4-BUG6 — mas a correcção
+  cobre apenas `scenes`, `mesh.visible`, `mesh.parent`. **NÃO cobre a câmara.**
+- Confirmação via `grep -n "camera.position\|camera.rotation\|camera.fov"
+  SceneLevel3D.jsx` mostra que a câmara só é mutada DENTRO do useFrame
+  (linhas 1471-1528), nunca no cleanup. Nenhuma referência a restaurar
+  `camera.position/rotation/fov` no useEffect cleanup (linhas 1155-1258).
+
+### LOCALIZAÇÃO EXACTA DO BUG
+**Ficheiro**: `/home/z/my-project/src/components/3d/SceneLevel3D.jsx`
+**Linhas 1155-1258** (cleanup useEffect do GameMode): **AUSENTE** qualquer
+restauro de `camera.position`, `camera.quaternion`, `camera.fov`,
+`camera.near`, `camera.far`.
+
+**Ficheiro contribuinte**: `/home/z/my-project/src/store/useStore.js`
+**Linhas 1342-1343** (`openScenePreview`/`closeScenePreview`): nenhuma
+lógica de save/restore da câmara no store.
+
+### SUGGESTED FIX (não implementado — investigação apenas)
+
+**Fix A (mínimo, recomendado)**: No setup useEffect do GameMode (entrar em
+Play Mode, linhas ~880-909), guardar snapshot da câmara antes de a mutar.
+No cleanup (linhas 1155-1258), restaurar:
+
+```js
+// Setup (entrada Play Mode, depois de line 894 window._flirGameContext = gameContext)
+const cam = camera  // useThree()
+const camSnapshot = {
+  position: cam.position.clone(),
+  quaternion: cam.quaternion.clone(),
+  fov: cam.fov,
+  near: cam.near,
+  far: cam.far,
+  aspect: cam.aspect,
+}
+cameraSnapshotRef.current = camSnapshot
+
+// Cleanup (linhas 1155-1258, antes do return final):
+const snap = cameraSnapshotRef.current
+if (snap) {
+  camera.position.copy(snap.position)
+  camera.quaternion.copy(snap.quaternion)
+  camera.fov = snap.fov
+  camera.near = snap.near
+  camera.far = snap.far
+  camera.updateProjectionMatrix()
+  cameraSnapshotRef.current = null
+}
+// Garantir que OrbitControls.target volta a (0,0,0) — re-mount já trata disto
+// se isGameMode=false, mas target pode ter sido mutado por lookAt.
+```
+
+**Fix B (robusto, médio prazo)**: usar o módulo `cameraController.js` (já
+existe em `/home/z/my-project/src/utils/cameraController.js`, linhas 27-67
+com `createCameraState`/`resetCameraState`) unificando a lógica de câmara
+entre editor e runtime. Recomendação já feita em BUG1-INVEST (Fix #2).
+Isto também resolve BUG1 (terreno vertical) e divergência editor/runtime
+apontada em AUDIT-2.
+
+### Notas adicionais
+- O mesmo padrão afecta qualquer propriedade mutada no `camera` durante
+  Play Mode: não só `position`/`quaternion`, mas também `fov`/`near`/`far`
+  via `updateProjectionMatrix()` (linhas 1516-1518).
+- `window._flirCameraRotation = null` (linha 1181) é seguro porque o
+  useFrame faz fallback `|| { yaw: 0, pitch: 0, enabled: false }` (linha 1442).
+- Não há error boundary para apanhar o caso em que a câmara fica em estado
+  inválido. A "página preta" do BUG 2 também aconteceria se MaterialEditor
+  crashesse ao re-renderizar para um objeto cuja câmara ficou "perdida".
+
+================================================================================
+## AUDIT — Abas inexistentes (Rig e outras)
+================================================================================
+
+### Metodologia
+- LS de `/home/z/my-project/src/components/panels/` (33 ficheiros .jsx).
+- `grep -rn "import .*Panel\|<.*Panel" App.jsx` para mapear todos os painéis
+  renderizados na raiz.
+- `grep -n "openRig\|openSkeletonEditor\|openWeightPaint\|rigPanelOpen\|
+  skeletonEditorOpen\|weightPaintPanelOpen\|rigOpen" useStore.js App.jsx
+  MainMenu.jsx` → 0 matches (sem store actions Rig).
+- `grep -rn "SkeletonEditor\|WeightPaintPanel" src/` → apenas referências aos
+  próprios ficheiros (código morto, sem imports externos).
+- `git log --oneline --all -- src/components/panels/LeftPanel.jsx` → 5 commits.
+- `git diff 9c6634c..786d407 -- LeftPanel.jsx` → confirma remoção de Rig/Weight.
+
+### Tabela de "missing" tabs/features
+
+| Tab/Feature                | File exists? | Imported in App.jsx? | Imported in LeftPanel? | Store action exists? | Rendered? | Status |
+|----------------------------|---------------|----------------------|------------------------|----------------------|-----------|--------|
+| Rig (Esqueleto)            | SkeletonEditor.jsx ✓ | ✗ | ✗ (removido em 786d407) | ✗ (nenhum openRig*) | ✗ | **REGRESSÃO** — removido do LeftPanel em 786d407, arquivo órfão |
+| Weight Paint (Peso)        | WeightPaintPanel.jsx ✓ | ✗ | ✗ (removido em 786d407) | ✗ | ✗ | **REGRESSÃO** — removido do LeftPanel em 786d407, arquivo órfão |
+| Animation (tab LeftPanel)  | AnimationPanel.jsx ✓ | n/a (importado no LeftPanel) | ✓ linha 47 | n/a (tab local) | ✓ quando activeTab='animation' | **OK** — funciona, tem secção "Esqueleto (Rigging)" básica |
+| Animation Studio (modal)   | AnimationStudio.jsx ✓ | ✓ linha 37 + render 227 | n/a | ✓ openAnimStudio (useStore.js:1629) | ✓ quando animStudioOpen | **OK** — abre via VerticalRail "Animação" |
+| AnimationControllerEditor   | AnimationControllerEditor.jsx ✓ | ✓ linha 38 + render 239-247 | n/a | ✓ animControllerTarget state | ✓ quando animControllerTarget | **OK** — abre via NpcObject/PersonalObject context |
+| Texturização                | TexturingPanel.jsx ✓ | ✓ linha 48 + render 237 | n/a | ✓ openTexturingPanel (useStore.js:1499) | ✓ quando texturingPanelOpen | **OK** |
+| Mechanics (Mecânicas)       | MechanicsPanel.jsx ✓ | ✓ linha 45 + render 234 | n/a | ✓ openMechanicsPanel (useStore.js:1649) | ✓ quando mechanicsPanelOpen | **OK** — abre via VerticalRail |
+| Dialogue (Diálogos)         | DialoguePanel.jsx ✓ | ✓ linha 46 + render 235 | n/a | ✓ openDialoguePanel (useStore.js:1654) | ✓ quando dialoguePanelOpen | **OK** — abre via VerticalRail |
+| UV Editor                  | UVEditor.jsx ✓ | ✓ linha 47 + render 236 | n/a | ✓ openUVEditor (useStore.js:1509) | ✓ quando uvEditorOpen | **OK** — abre via MoreToolsGrid |
+| Classes (FlirCode)          | ClassesPanel.jsx ✓ | ✗ | ✗ | ✓ openClassesPanel | ✗ | **MISSING** — store action existe mas não há import em App.jsx nem botão visível que chame openClassesPanel (MainMenu.jsx:111 chama openClassesPanel mas painel não é renderizado) |
+| Booleans (Booleanas)        | BooleansPanel.jsx ✓ | n/a | ✓ (tab boolean) | n/a | ✓ quando activeTab='boolean' | **OK** — tab do LeftPanel |
+| Edit Mode                   | EditModePanel.jsx ✓ | n/a | ✓ (tab edit) | n/a | ✓ quando activeTab='edit' | **OK** |
+| Modifiers (Modificadores)   | ModifiersPanel.jsx ✓ | n/a | ✓ (tab modifiers) | n/a | ✓ quando activeTab='modifiers' | **OK** |
+| Sculpt (Escanpir)           | SculptPanel.jsx ✓ | n/a | ✓ (tab sculpt) | n/a | ✓ quando activeTab='sculpt' | **OK** |
+| Material Library            | MaterialLibraryPanel.jsx ✓ | n/a | ✓ (tab materials) | n/a | ✓ quando activeTab='materials' | **OK** |
+| Scene Settings (Cena)       | SceneSettings.jsx ✓ | n/a | ✓ (tab scene) | n/a | ✓ quando activeTab='scene' | **OK** |
+| Conects (ConectsWindow)     | ConectsWindow.jsx ✓ | ✓ linha 31 + render 218-220 | n/a | ✓ toggleConectsWindow (useStore.js:1352) | ✓ quando conectsWindowOpen | **OK** — abre via VerticalRail "Conects" |
+| Builders (Construtores)     | BuildersPanel.jsx ✓ | ✓ linha 44 + render 233 | n/a | ✓ openBuildersPanel (useStore.js:1493 E 1644 — DUPLICADO) | ✓ quando buildersPanelOpen | **OK** com duplicação — `openBuildersPanel` definido 2x (linhas 1493 e 1644), idêntico mas deve ser limpo |
+| Multiplayer                  | MultiplayerPanel.jsx ✓ | ✓ linha 39 + render 228 | n/a | ✓ openMultiplayerPanel (useStore.js:1603) | ✓ quando multiplayerPanelOpen | **OK** |
+| Post Processing             | PostProcessingPanel.jsx ✓ | ✓ linha 40 + render 229 | n/a | ✓ openPostProcessing (useStore.js:1612) | ✓ quando postProcessingOpen | **OK** |
+| Marketplace                  | MarketplacePanel.jsx ✓ | ✓ linha 41 + render 230 | n/a | ✓ openMarketplace (useStore.js:1634) | ✓ quando marketplaceOpen | **OK** |
+| Instancing (GPU)            | InstancingPanel.jsx ✓ | ✓ linha 42 + render 231 | n/a | ✓ openInstancingPanel (useStore.js:1639) | ✓ quando instancingPanelOpen | **OK** |
+| Settings (Configurações)    | SettingsPanel.jsx ✓ | ✓ linha 43 + render 232 | n/a | ✓ openSettingsPanel (useStore.js:1666) | ✓ quando settingsPanelOpen | **OK** mas **VerticalRail.jsx:83 chama toggleMainMenu em vez de openSettingsPanel** (BUG) |
+| Terrain Editor              | TerrainEditor.jsx (em subpasta) ✓ | ✓ linha 36 + render 226 | n/a | ✓ openTerrainEditor (useStore.js:1488) | ✓ quando terrainEditorOpen | **OK** |
+| Project Browser             | ProjectBrowser.jsx (em subpasta) ✓ | ✓ linha 34 + render 224 | n/a | ✓ openProjectBrowser (useStore.js:1480) | ✓ quando projectBrowserOpen | **OK** |
+| Debug Console               | DebugConsole.jsx (em subpasta) ✓ | ✓ linha 35 + render 225 | n/a | ✓ openDebugConsole (useStore.js:1484) | ✓ quando debugConsoleOpen | **OK** |
+| Game Export Modal           | GameExportModal.jsx ✓ | ✓ linha 32 + render 221 | n/a | ✓ openGameExport (useStore.js:1467) | ✓ quando gameExportOpen | **OK** |
+| Shader Editor               | ShaderEditor.jsx (em subpasta) ✓ | ✓ linha 33 + render 223 | n/a | ✓ openShaderEditor (useStore.js:1476) | ✓ quando shaderEditorOpen | **OK** |
+| UI Editor                   | UIEditor.jsx (em subpasta) ✓ | ✓ linha 30 + render 222 | n/a | ✓ openUIEditor (useStore.js:1472) | ✓ quando uiEditorOpen | **OK** |
+| FlirCode Editor             | FlirCodeEditor.jsx (em subpasta) ✓ | ✓ linha 29 (renderizado quando appMode='flirscript') | n/a | n/a (mode switch) | ✓ quando appMode='flirscript' | **OK** |
+| Material Editor             | MaterialEditor.jsx ✓ | n/a (dentro de RightPanel) | ✗ | n/a | ✓ dentro de RightPanel.jsx:145 | **OK** (mas tem BUG 2 — `m.opacity.toFixed(2)` crash) |
+| Outliner                    | Outliner.jsx ✓ | n/a | ✓ (dentro de tools tab) | n/a | ✓ na tab tools | **OK** |
+
+### Resumo dos problemas encontrados no AUDIT
+
+1. **Rig (Esqueleto) tab MISSING** — `SkeletonEditor.jsx` (204 linhas) existe
+   no disco mas NÃO é importado em lado nenhum. Removido do LeftPanel.jsx em
+   commit 786d407. Causa: regressão da "restauração" que usou fonte antiga.
+
+2. **Weight Paint (Peso) tab MISSING** — `WeightPaintPanel.jsx` (214 linhas)
+   existe no disco mas NÃO é importado em lado nenhum. Removido do LeftPanel.jsx
+   em commit 786d407. Mesma causa.
+
+3. **ClassesPanel MISSING (parcial)** — ficheiro existe, store action
+   `openClassesPanel` existe, MainMenu.jsx tem botão que chama
+   `openClassesPanel` (linha 111), MAS App.jsx NÃO importa ClassesPanel nem
+   tem `{classesPanelOpen && <ClassesPanel onClose=... />}`. Clicar em
+   "Classes FlirCode" no MainMenu seta o state mas o painel nunca aparece.
+
+4. **VerticalRail.jsx:83 BUG** — botão "Config" chama `toggleMainMenu` em vez
+   de `openSettingsPanel`. Utilizador clica em Config e abre o Menu Principal.
+
+5. **openBuildersPanel DUPLICADO** — useStore.js linhas 1493 e 1644 ambas
+   definem `openBuildersPanel`. Idênticas (fazem `set({ buildersPanelOpen: true })`)
+   mas deve ser limpa a duplicação.
+
+6. **SkeletonEditor.jsx e WeightPaintPanel.jsx são código morto** — 418 linhas
+   (204 + 214) não importadas em nenhuma parte do código. Devem ser restaurados
+   no LeftPanel OU removidos se a funcionalidade foi intencionalmente descontinuada.
+
+### Verificação adicional: AnimationPanel tem secção "Esqueleto (Rigging)"
+`AnimationPanel.jsx:58` tem:
+```jsx
+<h4>Esqueleto (Rigging)</h4>
+```
+que mostra ossos do `selected.skeleton` e botão "Adicionar Osso". MAS isto é
+uma versão MUITO limitada — não tem:
+- Preset "Esqueleto Humanoide Base" (19 ossos) que SkeletonEditor.jsx tem
+  (linhas 20-45).
+- Hierarquia pai/filho editável.
+- Editar posição/rotação/comprimento/nome dos ossos (SkeletonEditor.jsx
+  docstring linhas 1-11).
+- Visualização 3D sobreposta.
+
+Logo, o utilizador que espera um editor de esqueleto completo (estilo Blender)
+encontra apenas um botão "Adicionar Osso" básico na tab Animação. A
+funcionalidade completa está em `SkeletonEditor.jsx` mas é código morto.
+
+### SUGGESTED FIX (não implementado — investigação apenas)
+
+1. **Restaurar Rig/Weight tabs em LeftPanel.jsx** (Fix A do BUG 3).
+2. **Importar e renderizar ClassesPanel em App.jsx**:
+   ```jsx
+   import ClassesPanel from './components/panels/ClassesPanel'
+   const classesPanelOpen = useStore((s) => s.classesPanelOpen)
+   const closeClassesPanel = useStore((s) => s.closeClassesPanel)
+   // ...
+   {classesPanelOpen && <ClassesPanel onClose={closeClassesPanel} />}
+   ```
+   E adicionar `closeClassesPanel` ao useStore.js (par de `openClassesPanel`).
+   Verificar se ClassesPanel.jsx exporta `default function` (sim, linha 47
+   — confirmar).
+3. **Corrigir VerticalRail.jsx:83** (Fix B do BUG 3).
+4. **Limpar duplicação de openBuildersPanel** em useStore.js (remover linhas
+   1493-1495 OU 1644-1645; manter uma).

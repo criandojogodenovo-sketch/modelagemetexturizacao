@@ -115,13 +115,13 @@ export default function MaterialEditor({ obj }) {
 
         {/* Roughness */}
         <div className="prop-row">
-          <label>Brilho (Roughness): {m.roughness.toFixed(2)}</label>
+          <label>Brilho (Roughness): {(m.roughness ?? 0.7).toFixed(2)}</label>
           <input
             type="range"
             min="0"
             max="1"
             step="0.01"
-            value={m.roughness}
+            value={m.roughness ?? 0.7}
             onFocus={_pushHistory}
             onChange={(e) => set({ roughness: Number(e.target.value) })}
             onMouseUp={(e) => commit({ roughness: Number(e.target.value) })}
@@ -134,13 +134,13 @@ export default function MaterialEditor({ obj }) {
 
         {/* Metalness */}
         <div className="prop-row">
-          <label>Metalicidade: {m.metalness.toFixed(2)}</label>
+          <label>Metalicidade: {(m.metalness ?? 0).toFixed(2)}</label>
           <input
             type="range"
             min="0"
             max="1"
             step="0.01"
-            value={m.metalness}
+            value={m.metalness ?? 0}
             onFocus={_pushHistory}
             onChange={(e) => set({ metalness: Number(e.target.value) })}
             onMouseUp={(e) => commit({ metalness: Number(e.target.value) })}
@@ -153,13 +153,13 @@ export default function MaterialEditor({ obj }) {
 
         {/* Opacidade */}
         <div className="prop-row">
-          <label>Opacidade: {m.opacity.toFixed(2)}</label>
+          <label>Opacidade: {(m.opacity ?? 1).toFixed(2)}</label>
           <input
             type="range"
             min="0"
             max="1"
             step="0.01"
-            value={m.opacity}
+            value={m.opacity ?? 1}
             onFocus={_pushHistory}
             onChange={(e) => set({ opacity: Number(e.target.value), transparent: Number(e.target.value) < 1 })}
             onMouseUp={(e) => commit({ opacity: Number(e.target.value), transparent: Number(e.target.value) < 1 })}

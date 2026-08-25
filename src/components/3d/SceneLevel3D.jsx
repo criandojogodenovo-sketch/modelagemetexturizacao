@@ -302,6 +302,10 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   // modificar outras scenes via spawnObject/addObjectToScene). JSON.parse cria
   // novas referências → R3F detecta mudança e re-aplica props ao restaurar.
   const sceneSnapshotRef = useRef(null)
+  // CORREÇÃO BUG4: Snapshot da câmara (position/quaternion/fov/near/far) antes
+  // do Play Mode. Sem isto, ao sair do Play a câmara fica na posição/rotação do
+  // último frame de Play → "câmera desaparece" (vista perdida).
+  const cameraSnapshotRef = useRef(null)
   // Bug #4: parent original de cada mesh — GroupObject.attach() reposiciona meshes
   // imperativamente; R3F não desfaz reparenting. Guardar para restaurar no Stop.
   const meshParentsRef = useRef(new Map())
@@ -418,6 +422,17 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         }))
       )),
       originalActiveSceneId: useStore.getState().activeSceneId,
+    }
+    // CORREÇÃO BUG4: Snapshot da câmara antes do Play Mode.
+    // useFrame em Play Mode muta camera.position/quaternion/fov/near/far diretamente.
+    // Sem restauração, ao sair a câmara fica na última pose de Play → vista perdida.
+    cameraSnapshotRef.current = {
+      position: camera.position.clone(),
+      quaternion: camera.quaternion.clone(),
+      fov: camera.fov,
+      near: camera.near,
+      far: camera.far,
+      aspect: camera.aspect,
     }
     // Bug #4: Snapshot dos parents originais de cada mesh. GroupObject.attach()
     // reposiciona meshes imperativamente durante Runtime; R3F não rastreia nem
@@ -1253,6 +1268,20 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         })
         sceneSnapshotRef.current = null
       }
+      // CORREÇÃO BUG4: Restaurar câmara ao estado pré-Play.
+      // Sem isto, ao sair do Play a câmara fica na última pose de Play → "câmera desaparece".
+      if (cameraSnapshotRef.current) {
+        camera.position.copy(cameraSnapshotRef.current.position)
+        camera.quaternion.copy(cameraSnapshotRef.current.quaternion)
+        if (camera.fov !== undefined) {
+          camera.fov = cameraSnapshotRef.current.fov
+          camera.near = cameraSnapshotRef.current.near
+          camera.far = cameraSnapshotRef.current.far
+          camera.aspect = cameraSnapshotRef.current.aspect
+          camera.updateProjectionMatrix()
+        }
+        cameraSnapshotRef.current = null
+      }
       gameStartedRef.current = false
     }
   }, [isGameMode, setupScene])
@@ -1274,7 +1303,13 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         const mesh = meshRefs.current.get(id) || conectMeshRefs.current.get(id)
         if (mesh) {
           mesh.position.copy(entry.body.position)
-          mesh.quaternion.copy(entry.body.quaternion)
+          // CORREÇÃO BUG1: TerrainObject tem rotação -PI/2 baked na geometria
+          // (PlaneGeometry → XZ). Copiar o quaternion do body Cannon (também -PI/2
+          // para alinhar normal up) dobrava a rotação → terreno ficava vertical.
+          // Solução: NÃO copiar quaternion para TerrainObject; a posição é sincronizada.
+          if (entry.type !== 'TerrainObject') {
+            mesh.quaternion.copy(entry.body.quaternion)
+          }
         }
       }
     }

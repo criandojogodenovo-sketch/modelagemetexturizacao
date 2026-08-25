@@ -61,9 +61,14 @@ export default function TopBar() {
 
   // ----- Ações de ficheiro -----
   const handleSave = () => {
-    const json = exportProjectJSON()
-    localStorage.setItem('me3d.project.snapshot', json)
-    toast('Projeto guardado no navegador', 'success')
+    try {
+      const json = exportProjectJSON()
+      localStorage.setItem('me3d.project.snapshot', json)
+      toast('Projeto guardado no navegador', 'success')
+    } catch (err) {
+      console.warn('[TopBar] handleSave falhou:', err)
+      toast('Projeto demasiado grande para guardar no navegador. Usa "Guardar .flirengine" para exportar como ficheiro.', 'error', 5000)
+    }
   }
 
   // Guardar como ficheiro .flirengine
