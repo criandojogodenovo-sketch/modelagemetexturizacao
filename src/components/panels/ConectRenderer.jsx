@@ -186,6 +186,13 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
     )
   }
 
+  // NpcObject: humanoide simples (cabeça + tronco + 2 braços + 2 pernas)
+  // A1: antes os NPCs caíam no PlaceholderMesh (cubo cinzento) — agora têm um
+  // humanoide com cor dedicada (vermelho/rosa por defeito, ou conect.color se definido).
+  if (conect.type === 'NpcObject') {
+    return <NpcHumanoidMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
   // Rigid/Static/Stop/Personal: placeholder com geometria simples
   return (
     <PlaceholderMesh
@@ -200,6 +207,94 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
 })
 
 export default ConectRenderer
+
+// ===== NpcHumanoidMesh — humanoide simples para NpcObject (A1) =====
+// Cabeça + tronco + 2 braços + 2 pernas, com cor dedicada.
+// A group é posicionada com conect.position/rotation/scale e o mesh principal
+// (tronco) fica registado no meshRefs via setMeshRef para a física sincronizar.
+const NpcHumanoidMesh = forwardRef(function NpcHumanoidMesh({ conect, setMeshRef }, ref) {
+  // Cor do NPC: usa conect.color (se definido) ou vermelho por defeito (hostil)
+  const bodyColor = conect.color || '#c0392b'
+  const skinColor = '#f4d4b8'
+  const isHostile = conect.aiMode === 'chase'
+  const isBoss = (conect.scale?.[0] || 1) > 1.5
+
+  return (
+    <group
+      ref={(node) => {
+        // A1: registar o group no meshRefs para que a física e a câmara o encontrem
+        if (typeof ref === 'function') ref(node)
+        else if (ref) ref.current = node
+        setMeshRef?.(node)
+      }}
+      position={conect.position}
+      rotation={conect.rotation}
+      scale={conect.scale}
+      visible={conect.visible !== false}
+      userData={{ conectInstanceId: conect.instanceId }}
+    >
+      {/* Tronco */}
+      <mesh position={[0, 1.2, 0]} castShadow receiveShadow>
+        <capsuleGeometry args={[0.3, 0.8, 4, 12]} />
+        <meshStandardMaterial color={bodyColor} roughness={0.7} metalness={0.1} />
+      </mesh>
+      {/* Cabeça */}
+      <mesh position={[0, 2.0, 0]} castShadow>
+        <sphereGeometry args={[0.28, 16, 16]} />
+        <meshStandardMaterial color={skinColor} roughness={0.6} />
+      </mesh>
+      {/* Olhos (indicador de hostilidade — vermelho se hostile) */}
+      <mesh position={[-0.1, 2.05, 0.22]}>
+        <sphereGeometry args={[0.04, 8, 8]} />
+        <meshStandardMaterial color={isHostile ? '#ff0000' : '#000000'} emissive={isHostile ? '#ff0000' : '#000000'} emissiveIntensity={isHostile ? 1 : 0} />
+      </mesh>
+      <mesh position={[0.1, 2.05, 0.22]}>
+        <sphereGeometry args={[0.04, 8, 8]} />
+        <meshStandardMaterial color={isHostile ? '#ff0000' : '#000000'} emissive={isHostile ? '#ff0000' : '#000000'} emissiveIntensity={isHostile ? 1 : 0} />
+      </mesh>
+      {/* Braço esquerdo */}
+      <mesh position={[-0.4, 1.3, 0]} castShadow>
+        <capsuleGeometry args={[0.1, 0.7, 4, 8]} />
+        <meshStandardMaterial color={bodyColor} roughness={0.7} />
+      </mesh>
+      {/* Braço direito */}
+      <mesh position={[0.4, 1.3, 0]} castShadow>
+        <capsuleGeometry args={[0.1, 0.7, 4, 8]} />
+        <meshStandardMaterial color={bodyColor} roughness={0.7} />
+      </mesh>
+      {/* Perna esquerda */}
+      <mesh position={[-0.18, 0.4, 0]} castShadow>
+        <capsuleGeometry args={[0.13, 0.7, 4, 8]} />
+        <meshStandardMaterial color={bodyColor} roughness={0.8} />
+      </mesh>
+      {/* Perna direita */}
+      <mesh position={[0.18, 0.4, 0]} castShadow>
+        <capsuleGeometry args={[0.13, 0.7, 4, 8]} />
+        <meshStandardMaterial color={bodyColor} roughness={0.8} />
+      </mesh>
+      {/* Indicador de boss — coroa dourada */}
+      {isBoss && (
+        <mesh position={[0, 2.4, 0]}>
+          <cylinderGeometry args={[0.35, 0.35, 0.15, 8]} />
+          <meshStandardMaterial color="#ffd700" emissive="#ffd700" emissiveIntensity={0.5} metalness={0.9} roughness={0.2} />
+        </mesh>
+      )}
+      {/* Indicador de health bar (acima da cabeça) — só se health < max */}
+      {conect.health !== undefined && conect.maxHealth !== undefined && conect.health < conect.maxHealth && (
+        <group position={[0, 2.5, 0]}>
+          <mesh>
+            <boxGeometry args={[0.6, 0.08, 0.02]} />
+            <meshBasicMaterial color="#333333" />
+          </mesh>
+          <mesh position={[-(0.6 - 0.6 * (conect.health / conect.maxHealth)) / 2, 0, 0.01]} scale={[conect.health / conect.maxHealth, 1, 1]}>
+            <boxGeometry args={[0.6, 0.08, 0.02]} />
+            <meshBasicMaterial color={conect.health > conect.maxHealth * 0.5 ? '#3fb950' : conect.health > conect.maxHealth * 0.25 ? '#d29922' : '#f85149'} />
+          </mesh>
+        </group>
+      )}
+    </group>
+  )
+})
 
 // ===== Placeholder para conects com física =====
 const PlaceholderMesh = forwardRef(function PlaceholderMesh({ conect }, ref) {

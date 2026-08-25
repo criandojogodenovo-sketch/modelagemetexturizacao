@@ -472,10 +472,161 @@ function startGame() {
         if (ss) { (data.uiScreens || []).forEach(function (s) { s.visible = (s.id === ss.id) }); renderUI(); dbg('Link: tela "' + ss.name + '"', 'log', 'Links') }
       } else if (target === 'url') { window.open(sub, '_blank') }
     },
-    // changeScene real (exportado)
-    changeScene: function (name) {
-      var sc = (data.scenes || []).find(function (s) { return s.name === name || s.id === name })
-      if (sc) { data.activeSceneId = sc.id; dbg('Cena mudou para "' + sc.name + '"', 'log', 'Game') }
+    // changeScene real (exportado) — A2: implementação completa
+    // Antes: apenas atualizava data.activeSceneId (não recarregava meshes)
+    // Agora: limpa meshes antigos, carrega nova cena, reposiciona jogador, re-inicializa física
+    changeScene: function (nameOrId) {
+      var sc = (data.scenes || []).find(function (s) { return s.name === nameOrId || s.id === nameOrId })
+      if (!sc) { dbg('Cena não encontrada: ' + nameOrId, 'error', 'Game'); return }
+      if (sc.id === data.activeSceneId) { dbg('Já na cena: ' + sc.name, 'log', 'Game'); return }
+      dbg('A mudar para cena: ' + sc.name, 'log', 'Game')
+
+      // 1. Guardar estado do jogador (vida, inventário, etc.)
+      var savedPlayer = null
+      if (player && meshMap[player.instanceId]) {
+        var pm = meshMap[player.instanceId]
+        savedPlayer = {
+          position: { x: pm.position.x, y: pm.position.y, z: pm.position.z },
+          rotation: { x: pm.rotation.x, y: pm.rotation.y, z: pm.rotation.z },
+          health: player.health,
+          // FlirCode pode ter guardado estado no runtime do jogador
+          runtimeState: runtimes[player.instanceId] ? { _vars: runtimes[player.instanceId]._vars || {} } : null,
+        }
+      }
+
+      // 2. Limpar meshes e bodies da cena antiga
+      for (var k in meshMap) {
+        if (meshMap[k] && meshMap[k].parent) meshMap[k].parent.remove(meshMap[k])
+        if (meshMap[k] && meshMap[k].geometry) meshMap[k].geometry.dispose?.()
+        if (meshMap[k] && meshMap[k].material) meshMap[k].material.dispose?.()
+      }
+      meshMap = {}
+      for (var k2 in bodies) {
+        if (bodies[k2]) world.removeBody(bodies[k2])
+      }
+      bodies = {}
+      // Dispose runtimes antigos
+      for (var k3 in runtimes) {
+        if (runtimes[k3] && runtimes[k3].dispose) runtimes[k3].dispose()
+      }
+      runtimes = {}
+
+      // 3. Atualizar cena ativa
+      data.activeSceneId = sc.id
+      scene = sc
+
+      // 4. Re-inicializar física (gravidade da nova cena)
+      if (sc.physics && sc.physics.gravity) {
+        world.gravity.set(0, sc.physics.gravity[1], 0)
+      }
+
+      // 5. Re-criar meshes da nova cena (reaproveita o forEach existente)
+      ;(sc.conects || []).forEach(function (conect) {
+        var mesh = null
+        if (['RigidObject', 'StaticObject', 'StopObject', 'PersonalObject', 'NpcObject'].indexOf(conect.type) >= 0) {
+          // A2: criar mesh humanoide para NpcObject (igual ao ConectRenderer do editor)
+          if (conect.type === 'NpcObject') {
+            var npcGroup = new THREE.Group()
+            npcGroup.position.set.apply(npcGroup, conect.position || [0, 0.5, 0])
+            var bodyColor = conect.color || '#c0392b'
+            // Tronco
+            var torso = new THREE.Mesh(
+              new THREE.CapsuleGeometry(0.3, 0.8, 4, 12),
+              new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.7 })
+            )
+            torso.position.y = 1.2; torso.castShadow = true
+            npcGroup.add(torso)
+            // Cabeça
+            var head = new THREE.Mesh(
+              new THREE.SphereGeometry(0.28, 16, 16),
+              new THREE.MeshStandardMaterial({ color: '#f4d4b8', roughness: 0.6 })
+            )
+            head.position.y = 2.0; head.castShadow = true
+            npcGroup.add(head)
+            // Braços + Pernas (simplificado — 4 cilindros)
+            var limbGeo = new THREE.CapsuleGeometry(0.12, 0.7, 4, 8)
+            var limbMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.7 })
+            ;[[-0.4, 1.3], [0.4, 1.3], [-0.18, 0.4], [0.18, 0.4]].forEach(function (p) {
+              var limb = new THREE.Mesh(limbGeo, limbMat)
+              limb.position.set(p[0], p[1], 0); limb.castShadow = true
+              npcGroup.add(limb)
+            })
+            scene3d.add(npcGroup)
+            meshMap[conect.instanceId] = npcGroup
+            npcGroup._name = conect.name; npcGroup._conect = conect
+            mesh = npcGroup
+          } else {
+            var color = conect.type === 'PersonalObject' ? 0x3fb950 : conect.type === 'StaticObject' ? 0x6e7681 : conect.type === 'NpcObject' ? 0xe63946 : 0x888888
+            var geo = conect.type === 'PersonalObject' ? new THREE.CapsuleGeometry(0.4, 1, 8, 16) : new THREE.BoxGeometry(1, 1, 1)
+            mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: color, roughness: 0.6 }))
+            mesh.position.set.apply(mesh, conect.position || [0, 0.5, 0])
+            mesh.castShadow = true; mesh.receiveShadow = true
+            scene3d.add(mesh)
+            meshMap[conect.instanceId] = mesh
+            mesh._name = conect.name; mesh._conect = conect
+          }
+          // Physics
+          var shape = new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5))
+          var body = new CANNON.Body({ mass: conect.type === 'StaticObject' ? 0 : (conect.mass || 1), shape: shape, position: new CANNON.Vec3(conect.position[0], conect.position[1], conect.position[2]) })
+          if (conect.type === 'StaticObject') { body.type = CANNON.Body.STATIC; body.mass = 0 }
+          if (conect.type === 'StopObject') { body.type = CANNON.Body.KINEMATIC; body.mass = 0 }
+          body.fixedRotation = conect.fixedRotation || false
+          body._conect = conect
+          world.addBody(body)
+          bodies[conect.instanceId] = body
+          body.addEventListener('collide', function (e) {
+            var otherId = null
+            for (var k in bodies) { if (bodies[k] === e.body) { otherId = k; break } }
+            if (otherId && runtimes[conect.instanceId]) runtimes[conect.instanceId].triggerEvent('onCollision', { other: otherId })
+          })
+        } else if (conect.type === 'TerrainObject') {
+          var seg = conect.segments || 64
+          var terrainGeo = new THREE.PlaneGeometry(conect.width || 50, conect.depth || 50, seg, seg)
+          if (conect.heightmap && conect.heightmap.length > 0) {
+            var pos = terrainGeo.attributes.position
+            var heightScale = conect.heightScale || 5
+            for (var k = 0; k < pos.count; k++) {
+              pos.setZ(k, (conect.heightmap[k] || 0) * heightScale)
+            }
+            pos.needsUpdate = true
+          }
+          terrainGeo.rotateX(-Math.PI / 2)
+          terrainGeo.computeVertexNormals()
+          var terrainMesh = new THREE.Mesh(terrainGeo, new THREE.MeshStandardMaterial({ color: conect.color || 0x4a7c3a, roughness: 0.85 }))
+          terrainMesh.position.set.apply(terrainMesh, conect.position || [0, 0, 0])
+          terrainMesh.receiveShadow = true
+          scene3d.add(terrainMesh)
+          meshMap[conect.instanceId] = terrainMesh
+          terrainMesh._name = conect.name; terrainMesh._conect = conect
+        } else if (conect.type === 'LuminousObject') {
+          var light
+          if (conect.lightType === 'directional') light = new THREE.DirectionalLight(conect.color || 0xffffff, conect.intensity || 1)
+          else if (conect.lightType === 'spot') light = new THREE.SpotLight(conect.color || 0xffffff, conect.intensity || 1)
+          else light = new THREE.PointLight(conect.color || 0xffffff, conect.intensity || 1, conect.distance || 10)
+          light.position.set.apply(light, conect.position || [0, 5, 0])
+          light.castShadow = conect.castShadow !== false
+          scene3d.add(light)
+        }
+        // FlirCode para conects (re-inicializa runtimes)
+        if (conect.flirScript && typeof conect.flirScript === 'string' && conect.flirScript.startsWith('FLIRCODE:')) {
+          var rt2 = createFlirCodeRuntime(conect.flirScript.slice(9), Object.assign(gc, { _instanceId: conect.instanceId, mesh: mesh }))
+          if (!rt2.hasErrors) { runtimes[conect.instanceId] = rt2; rt2.triggerEvent('beginPlay') }
+        }
+      })
+
+      // 6. Reposicionar jogador (spawn point da nova cena)
+      player = (sc.conects || []).find(function (c) { return c.type === 'PersonalObject' })
+      if (player && meshMap[player.instanceId] && savedPlayer) {
+        // Manter vida do jogador
+        if (savedPlayer.health !== undefined) player.health = savedPlayer.health
+        // Posição inicial da nova cena (definida no conect)
+        // (não restaurar posição antiga — cada cena tem o seu próprio spawn)
+      }
+
+      // 7. Re-render UI
+      renderUI()
+
+      dbg('Cena mudou para "' + sc.name + '"', 'log', 'Game')
     },
     // Sistema: Game State (exportado)
     _gameState: 'menu',

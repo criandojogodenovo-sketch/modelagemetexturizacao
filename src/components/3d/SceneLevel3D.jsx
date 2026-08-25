@@ -298,6 +298,8 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
   const collisionTimeoutsRef = useRef(new Set())
   const checkpointRef = useRef(null) // último checkpoint registado
   const skyRef = useRef(null) // referência ao SkyObject ativo
+  // A1 fix: gameContext exposto num ref para o useFrame poder aceder
+  const gameContextRef = useRef(null)
   // Bug #4: snapshot de TODAS as scenes antes de Play (portal transitions podem
   // modificar outras scenes via spawnObject/addObjectToScene). JSON.parse cria
   // novas referências → R3F detecta mudança e re-aplica props ao restaurar.
@@ -343,7 +345,11 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
     return () => { window._flirJoystick = null }
   }, [])
 
-  // Use o ref para o setup
+  // Use o ref para o setup — mas também sincronizar quando activeScene muda
+  // A1 fix: garantir que setupScene reflete a cena ativa atual
+  if (activeScene && activeSceneRef.current?.id !== activeScene.id) {
+    activeSceneRef.current = activeScene
+  }
   const setupScene = activeSceneRef.current
 
   // Fase 5: Expor multiplayer globalmente e configurar sync de estado do PersonalObject
@@ -393,13 +399,16 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
 
   // Atualizar refs sem re-disparar o useEffect
   useEffect(() => {
-    // Só atualizar o ref se o jogo ainda não começou OU se a cena mudou de verdade
-    // (não por spawnObject, mas por mudança de cena manual via changeScene)
-    if (!gameStartedRef.current || (activeScene && activeScene.id !== activeSceneRef.current?.id)) {
+    // A1 fix: sempre atualizar o ref quando a cena ativa muda.
+    // Antes: a condição !gameStartedRef.current impedia a atualização durante Play,
+    // mas isto causava que o setupScene ficasse stale quando o projeto era carregado.
+    // Agora: atualiza sempre que o activeScene.id muda (incluindo durante Play).
+    if (activeScene && activeScene.id !== activeSceneRef.current?.id) {
       activeSceneRef.current = activeScene
       objectsRef.current = objects
-    } else {
-      // Jogo em curso: manter o snapshot antigo, mas atualizar objects (para spawn)
+    } else if (!activeSceneRef.current && activeScene) {
+      // Primeira carga
+      activeSceneRef.current = activeScene
       objectsRef.current = objects
     }
   }, [activeScene, objects])
@@ -918,6 +927,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
       api: FlirScriptAPI,
     }
     window._flirGameContext = gameContext
+    gameContextRef.current = gameContext // A1 fix: expor para o useFrame
     window._flirInventory = inventoryRef.current
     // Fase 11 — Expor câmara para FlirScriptAPI.Camera.getPosition()/getFOV()
     window._flirCamera = camera
@@ -1202,6 +1212,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       window._flirGameContext = null
+      gameContextRef.current = null // A1 fix: limpar ref
       window._flirCamera = null
       window._flirInventory = null
       window._flirCameraRotation = null
@@ -1317,6 +1328,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
   // Loop do jogo — consolidado: 1 passagem sobre conects em vez de 8-9
   useFrame((_, delta) => {
     if (!isGameMode) return
+    const conects = setupScene?.conects || []
 
     // Limpar cache de poses no início de cada frame (evita memory leak)
     clearPoseCache()
@@ -1342,9 +1354,14 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
     // === PASSAGEM ÚNICA sobre conects ===
     // Pré-resolver PersonalObject para que checkpoints/navigators/items funcionem
     // independentemente da ordem no array conects[]
-    const conects = setupScene?.conects || []
     let playerConect = null
     let playerMesh = null
+    const gameContext = gameContextRef.current // A1 fix: usar ref em vez de variável local
+    if (!gameContext) return // gameContext null — setup ainda não completou
+    // A1 fix: declarar activeView e viewConects FORA do try para serem acessíveis depois
+    let activeView = null
+    const viewConects = []
+    try {
     for (let i = 0; i < conects.length; i++) {
       if (conects[i].type === 'PersonalObject') {
         playerConect = conects[i]
@@ -1359,8 +1376,7 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
       }
     }
 
-    let activeView = null
-    const viewConects = []
+    // Segundo loop: processar conects (ViewObject, checkpoints, items, etc.)
 
     for (let i = 0; i < conects.length; i++) {
       const conect = conects[i]
@@ -1452,6 +1468,9 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
     activeView = viewConects.find((c) => c.cameraRole === 'player') ||
                  viewConects.find((c) => c.cameraRole === 'primary') ||
                  viewConects[0]
+    } catch (e) {
+      console.error('[GameMode] erro no loop de conects:', e.message)
+    }
 
     // FlirCode onTick
     for (const rt of runtimesRef.current.values()) {
