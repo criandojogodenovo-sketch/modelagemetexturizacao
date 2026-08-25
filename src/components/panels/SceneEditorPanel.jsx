@@ -10,7 +10,7 @@
  *  - Os itens do catálogo são draggable
  *  - O viewport (SceneLevel3D) aceita drop
  */
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { useStore } from '../../store/useStore'
 import {
   IconPlus,
@@ -495,7 +495,7 @@ function ConectsList({ scene }) {
           </div>
         </div>
         {/* Renderizar filhos se expandido */}
-        {hasChildren && isExpanded && childConects.map(child => renderConect(child, true, conect.name))}
+        {hasChildren && isExpanded && childConects.map(child => <React.Fragment key={child.instanceId}>{renderConect(child, true, conect.name)}</React.Fragment>)}
       </div>
     )
   }
@@ -509,7 +509,7 @@ function ConectsList({ scene }) {
         </div>
       ) : (
         <div className="outliner">
-          {topLevelConects.map(conect => renderConect(conect))}
+          {topLevelConects.map(conect => <React.Fragment key={conect.instanceId}>{renderConect(conect)}</React.Fragment>)}
         </div>
       )}
     </div>

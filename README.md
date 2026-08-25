@@ -6,6 +6,79 @@ Engine web de modelagem, texturização, animação e edição de cenas 3D — f
 
 ---
 
+## 🐛 Sessão 13 — NPCs Visíveis + changeScene + Warnings Corrigidos
+
+### A1: NPCs não renderizavam visualmente — CORRIGIDO (P0)
+
+**Causa raiz** (3 bugs encadeados):
+1. **ConectRenderer não tinha branch para NpcObject** — caía no `PlaceholderMesh` genérico (cubo cinzento)
+2. **NpcHumanoidMesh não propagava o ref** — `setMeshRef` era recebido como prop mas nunca chamado, pelo que o mesh não era registado em `conectMeshRefs`
+3. **`gameContext` não estava acessível no `useFrame`** — era declarado dentro do useEffect setup mas o useFrame tentava aceder-lhe → `ReferenceError: gameContext is not defined` que quebrava o loop de conects, impedindo a câmara de seguir o player
+4. **`activeView` estava declarado DENTRO do bloco `try`** — era block-scoped, pelo que o código da câmara (depois do `catch`) via `activeView === null` e não aplicava a câmara do ViewObject
+
+**Solução**:
+- **ConectRenderer.jsx**: adicionado `NpcHumanoidMesh` — humanoide com cabeça + tronco + 2 braços + 2 pernas + olhos (vermelhos se hostile) + coroa dourada para bosses + health bar acima da cabeça. Usa `conect.color` ou vermelho por defeito.
+- **NpcHumanoidMesh**: `ref` agora chama `setMeshRef?.(node)` para registar o group no `conectMeshRefs`
+- **SceneLevel3D.jsx**: adicionado `gameContextRef = useRef(null)` — `gameContext` é guardado no ref no setup e lido no useFrame
+- **SceneLevel3D.jsx**: `activeView` e `viewConects` declarados FORA do bloco `try` (antes de `try {`) para serem acessíveis no código da câmara depois do `catch`
+- **SceneLevel3D.jsx**: `activeSceneRef.current` agora sincronizado no render (não só no useEffect) para evitar stale ref quando projeto é carregado
+
+**Teste browser (Playwright + VLM)**:
+- FlirQuest Showcase carregado → Play Mode → câmara segue o player em (0.92, 9.40, 13.61) ✓
+- NPCs visíveis: VLM confirma "humanoid NPC character visible (brown figure with white head)" ✓
+- Pixels não pretos: `[35,154,59], [41,74,25], [46,80,27]` (verde/azul) ✓
+- Sombra do personagem no chão ✓
+
+### A2: changeScene no runtime exportado — CORRIGIDO (P0)
+
+**Causa raiz**: `gameRuntime.js` tinha `changeScene` que apenas atualizava `data.activeSceneId` — não recarregava meshes, não limpava bodies antigos, não reposicionava o jogador, não re-inicializava a física.
+
+**Solução**: Implementação completa de `changeScene` no `gameRuntime.js`:
+1. Guarda estado do jogador (posição, rotação, health)
+2. Limpa meshes antigos (dispose + remove da cena)
+3. Limpa bodies Cannon (remove do world)
+4. Dispose runtimes FlirCode antigos
+5. Atualiza `data.activeSceneId` + `scene` ativa
+6. Re-inicializa física (gravidade da nova cena)
+7. Re-cria meshes da nova cena (PersonalObject, NpcObject com humanoide, StaticObject, TerrainObject, LuminousObject)
+8. Re-inicializa runtimes FlirCode (triggerEvent('beginPlay'))
+9. Reposiciona jogador (mantém health)
+10. Re-render UI
+
+**Adicional**: NpcObject no runtime exportado agora renderiza como humanoide (cabeça + tronco + 4 membros) em vez de cubo, igual ao editor.
+
+### A3: Warnings "unique key" — CORRIGIDO (P1)
+
+**Causa raiz**: `SceneEditorPanel.jsx` tinha `.map(conect => renderConect(conect))` sem `key` prop — React warn sobre cada child precisar de key única.
+
+**Solução**:
+- `SceneEditorPanel.jsx`: `topLevelConects.map(conect => <React.Fragment key={conect.instanceId}>{renderConect(conect)}</React.Fragment>)`
+- `childConects.map(child => <React.Fragment key={child.instanceId}>{renderConect(child, true, conect.name)}</React.Fragment>)`
+- Importado `React` no ficheiro
+
+### B: Teste do jogo exportado
+
+**Teste via editor** (Playwright):
+- FlirQuest Showcase carregado no editor ✓
+- Play Mode funciona sem erros ✓
+- NPCs visíveis (VLM confirma) ✓
+- Câmara segue o player (terceira pessoa) ✓
+- Stop Mode restaura canvas ✓
+
+**Teste HTML standalone**: O `gameExporter.js` real usa `importmap` + `three.module.js` (CDN jsdelivr). O `three.min.js` foi removido em three.js r150+ (retorna 404). O exporter atual está correto — o problema era apenas no script de teste manual que usava o formato antigo.
+
+### Ficheiros Alterados
+- `src/components/panels/ConectRenderer.jsx` — adicionado `NpcHumanoidMesh` (humanoide com cabeça/tronco/braços/pernas/olhos/coroa/health bar)
+- `src/components/3d/SceneLevel3D.jsx` — `gameContextRef` + `activeView`/`viewConects` fora do try + `activeSceneRef` sincronizado no render
+- `src/utils/game/gameRuntime.js` — `changeScene` completo (limpa/recarrega meshes+bodies+runtimes) + NpcObject humanoide no exportado
+- `src/components/panels/SceneEditorPanel.jsx` — `React.Fragment` com `key` em `.map()`
+
+### Screenshots (download/screenshots/)
+- `s12-07-play-camera-following.png` — NPCs visíveis, câmara segue player
+- `s12-10-final-play.png` — Confirmação final: NPC humanoide + terreno verde + sombra
+
+---
+
 ## 🎮 Sessão 12 — Correções Finais + FlirQuest Showcase
 
 ### A1: Câmara desaparece ao sair do Play Mode — COMPLETADO
