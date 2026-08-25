@@ -91,8 +91,42 @@ const initialScene = {
     postProcessing: false,
     waterQuality: 'basic', // basic | professional
     pixelRatio: 1,
+    // A3: campos novos para o SettingsPanel expandido
+    targetFps: 60,
+    antialias: true,
+    resolutionScale: 1.0,
+    shadows: true,
   },
   projectName: 'Novo Projeto',
+
+  // A3: Configurações estruturadas do projeto/editor/física/áudio
+  projectSettings: {
+    name: 'Novo Projeto',
+    version: '1.0.0',
+    author: 'Anónimo',
+    description: '',
+    iconColor: '#2f81f7',
+  },
+  editorSettings: {
+    theme: 'dark', // 'dark' | 'light'
+    language: 'pt-PT',
+    gizmoSensitivity: 1.0,
+    units: 'meters',
+    snapEnabled: false,
+    snapSize: 0.5,
+    snapRotationStep: 15, // graus
+  },
+  physicsSettings: {
+    gravity: -9.82,
+    timestep: 1 / 60,
+    iterations: 10,
+    damping: 0.01,
+  },
+  audioSettings: {
+    masterVolume: 1.0,
+    musicVolume: 0.7,
+    sfxVolume: 0.8,
+  },
 }
 
 // Níveis de Qualidade Gráfica
@@ -1625,6 +1659,23 @@ export const useStore = create(
       },
       setProjectName: (name) => set({ projectName: name }),
 
+      // A3: Setters para configurações estruturadas
+      setProjectSettings: (patch) => set((s) => ({
+        projectSettings: { ...s.projectSettings, ...patch },
+      })),
+      setEditorSettings: (patch) => set((s) => ({
+        editorSettings: { ...s.editorSettings, ...patch },
+      })),
+      setPhysicsSettings: (patch) => set((s) => ({
+        physicsSettings: { ...s.physicsSettings, ...patch },
+      })),
+      setAudioSettings: (patch) => set((s) => ({
+        audioSettings: { ...s.audioSettings, ...patch },
+      })),
+      setTheme: (theme) => set((s) => ({
+        editorSettings: { ...s.editorSettings, theme },
+      })),
+
       animStudioOpen: false,
       openAnimStudio: () => set({ animStudioOpen: true }),
       closeAnimStudio: () => set({ animStudioOpen: false }),
@@ -1807,6 +1858,11 @@ export const useStore = create(
         activeUIScreenId: state.activeUIScreenId,
         renderSettings: state.renderSettings,
         projectName: state.projectName,
+        // A3: persistir configurações estruturadas
+        projectSettings: state.projectSettings,
+        editorSettings: state.editorSettings,
+        physicsSettings: state.physicsSettings,
+        audioSettings: state.audioSettings,
       }),
       // CORREÇÃO BUG2/CRASH: Storage customizado com error handling.
       // Quando o projeto excede a quota do localStorage (~5MB), o setItem

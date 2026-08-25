@@ -4289,3 +4289,200 @@ funcionalidade completa está em `SkeletonEditor.jsx` mas é código morto.
 3. **Corrigir VerticalRail.jsx:83** (Fix B do BUG 3).
 4. **Limpar duplicação de openBuildersPanel** em useStore.js (remover linhas
    1493-1495 OU 1644-1645; manter uma).
+
+================================================================================
+## Task ID: BUG-A-INVEST — Auditoria A1, A2, A3
+================================================================================
+
+Data: sessão de auditoria p-FIX.HEAD. Investigação sem escrita de código.
+
+### A1 — Câmara desaparece ao sair do Play Mode
+-------------------------------------------------
+
+**Veredicto: Fix ~95% completo. Falta 1 edge case (OrbitControls.target).**
+
+#### Snapshot (setup) — SceneLevel3D.jsx:429-436
+```js
+cameraSnapshotRef.current = {
+  position: camera.position.clone(),
+  quaternion: camera.quaternion.clone(),
+  fov: camera.fov,
+  near: camera.near,
+  far: camera.far,
+  aspect: camera.aspect,
+}
+```
+Captura as 6 propriedades esperadas ✓ (position, quaternion, fov, near, far, aspect).
+
+#### Restauração (cleanup) — SceneLevel3D.jsx:1273-1284
+```js
+if (cameraSnapshotRef.current) {
+  camera.position.copy(cameraSnapshotRef.current.position)
+  camera.quaternion.copy(cameraSnapshotRef.current.quaternion)
+  if (camera.fov !== undefined) {
+    camera.fov = cameraSnapshotRef.current.fov
+    camera.near = cameraSnapshotRef.current.near
+    camera.far = cameraSnapshotRef.current.far
+    camera.aspect = cameraSnapshotRef.current.aspect
+    camera.updateProjectionMatrix()
+  }
+  cameraSnapshotRef.current = null
+}
+```
+Restaura as 6 propriedades + chama `updateProjectionMatrix()` ✓. O guard
+`if (camera.fov !== undefined)` é defensivo (PerspectiveCamera tem sempre fov);
+em PerspectiveCamera o ramo é sempre executado.
+
+#### Verificações adicionais
+- **`camera.up`**: grep `camera\.up|\.up\s*=|\.up\.set|\.up\.copy` em
+  SceneLevel3D.jsx → 0 matches (excluindo `camera.updateProjectionMatrix`).
+  `camera.up` NÃO é mutado em Play Mode → não precisa de restauração ✓.
+- **`camera.lookAt()` chamadas em useFrame Play Mode** (linhas 1520, 1524,
+  1529, 1533, 1543, 1561): mutam `camera.quaternion` (restaurado) mas NÃO
+  mutam OrbitControls.target. ✓
+- **OrbitControls renderização** — SceneLevel3D.jsx:1837-1842:
+  ```jsx
+  {!isGameMode && (
+    <OrbitControls ref={orbitRef} makeDefault enableDamping ... />
+  )}
+  ```
+  OrbitControls é montado APENAS em modo editor. Em Play Mode é desmontado.
+
+#### GAP — OrbitControls.target NÃO é restaurado
+**Cenário**: utilizador pan-Orbit (botão direito) antes de Play →
+`orbitRef.current.target` desloca-se para um ponto não-origem (ex.: (3,1,2)).
+Ao entrar em Play, OrbitControls desmonta-se. Ao sair, remonta com
+`target = (0,0,0)` por defeito. A câmara restaura para a posição/quaternion
+pré-Play (que apontavam para o target antigo), mas o novo OrbitControls tem
+target=(0,0,0). No próximo drag, o utilizador sente um "salto" porque o
+pivot mudou.
+
+**Impacto**: pequeno — só afecta utilizadores que fazem pan antes de Play.
+Não reproduz o sintoma "câmara desaparece".
+
+**Porquê não foi coberto**: o snapshot de câmara é tirado ANTES de Play, mas
+`orbitRef.current` já não existe no cleanup (OrbitControls desmontado).
+Restaurar `target` exigiria um useEffect dedicado que corre APÓS o
+remount do OrbitControls (ex.: `useEffect(() => { if (!isGameMode && orbitTargetSnapshot.current && orbitRef.current) { orbitRef.current.target.copy(orbitTargetSnapshot.current); orbitTargetSnapshot.current = null } }, [isGameMode])`).
+
+**Resumo A1**: Fix cobre o sintoma principal reportado. Único gap é o
+`OrbitControls.target` (cosmético, não reproduz "câmara desaparece").
+
+---
+
+### A2 — Menu 3 pontos e hambúrguer
+------------------------------------
+
+**Veredicto: Botões EXISTEM no código. Vários estão CSS-hidden em desktop
+(>1024px) por design. 1 bug previamente reportado (VerticalRail.jsx:83)
+está CORRIGIDO.**
+
+#### Botões que EXISTEM (com localizações exactas)
+
+| Botão | Ficheiro:linha | Tipo | className | Sempre visível? |
+|-------|---------------|------|-----------|-----------------|
+| Hamburger — Ferramentas (left drawer) | TopBar.jsx:242-249 | `IconMenu` | `icon drawer-toggle` | ✗ só ≤1024px |
+| 3-dots — Mais ações | TopBar.jsx:384-390 | `Icon name="more-horizontal"` | `icon drawer-toggle topbar-more-btn` | ✗ só ≤1024px |
+| Hamburger — Menu principal | TopBar.jsx:409-415 | `Icon name="menu"` | `icon` (sem drawer-toggle) | ✓ sempre |
+| Gear — Propriedades (right drawer) | TopBar.jsx:417-423 | `IconSettings` | `icon drawer-toggle` | ✗ só ≤1024px |
+| Hamburger — Menu | BottomBar.jsx:49-56 | `IconMenu` | `bb-btn` | ✗ BottomBar hidden >1024px |
+| 4-quadrados — Mais ferramentas | BottomBar.jsx:87-94 | `IconMoreGrid` | `bb-btn` | ✗ BottomBar hidden >1024px |
+| Hamburger — Menu (bottom) | VerticalRail.jsx:47 RAIL_BOTTOM | `Icon name="menu"` | `rail-btn` | ✓ sempre |
+| Gear — Config (bottom) | VerticalRail.jsx:48 RAIL_BOTTOM | `Icon name="settings"` | `rail-btn` | ✓ sempre |
+
+#### Componentes renderizados em App.jsx
+- `TopBar` — App.jsx:191 (quando `!scenePreviewOpen`) ✓
+- `VerticalRail` — App.jsx:192 (quando `!scenePreviewOpen && appMode !== 'flirscript' && appMode !== 'ui'`) ✓
+- `BottomBar` — App.jsx:215 (quando `!scenePreviewOpen`) ✓
+- `MoreToolsGrid` — App.jsx:217 (quando `ui.moreToolsOpen`) ✓ — aberto por BottomBar "Mais"
+- `MainMenu` — App.jsx:250 (quando `mainMenuOpen`) ✓
+
+#### CSS-hidden (global.css)
+
+| Regra CSS | Ficheiro:linha | Efeito |
+|-----------|----------------|--------|
+| `.drawer-toggle { display: none }` (default) | global.css:630-632 | Esconde TODOS os `.drawer-toggle` em desktop |
+| `@media (max-width: 1024px) { .drawer-toggle { display: inline-flex } }` | global.css:634-637 | Mostra drawer-toggle em mobile/tablet |
+| `@media (min-width: 1025px) { .drawer-toggle { display: none !important } }` | global.css:1005-1009 | Força esconder em desktop |
+| `.bottom-bar { display: none }` (default) | global.css:1075-1076 | Esconde BottomBar em desktop |
+| `@media (max-width: 1024px) { .bottom-bar { display: flex } }` | global.css:1126-1136 | Mostra BottomBar em mobile/tablet |
+| `.vertical-rail` — nenhuma regra `display: none` | global.css:4673+ | Sempre visível (apenas redimensionado em <375px e <340px) |
+
+**Botões afetados pela regra `.drawer-toggle` (HIDDEN em desktop >1024px):**
+1. TopBar.jsx:242-249 — IconMenu (Ferramentas / left drawer)
+2. TopBar.jsx:384-390 — Icon name="more-horizontal" (3-dots, Mais ações)
+3. TopBar.jsx:417-423 — IconSettings (Propriedades / right drawer)
+
+**BottomBar inteira HIDDEN em desktop >1024px** (afeta os 6 botões:
+Menu, Cubo, Transform, Editar, Mais, Props).
+
+#### Bug secundário previamente reportado — CORRIGIDO
+- AUDIT anterior (worklog linha 4246-4248) reportou:
+  `VerticalRail.jsx:83 — case 'openSettingsPanel': toggleMainMenu()`
+  (botão Config abria MainMenu em vez de SettingsPanel).
+- **Estado ACTUAL**: VerticalRail.jsx:83 reads `case 'toggleMainMenu': toggleMainMenu(); break` e VerticalRail.jsx:84 reads `case 'openSettingsPanel': openSettingsPanel(); break` ✓ CORRIGIDO.
+
+#### Botões MISSING (não implementados)
+- **VerticalRail NÃO tem botão "3-dots / overflow"** — só tem Menu (hamburger) + Config (gear) na secção bottom. Não há atalho rápido para abrir MoreToolsGrid a partir do rail.
+- **VerticalRail RAIL_TOOLS (9 ferramentas) não inclui acesso directo às TABS do LeftPanel** (Editar, Modificadores, Escanpir, Materiais, Cena, Booleanas). Para aceder a estas tabs em desktop, o utilizador precisa de abrir o LeftDrawer — mas o toggle do LeftDrawer (TopBar IconMenu com `drawer-toggle`) está HIDDEN em desktop.
+
+#### Inconsistência visual
+- BottomBar.jsx:87-94 usa `IconMoreGrid` (4 quadrados) — NÃO é o ícone "3 dots" que o utilizador espera. O `IconMoreGrid` (Icons.jsx:373-380) é uma grelha 2×2 de quadrados.
+- TopBar.jsx:384-390 usa `Icon name="more-horizontal"` (3 dots) — este sim é o "3-dots" esperado, mas está CSS-hidden em desktop.
+
+#### Resumo A2
+- Em **desktop (>1024px)** o utilizador NÃO vê: TopBar 3-dots, TopBar IconMenu (left drawer), TopBar IconSettings (right drawer), BottomBar inteira. VÊ: TopBar hamburger (Menu principal, sem drawer-toggle) + VerticalRail (com hamburger e gear no fundo).
+- Em **mobile/tablet (≤1024px)** o utilizador vê todos os botões (TopBar drawer-toggles + TopBar main hamburger + BottomBar completa + VerticalRail).
+- Se o utilizador está em desktop e reporta "3-dots e hamburger desapareceram", está a descrever o comportamento esperado (CSS hidden by design). O bug REAL da regressão anterior (Rig/Peso tabs removidas) continua por corrigir — ver AUDIT anterior (linha 4230+) e SUGGESTED FIX (linha 4275+).
+
+---
+
+### A3 — Aba de Configurações (SettingsPanel.jsx + useStore.js)
+-----------------------------------------------------------------
+
+**Veredicto: SettingsPanel COBRE ~30% do especificado. Store tem `renderSettings`
+mas FALTA `projectSettings`, `editorSettings`, `physicsSettings`, `audioSettings`.**
+
+#### SettingsPanel.jsx — secções PRESENTES (188 linhas totais)
+
+| Secção | Linhas | Campos | Persistência |
+|--------|--------|--------|--------------|
+| Nível de Qualidade Gráfica | 78-106 | 5 preset buttons (performance, balanced, realista, super-realista, hiper-realista) | store.renderSettings.qualityLevel + QUALITY_PRESETS |
+| Projeto | 109-141 | Nome, Resolução alvo, Gravidade global, LOD por defeito | LOCAL useState + write direto a localStorage `me3d.project.v1` (NÃO passa pelo store) |
+| Guardar Projeto | 143-151 | Botão "Guardar como .flirengine" | exportProjectJSON() + download |
+| Editor | 153-170 | Sensibilidade dos gizmos, Unidades | LOCAL useState + write direto a localStorage (NÃO passa pelo store) |
+| Atalhos de Teclado | 172-183 | Lista READ-ONLY hardcoded (HOTKEYS const linhas 13-22) | N/A — não editável |
+
+#### SettingsPanel.jsx — secções MISSING (vs especificação)
+
+| Secção esperada | Campos esperados | Status |
+|-----------------|------------------|--------|
+| **Projeto** | Nome ✓, versão ✗, autor ✗, descrição ✗, ícone ✗ | FALTAM 4 campos |
+| **Editor** | Tema (claro/escuro) ✗, idioma ✗, atalhos ✓ (read-only), snapping ✗ | FALTAM 3 campos (snapping existe no store useStore.js:1562-1567 mas NÃO está surfaced no SettingsPanel — só via TopBar SnappingControls.jsx) |
+| **Render** | Qualidade ✓, resolução ✗, FPS ✗, sombras ✗ (só via preset), anti-aliasing ✗, pixel ratio ✗ (só via preset) | FALTAM 4 campos; granular controls para shadowMapSize/shadowDistance/flirGI/flirAdaptiveMesh/vertexAO/pom/postProcessing/waterQuality/pixelRatio existem no store mas NÃO surfaced na UI |
+| **Física** | Gravidade ✓ (em "Projeto" como global, mas é local useState), timestep ✗, iterações ✗, damping ✗ | Secção FÍSICA INEXISTENTE — sem secção dedicada; "Gravidade" aparece em "Projeto" mas só como state local React |
+| **Áudio** | Volume master ✗, música ✗, efeitos ✗ | Secção ÁUDIO INEXISTENTE |
+
+#### useStore.js — gaps de state
+
+Verificado via `grep -n "projectSettings|editorSettings|physicsSettings|audioSettings|theme|language|antialias|targetFps|timestep|damping|masterVolume|musicVolume"` em /home/z/my-project/src/store/useStore.js:
+
+| State esperado | Existe? | Localização | Notas |
+|----------------|---------|-------------|-------|
+| `projectSettings` | ✗ NÃO | — | Só `projectName` (linha 95, string) e `renderSettings` (linha 82). SettingsPanel.jsx:30-40 usa LOCAL useState para `targetResolution`, `gravity`, `defaultLOD`, `gizmoSensitivity`, `units` — persiste via write direto a `localStorage.getItem('me3d.project.v1')` (linhas 44-49), NÃO pelo store. |
+| `editorSettings` | ✗ NÃO | — | Mesma situação — `gizmoSensitivity`/`units` são useState local. Não há `theme`/`language` no store (grep 0 matches). |
+| `renderSettings` | ✓ SIM | useStore.js:82-94 | qualityLevel, flirGI, flirAdaptiveMesh, shadowOptimizations, shadowDistance, shadowMapSize, vertexAO, pom, postProcessing, waterQuality, pixelRatio. Setters: `setRenderSettings` (1616-1618), `setQualityLevel` (1619-1624). MISSING do state: `targetFps`, `antialias`, `resolutionScale`. |
+| `physicsSettings` (global) | ✗ NÃO | — | Física é PER-SCENE via `setScenePhysics(sceneId, patch)` (useStore.js:1454-1463) escrevendo em `scenes[i].physics`. `createScene` (linha 1175-1201) NÃO inicializa `physics` — fica `undefined` até primeiro `setScenePhysics`. Não há state global de timestep/iterations/damping. |
+| `audioSettings` | ✗ NÃO | — | Grep `masterVolume\|musicVolume\|sfxVolume\|audioSettings` em useStore.js → 0 matches. Áudio completamente ausente do store. |
+| `theme` (claro/escuro) | ✗ NÃO | — | Grep `theme\|locale\|i18n\|language` em useStore.js → 0 matches. Não há sistema de temas no store. |
+| `language` / `i18n` | ✗ NÃO | — | Idem. UI é hardcoded PT-PT. |
+| `snapping` | ✓ SIM | useStore.js:1561-1567 | `snapEnabled`, `snapSize`, `snapRotationStep`, `toggleSnap`, `setSnapSize`, `setSnapRotationStep`. MAS NÃO surfaced no SettingsPanel — só via `SnappingControls.jsx` no TopBar (App.jsx não renderiza SnappingControls directamente; é importado por TopBar.jsx:30 e usado na linha 371). |
+
+#### Resumo A3
+- SettingsPanel.jsx cobre: 4 campos de Projeto (Nome, Resolução, Gravidade, LOD) + 2 campos de Editor (Sensibilidade, Unidades) + 5 presets de Qualidade Gráfica + lista read-only de Atalhos + botão Guardar .flirengine.
+- FALTAM em SettingsPanel: 4 campos de Projeto (versão, autor, descrição, ícone), 3 campos de Editor (tema, idioma, snapping), 4+ campos de Render granulares (resolução, FPS, sombras, AA, pixel ratio), secção Física inteira (timestep, iterações, damping), secção Áudio inteira (master, música, efeitos).
+- Store gaps: faltam `projectSettings`, `editorSettings`, `physicsSettings`, `audioSettings` como top-level state. `renderSettings` existe mas faltam `targetFps`/`antialias`/`resolutionScale`. SettingsPanel atual usa useState local + write direto a localStorage para `projectName`/`targetResolution`/`gravity`/`defaultLOD`/`gizmoSensitivity`/`units` — não passa pelo store, pelo que estes valores NÃO são persistidos em IndexedDB sync nem em autosave (useAutosave/useIndexedDBSync em App.jsx:130-132 só sincronizam o store Zustand).
+
+================================================================================
+## FIM BUG-A-INVEST
+================================================================================

@@ -382,7 +382,7 @@ export default function TopBar() {
 
       {/* Botão "Mais" — visível só em mobile, abre menu overflow com todas as ações escondidas */}
       <button
-        className="icon drawer-toggle topbar-more-btn"
+        className="icon topbar-more-btn"
         onClick={() => setMoreMenuOpen(true)}
         title="Mais ações (Guardar, Importar, Abrir...)"
       >

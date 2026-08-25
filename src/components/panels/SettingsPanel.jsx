@@ -1,12 +1,18 @@
 /**
- * SettingsPanel — Configurações do Projeto e do Editor.
+ * SettingsPanel — Configurações completas do Projeto e do Editor.
  *
- * Configurações do Projeto: nome, resolução alvo, gravidade, LOD default
- * Configurações do Editor: sensibilidade de gizmos, unidades, atalhos
+ * A3 (Sessão 12) — expandido com 6 secções:
+ *  - Projeto: nome, versão, autor, descrição, ícone
+ *  - Editor: tema, idioma, atalhos, snapping (grade, ângulo)
+ *  - Render: qualidade, FPS alvo, sombras, anti-aliasing, pixel ratio, resolução
+ *  - Física: gravidade, timestep, iterações, damping
+ *  - Áudio: volume master, música, efeitos
+ *  - Ficheiro: guardar/carregar projeto, exportar JSON
  *
- * Acessível via Menu Principal → Configurações
+ * Tudo persistido no useStore via Zustand persist (localStorage + IndexedDB).
+ *
+ * Acessível via Menu Principal → Configurações, ou botão "Config" no VerticalRail.
  */
-import { useState } from 'react'
 import { useStore, QUALITY_PRESETS } from '../../store/useStore'
 import { IconClose } from '../ui/Icons'
 
@@ -19,42 +25,50 @@ const HOTKEYS = [
   { key: 'Ctrl+D', action: 'Duplicar' },
   { key: 'Del', action: 'Apagar' },
   { key: 'Esc', action: 'Desselecionar / Fechar' },
+  { key: 'F3', action: 'Toggle Debug Overlay' },
 ]
+
+const Section = ({ title, icon, children }) => (
+  <div className="panel-section">
+    <h4>{icon ? `${icon} ` : ''}{title}</h4>
+    {children}
+  </div>
+)
+
+const Row = ({ label, children }) => (
+  <div className="prop-row">
+    <label>{label}</label>
+    {children}
+  </div>
+)
+
+const Slider = ({ label, value, min, max, step, onChange, fmt }) => (
+  <Row label={`${label}: ${fmt ? fmt(value ?? 0) : (value ?? 0)}`}>
+    <input type="range" min={min} max={max} step={step} value={value ?? 0} onChange={(e) => onChange(Number(e.target.value))} />
+  </Row>
+)
 
 export default function SettingsPanel({ onClose }) {
   const toast = useStore((s) => s.toast)
   const exportProjectJSON = useStore((s) => s.exportProjectJSON)
-  const renderSettings = useStore((s) => s.renderSettings)
+  // Render settings
+  const renderSettings = useStore((s) => s.renderSettings) || {}
   const setRenderSettings = useStore((s) => s.setRenderSettings)
   const setQualityLevel = useStore((s) => s.setQualityLevel)
-  const [projectName, setProjectName] = useState(() => {
-    try {
-      const data = JSON.parse(localStorage.getItem('me3d.project.v1') || '{}')
-      return data.state?.projectName || 'Meu Jogo'
-    } catch { return 'Meu Jogo' }
-  })
-  const [targetResolution, setTargetResolution] = useState('mobile')
-  const [gravity, setGravity] = useState(-9.82)
-  const [defaultLOD, setDefaultLOD] = useState('auto')
-  const [gizmoSensitivity, setGizmoSensitivity] = useState(1.0)
-  const [units, setUnits] = useState('meters')
-
-  const saveSettings = () => {
-    // Guardar nome do projeto no state
-    const data = JSON.parse(localStorage.getItem('me3d.project.v1') || '{}')
-    if (data.state) {
-      data.state.projectName = projectName
-      data.state.projectSettings = { targetResolution, gravity, defaultLOD }
-      data.state.editorSettings = { gizmoSensitivity, units }
-      localStorage.setItem('me3d.project.v1', JSON.stringify(data))
-    }
-    toast('Configurações guardadas', 'success')
-  }
+  // A3: settings estruturadas (com fallbacks para estado persistido antigo)
+  const projectSettings = useStore((s) => s.projectSettings) || { name: '', version: '1.0.0', author: '', description: '', iconColor: '#2f81f7' }
+  const setProjectSettings = useStore((s) => s.setProjectSettings)
+  const editorSettings = useStore((s) => s.editorSettings) || { theme: 'dark', language: 'pt-PT', gizmoSensitivity: 1.0, units: 'meters', snapEnabled: false, snapSize: 0.5, snapRotationStep: 15 }
+  const setEditorSettings = useStore((s) => s.setEditorSettings)
+  const physicsSettings = useStore((s) => s.physicsSettings) || { gravity: -9.82, timestep: 1/60, iterations: 10, damping: 0.01 }
+  const setPhysicsSettings = useStore((s) => s.setPhysicsSettings)
+  const audioSettings = useStore((s) => s.audioSettings) || { masterVolume: 1.0, musicVolume: 0.7, sfxVolume: 0.8 }
+  const setAudioSettings = useStore((s) => s.setAudioSettings)
+  const setTheme = useStore((s) => s.setTheme)
 
   const saveAsFlirengine = () => {
     const json = exportProjectJSON()
-    // Usar o nome do projeto para o ficheiro
-    const filename = (projectName || 'projeto').replace(/[^a-zA-Z0-9-_]/g, '_').toLowerCase() + '.flirengine'
+    const filename = (projectSettings.name || 'projeto').replace(/[^a-zA-Z0-9-_]/g, '_').toLowerCase() + '.flirengine'
     const blob = new Blob([json], { type: 'application/octet-stream' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -63,6 +77,15 @@ export default function SettingsPanel({ onClose }) {
     a.click()
     URL.revokeObjectURL(url)
     toast(`Projeto guardado como "${filename}"`, 'success')
+  }
+
+  // Aplicar tema (claro/escuro) — adiciona/remove class no <html>
+  const applyTheme = (theme) => {
+    setEditorSettings({ theme })
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', theme)
+    }
+    toast(`Tema: ${theme === 'dark' ? 'Escuro' : 'Claro'}`, 'success')
   }
 
   return (
@@ -75,103 +98,116 @@ export default function SettingsPanel({ onClose }) {
         </div>
 
         <div className="panel-body">
-          {/* FASE 6: Níveis de Qualidade Gráfica */}
-          <div className="panel-section">
-            <h4>Nível de Qualidade Gráfica</h4>
-            <div className="small muted mb-2">
-              Cada nível ativa progressivamente mais recursos pesados.
-              Valores de FPS estimados para Realme C33 / WebGL2.
-            </div>
+          {/* === PROJETO === */}
+          <Section title="Projeto" icon="📁">
+            <Row label="Nome do projeto">
+              <input type="text" value={projectSettings.name} onChange={(e) => setProjectSettings({ name: e.target.value })} />
+            </Row>
+            <Row label="Versão">
+              <input type="text" value={projectSettings.version} onChange={(e) => setProjectSettings({ version: e.target.value })} placeholder="1.0.0" />
+            </Row>
+            <Row label="Autor">
+              <input type="text" value={projectSettings.author} onChange={(e) => setProjectSettings({ author: e.target.value })} placeholder="O teu nome" />
+            </Row>
+            <Row label="Descrição">
+              <textarea value={projectSettings.description} onChange={(e) => setProjectSettings({ description: e.target.value })} placeholder="Descrição do projeto" rows={3} style={{ width: '100%' }} />
+            </Row>
+            <Row label="Cor do ícone">
+              <input type="color" value={projectSettings.iconColor} onChange={(e) => setProjectSettings({ iconColor: e.target.value })} />
+            </Row>
+          </Section>
+
+          {/* === RENDER === */}
+          <Section title="Render" icon="🎨">
+            <div className="small muted mb-2">Nível de qualidade — cada nível ativa mais recursos pesados.</div>
             {Object.entries(QUALITY_PRESETS).map(([key, preset]) => (
               <button
                 key={key}
                 onClick={() => { setQualityLevel(key); toast(`Qualidade: ${preset.label}`, 'success') }}
                 style={{
-                  display: 'block',
-                  width: '100%',
-                  padding: '8px 12px',
-                  marginBottom: 6,
-                  borderRadius: 6,
+                  display: 'block', width: '100%', padding: '8px 12px', marginBottom: 6, borderRadius: 6,
                   border: renderSettings.qualityLevel === key ? '2px solid #2f81f7' : '1px solid #30363d',
-                  background: renderSettings.qualityLevel === key ? '#161b22' : '#0d1117',
-                  color: '#e6edf3',
-                  textAlign: 'left',
-                  cursor: 'pointer',
+                  background: renderSettings.qualityLevel === key ? '#161b22' : '#0d1117', color: '#e6edf3',
+                  textAlign: 'left', cursor: 'pointer',
                 }}
               >
                 <div style={{ fontWeight: 600, fontSize: 13 }}>{preset.label}</div>
                 <div className="small muted">{preset.description}</div>
               </button>
             ))}
-          </div>
 
-          {/* Configurações do Projeto */}
-          <div className="panel-section">
-            <h4>Projeto</h4>
-            <div className="prop-row">
-              <label>Nome do projeto</label>
-              <input type="text" value={projectName} onChange={(e) => setProjectName(e.target.value)}
-                placeholder="Meu Jogo" />
-            </div>
-            <div className="prop-row">
-              <label>Resolução alvo</label>
-              <select value={targetResolution} onChange={(e) => setTargetResolution(e.target.value)}>
-                <option value="mobile">Mobile (360-414px)</option>
-                <option value="tablet">Tablet (768px)</option>
-                <option value="desktop">Desktop (1920px)</option>
-                <option value="auto">Auto</option>
+            <Slider label="FPS alvo" value={renderSettings.targetFps} min={15} max={144} step={1} onChange={(v) => setRenderSettings({ targetFps: v })} />
+            <Slider label="Pixel ratio" value={renderSettings.pixelRatio} min={0.5} max={3} step={0.25} onChange={(v) => setRenderSettings({ pixelRatio: v })} fmt={(v) => v.toFixed(2)} />
+            <Slider label="Resolution scale" value={renderSettings.resolutionScale} min={0.5} max={2} step={0.1} onChange={(v) => setRenderSettings({ resolutionScale: v })} fmt={(v) => v.toFixed(1) + 'x'} />
+            <Slider label="Shadow map size" value={renderSettings.shadowMapSize} min={256} max={4096} step={256} onChange={(v) => setRenderSettings({ shadowMapSize: v })} />
+            <Slider label="Shadow distance" value={renderSettings.shadowDistance} min={5} max={100} step={5} onChange={(v) => setRenderSettings({ shadowDistance: v })} fmt={(v) => v + 'm'} />
+
+            <Row label="Sombras">
+              <input type="checkbox" checked={renderSettings.shadows !== false} onChange={(e) => setRenderSettings({ shadows: e.target.checked })} />
+            </Row>
+            <Row label="Anti-aliasing">
+              <input type="checkbox" checked={renderSettings.antialias !== false} onChange={(e) => setRenderSettings({ antialias: e.target.checked })} />
+            </Row>
+            <Row label="FlirGI (iluminação global)">
+              <input type="checkbox" checked={renderSettings.flirGI} onChange={(e) => setRenderSettings({ flirGI: e.target.checked })} />
+            </Row>
+            <Row label="Post-processing (bloom, etc.)">
+              <input type="checkbox" checked={renderSettings.postProcessing} onChange={(e) => setRenderSettings({ postProcessing: e.target.checked })} />
+            </Row>
+          </Section>
+
+          {/* === EDITOR === */}
+          <Section title="Editor" icon="🖊️">
+            <Row label="Tema">
+              <select value={editorSettings.theme} onChange={(e) => applyTheme(e.target.value)}>
+                <option value="dark">Escuro</option>
+                <option value="light">Claro</option>
               </select>
-            </div>
-            <div className="prop-row">
-              <label>Gravidade global: {gravity}</label>
-              <input type="range" min="-20" max="0" step="0.1" value={gravity}
-                onChange={(e) => setGravity(Number(e.target.value))} />
-            </div>
-            <div className="prop-row">
-              <label>LOD por defeito</label>
-              <select value={defaultLOD} onChange={(e) => setDefaultLOD(e.target.value)}>
-                <option value="auto">Automático</option>
-                <option value="high">Alto (mais detalhe)</option>
-                <option value="medium">Médio</option>
-                <option value="low">Baixo (mais performance)</option>
+            </Row>
+            <Row label="Idioma">
+              <select value={editorSettings.language} onChange={(e) => setEditorSettings({ language: e.target.value })}>
+                <option value="pt-PT">Português (PT)</option>
+                <option value="pt-BR">Português (BR)</option>
+                <option value="en">English</option>
+                <option value="es">Español</option>
               </select>
-            </div>
-            <button onClick={saveSettings} className="primary" style={{ width: '100%', marginTop: 8 }}>Guardar Configurações
-            </button>
-          </div>
-
-          {/* Guardar como .flirengine com nome do projeto */}
-          <div className="panel-section">
-            <h4>Guardar Projeto</h4>
-            <div className="small muted mb-2">
-              O ficheiro será guardado com o nome do projeto: <strong>{(projectName || 'projeto').replace(/[^a-zA-Z0-9-_]/g, '_').toLowerCase()}.flirengine</strong>
-            </div>
-            <button onClick={saveAsFlirengine} className="primary" style={{ width: '100%' }}>Guardar como .flirengine
-            </button>
-          </div>
-
-          {/* Configurações do Editor */}
-          <div className="panel-section">
-            <h4>🖊️ Editor</h4>
-            <div className="prop-row">
-              <label>Sensibilidade dos gizmos: {gizmoSensitivity.toFixed(2)}</label>
-              <input type="range" min="0.1" max="3" step="0.1" value={gizmoSensitivity}
-                onChange={(e) => setGizmoSensitivity(Number(e.target.value))} />
-            </div>
-            <div className="prop-row">
-              <label>Unidades</label>
-              <select value={units} onChange={(e) => setUnits(e.target.value)}>
+            </Row>
+            <Slider label="Sensibilidade gizmos" value={editorSettings.gizmoSensitivity} min={0.1} max={3} step={0.1} onChange={(v) => setEditorSettings({ gizmoSensitivity: v })} fmt={(v) => v.toFixed(2)} />
+            <Row label="Unidades">
+              <select value={editorSettings.units} onChange={(e) => setEditorSettings({ units: e.target.value })}>
                 <option value="meters">Metros</option>
                 <option value="centimeters">Centímetros</option>
                 <option value="feet">Pés</option>
                 <option value="units">Unidades (genérico)</option>
               </select>
-            </div>
-          </div>
+            </Row>
 
-          {/* Lista de Atalhos */}
-          <div className="panel-section">
-            <h4>⌨️ Atalhos de Teclado</h4>
+            {/* Snapping */}
+            <div className="small muted mt-2 mb-1" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Snapping</div>
+            <Row label="Snap ativo (grade)">
+              <input type="checkbox" checked={editorSettings.snapEnabled} onChange={(e) => setEditorSettings({ snapEnabled: e.target.checked })} />
+            </Row>
+            <Slider label="Tamanho da grade" value={editorSettings.snapSize} min={0.1} max={5} step={0.1} onChange={(v) => setEditorSettings({ snapSize: v })} fmt={(v) => v.toFixed(1) + 'u'} />
+            <Slider label="Ângulo de rotação" value={editorSettings.snapRotationStep} min={1} max={90} step={1} onChange={(v) => setEditorSettings({ snapRotationStep: v })} fmt={(v) => v + '°'} />
+          </Section>
+
+          {/* === FÍSICA === */}
+          <Section title="Física" icon="⚙️">
+            <Slider label="Gravidade" value={physicsSettings.gravity} min={-30} max={0} step={0.1} onChange={(v) => setPhysicsSettings({ gravity: v })} fmt={(v) => v.toFixed(1) + ' m/s²'} />
+            <Slider label="Timestep" value={physicsSettings.timestep} min={0.005} max={0.05} step={0.005} onChange={(v) => setPhysicsSettings({ timestep: v })} fmt={(v) => (v * 1000).toFixed(0) + 'ms'} />
+            <Slider label="Iterações do solver" value={physicsSettings.iterations} min={1} max={30} step={1} onChange={(v) => setPhysicsSettings({ iterations: v })} />
+            <Slider label="Damping" value={physicsSettings.damping} min={0} max={0.5} step={0.01} onChange={(v) => setPhysicsSettings({ damping: v })} fmt={(v) => v.toFixed(2)} />
+          </Section>
+
+          {/* === ÁUDIO === */}
+          <Section title="Áudio" icon="🔊">
+            <Slider label="Volume master" value={audioSettings.masterVolume} min={0} max={1} step={0.05} onChange={(v) => setAudioSettings({ masterVolume: v })} fmt={(v) => Math.round(v * 100) + '%'} />
+            <Slider label="Música" value={audioSettings.musicVolume} min={0} max={1} step={0.05} onChange={(v) => setAudioSettings({ musicVolume: v })} fmt={(v) => Math.round(v * 100) + '%'} />
+            <Slider label="Efeitos (SFX)" value={audioSettings.sfxVolume} min={0} max={1} step={0.05} onChange={(v) => setAudioSettings({ sfxVolume: v })} fmt={(v) => Math.round(v * 100) + '%'} />
+          </Section>
+
+          {/* === ATALHOS === */}
+          <Section title="Atalhos de Teclado" icon="⌨️">
             <div className="settings-hotkeys">
               {HOTKEYS.map((hk) => (
                 <div key={hk.key} className="settings-hotkey-row">
@@ -180,7 +216,21 @@ export default function SettingsPanel({ onClose }) {
                 </div>
               ))}
             </div>
-          </div>
+          </Section>
+
+          {/* === FICHEIRO === */}
+          <Section title="Guardar Projeto" icon="💾">
+            <div className="small muted mb-2">
+              Ficheiro: <strong>{(projectSettings.name || 'projeto').replace(/[^a-zA-Z0-9-_]/g, '_').toLowerCase()}.flirengine</strong>
+            </div>
+            <button onClick={saveAsFlirengine} className="primary" style={{ width: '100%' }}>
+              💾 Guardar como .flirengine
+            </button>
+            <div className="small muted mt-2">
+              As configurações deste painel são guardadas automaticamente no navegador
+              (localStorage + IndexedDB) via Zustand persist.
+            </div>
+          </Section>
         </div>
       </aside>
     </>

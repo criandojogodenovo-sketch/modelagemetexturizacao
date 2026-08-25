@@ -14,6 +14,7 @@ import { useStore } from '../../store/useStore'
 import { listProjects, loadProject, deleteProject } from '../../utils/db'
 import { flirQuestArenaJSON } from '../../utils/game/flirQuestArena'
 import { flirQuestSagaJSON } from '../../utils/game/flirQuestSaga'
+import { flirQuestShowcaseJSON } from '../../utils/game/flirQuestShowcase'
 import Ebook from './Ebook'
 import { Icon } from '../ui/iconMap'
 
@@ -108,6 +109,17 @@ export default function HomePage({ onOpenProject }) {
     }
   }
 
+  // Carregar jogo demo "FlirQuest Showcase" (teste de stress completo)
+  const handleLoadShowcase = () => {
+    try {
+      loadProjectJSON(flirQuestShowcaseJSON)
+      toast('FlirQuest Showcase carregado! 2 cenas (Cidade + Floresta), NPCs com IA, items, boss. Clica em ▶ Play.', 'success', 6000)
+      onOpenProject?.()
+    } catch (err) {
+      toast('Erro ao carregar Showcase: ' + err.message, 'error')
+    }
+  }
+
   if (showEbook) {
     return <Ebook onClose={() => setShowEbook(false)} />
   }
@@ -144,6 +156,10 @@ export default function HomePage({ onOpenProject }) {
               <button onClick={handleLoadSaga} title="Carregar RPG/FPS profissional completo (2 cenas, BOSS, etc.)" style={{ background: '#7c3aed', color: 'white' }}>
                 <Icon name="sword" size={12} />
                 <span>RPG Saga</span>
+              </button>
+              <button onClick={handleLoadShowcase} title="FlirQuest Showcase — teste de stress completo (personagem humano, cidade, NPCs IA, boss)" style={{ background: '#dc2626', color: 'white' }}>
+                <Icon name="sparkles" size={12} />
+                <span>Showcase</span>
               </button>
               <button className="primary" onClick={handleNew}>
                 <Icon name="plus" size={12} />

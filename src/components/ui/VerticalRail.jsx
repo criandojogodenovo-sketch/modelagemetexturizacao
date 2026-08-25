@@ -41,10 +41,11 @@ const RAIL_TOOLS = [
   { id: 'terrain', icon: 'mountain', label: 'Terreno', action: 'openTerrainEditor' },
   { id: 'instancing', icon: 'boxes', label: 'Instancing (GPU)', action: 'openInstancingPanel' },
   { id: 'marketplace', icon: 'package', label: 'Marketplace', action: 'openMarketplace' },
+  { id: 'more', icon: 'more-horizontal', label: 'Mais ferramentas (3 pontos)', action: 'toggleMoreTools' },
 ]
 
 const RAIL_BOTTOM = [
-  { id: 'menu', icon: 'menu', label: 'Menu', action: 'toggleMainMenu' },
+  { id: 'menu', icon: 'menu', label: 'Menu (hambúrguer)', action: 'toggleMainMenu' },
   { id: 'settings', icon: 'settings', label: 'Config', action: 'openSettingsPanel' },
 ]
 
@@ -82,6 +83,10 @@ export default function VerticalRail() {
       case 'openInstancingPanel': openInstancingPanel(); break
       case 'toggleMainMenu': toggleMainMenu(); break
       case 'openSettingsPanel': openSettingsPanel(); break
+      case 'toggleMoreTools':
+        // A2: botão "3 pontos" no rail para abrir MoreToolsGrid
+        useStore.getState().toggleMoreTools()
+        break
       case 'openBuilders':
         // Fase 2 — Abrir painel de Construtores Profissionais
         useStore.getState().openBuildersPanel()

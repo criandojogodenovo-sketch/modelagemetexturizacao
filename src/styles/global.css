@@ -1001,10 +1001,15 @@ label {
   }
 }
 
-/* Desktop: hide drawer-toggle */
+/* Desktop: hide left/right drawer-toggle (use VerticalRail + LeftPanel instead).
+   The .topbar-more-btn (3 dots) stays visible — gives access to overflow menu. */
 @media (min-width: 1025px) {
   .drawer-toggle {
     display: none !important;
+  }
+  /* A2: garantir que o botão "3 pontos" (Mais ações) fica visível em desktop */
+  .topbar-more-btn {
+    display: inline-flex !important;
   }
 }
 

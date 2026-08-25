@@ -277,7 +277,7 @@ function ViewModelFPS({ activeScene, isGameMode }) {
 }
 
 // ===== Componente que gere o modo jogo dentro do canvas =====
-function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }) {
+function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, orbitRef }) {
   const { camera, scene } = useThree()
   const physicsRef = useRef(null)
   // BUG6-FIX: Pathfinder partilhado por todos os NPCs da cena — populated uma vez
@@ -306,6 +306,10 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
   // do Play Mode. Sem isto, ao sair do Play a câmara fica na posição/rotação do
   // último frame de Play → "câmera desaparece" (vista perdida).
   const cameraSnapshotRef = useRef(null)
+  // A1: Snapshot do OrbitControls.target — OrbitControls é desmontado durante
+  // Play e re-montado no Stop com target default (0,0,0). Sem restaurar, o
+  // utilizador perde o ponto de orbitação se tiver feito pan antes do Play.
+  const orbitTargetSnapshotRef = useRef(null)
   // Bug #4: parent original de cada mesh — GroupObject.attach() reposiciona meshes
   // imperativamente; R3F não desfaz reparenting. Guardar para restaurar no Stop.
   const meshParentsRef = useRef(new Map())
@@ -433,6 +437,13 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
       near: camera.near,
       far: camera.far,
       aspect: camera.aspect,
+    }
+    // A1: Snapshot do target do OrbitControls. orbitRef.current pode ser null
+    // se o utilizador ainda não interagiu, mas o OrbitControls tem target default (0,0,0).
+    if (orbitRef.current && orbitRef.current.target) {
+      orbitTargetSnapshotRef.current = orbitRef.current.target.clone()
+    } else {
+      orbitTargetSnapshotRef.current = null
     }
     // Bug #4: Snapshot dos parents originais de cada mesh. GroupObject.attach()
     // reposiciona meshes imperativamente durante Runtime; R3F não rastreia nem
@@ -1282,9 +1293,23 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode }
         }
         cameraSnapshotRef.current = null
       }
+      // A1: Restaurar OrbitControls.target — OrbitControls é desmontado durante
+      // Play e remontado no Stop. Remontagem usa target default (0,0,0); sem
+      // restaurar, o utilizador perde o ponto de orbitação pós-pan.
+      // Pequeno delay para o OrbitControls remontar primeiro.
+      if (orbitTargetSnapshotRef.current) {
+        const savedTarget = orbitTargetSnapshotRef.current
+        setTimeout(() => {
+          if (orbitRef.current) {
+            orbitRef.current.target.copy(savedTarget)
+            orbitRef.current.update()
+          }
+        }, 50)
+        orbitTargetSnapshotRef.current = null
+      }
       gameStartedRef.current = false
     }
-  }, [isGameMode, setupScene])
+  }, [isGameMode, setupScene, orbitRef])
 
   // Vector3 reutilizável para câmara (evita allocation por frame)
   const _camTarget = useRef(new THREE.Vector3())
@@ -1856,7 +1881,7 @@ export default function SceneLevel3D() {
           <ViewModelFPS activeScene={activeScene} isGameMode={isGameMode} />
 
           {/* GameMode — activado quando scenePreviewOpen */}
-          <GameMode activeScene={activeScene} objects={objects} meshRefs={meshRefs} conectMeshRefs={conectMeshRefs} isGameMode={isGameMode} />
+          <GameMode activeScene={activeScene} objects={objects} meshRefs={meshRefs} conectMeshRefs={conectMeshRefs} isGameMode={isGameMode} orbitRef={orbitRef} />
         </Suspense>
       </Canvas>
     </div>
