@@ -296,6 +296,9 @@ export function createPhysicsSystem(options = {}) {
     const entry = bodies.get(instanceId)
     // BUG6-FIX: aceitar NpcObject em paralelo com PersonalObject
     if (!entry || !isCharacterType(entry.type)) return
+    // A fix: acordar o body se estiver a dormir (cannon-es allowSleep=true
+    // faz bodies adormecerem após inatividade, ignorando velocity changes)
+    if (entry.body.wakeUp) entry.body.wakeUp()
     // Aplicar velocidade horizontal diretamente
     entry.body.velocity.x = direction[0] * speed
     entry.body.velocity.z = direction[2] * speed
@@ -308,6 +311,7 @@ export function createPhysicsSystem(options = {}) {
   function moveNpc(instanceId, direction, speed) {
     const entry = bodies.get(instanceId)
     if (!entry || entry.type !== 'NpcObject') return
+    if (entry.body.wakeUp) entry.body.wakeUp()
     entry.body.velocity.x = direction[0] * speed
     entry.body.velocity.z = direction[2] * speed
   }
@@ -316,6 +320,7 @@ export function createPhysicsSystem(options = {}) {
     const entry = bodies.get(instanceId)
     // BUG6-FIX: aceitar NpcObject
     if (!entry || !isCharacterType(entry.type)) return
+    if (entry.body.wakeUp) entry.body.wakeUp()
     // FASE 9: Coyote time + salto duplo configurável
     const coyoteTime = entry.conect.coyoteTime ?? 0.15
     const maxJumps = entry.conect.maxJumps ?? 1
