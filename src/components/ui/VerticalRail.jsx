@@ -42,6 +42,7 @@ const RAIL_TOOLS = [
   { id: 'instancing', icon: 'boxes', label: 'Instancing (GPU)', action: 'openInstancingPanel' },
   { id: 'marketplace', icon: 'package', label: 'Marketplace', action: 'openMarketplace' },
   { id: 'more', icon: 'more-horizontal', label: 'Mais ferramentas (3 pontos)', action: 'toggleMoreTools' },
+  { id: 'layers', icon: 'layers', label: 'Layers', action: 'openLayersPanel' },
 ]
 
 const RAIL_BOTTOM = [
@@ -86,6 +87,10 @@ export default function VerticalRail() {
       case 'toggleMoreTools':
         // A2: botão "3 pontos" no rail para abrir MoreToolsGrid
         useStore.getState().toggleMoreTools()
+        break
+      case 'openLayersPanel':
+        // C3: Abrir painel de Layers
+        useStore.getState().openLayersPanel()
         break
       case 'openBuilders':
         // Fase 2 — Abrir painel de Construtores Profissionais

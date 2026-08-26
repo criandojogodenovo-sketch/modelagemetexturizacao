@@ -27,6 +27,16 @@ import SceneObject from '../3d/SceneObject'
 const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, setMeshRef }, meshRef) {
   const def = findConectDefinition(conect.type)
 
+  // C1: Verificar visibilidade da layer — se a layer está oculta, não renderiza
+  const hiddenLayers = useStore((s) => s.hiddenLayers)
+  const conectLayer = conect.layer || 'world'
+  const isLayerHidden = hiddenLayers.includes(conectLayer)
+  if (isLayerHidden && !useStore.getState().scenePreviewOpen) {
+    // Em Play Mode, mostrar tudo (layers só afetam o editor)
+    // Fora do Play Mode, ocultar meshes de layers ocultas
+    return null
+  }
+
   // Post-Audit 4.0 — P3: objectsById Map para lookup O(1) em vez de objects.find() O(N).
   // Reconstroi só quando `objects` muda (useMemo). Mesmo pattern do SceneLevel3D.
   const objectsById = useMemo(() => {

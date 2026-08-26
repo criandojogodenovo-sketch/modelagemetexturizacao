@@ -1506,6 +1506,13 @@ export function createConectInstance(type, position = [0, 0.5, 0]) {
   for (const propDef of def.properties) {
     defaults[propDef.key] = JSON.parse(JSON.stringify(propDef.default))
   }
+  // C1: atribuir layer automática baseada no tipo do conect
+  const autoLayer = def.category === 'physics' ? 'world'
+                  : def.category === 'gameplay' ? 'gameplay'
+                  : def.category === 'ui' ? 'ui'
+                  : def.category === 'effects' ? 'effects'
+                  : def.category === 'audio' ? 'audio'
+                  : 'world'
   return {
     instanceId: `conect_${Math.random().toString(36).slice(2, 10)}`,
     type,
@@ -1514,6 +1521,7 @@ export function createConectInstance(type, position = [0, 0.5, 0]) {
     rotation: type === 'ViewObject' ? [-0.5, 0.7, 0] : [0, 0, 0],
     scale: [1, 1, 1],
     visible: def.hasVisual !== false,
+    layer: autoLayer, // C1: layer para organização (world/gameplay/ui/effects/audio)
     flirScript: null, // grafo FlirScript opcional
     ...defaults,
     ...def.defaults, // garantir que defaults da taxonomy também ficam

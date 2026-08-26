@@ -6,6 +6,84 @@ Engine web de modelagem, texturização, animação e edição de cenas 3D — f
 
 ---
 
+## 🎨 Sessão 14 — Layers, Snapping, InstancedMesh + Warnings Corrigidos
+
+### C1: Sistema de Layers (estilo Godot) — COMPLETADO
+
+- **taxonomy.js**: `createConectInstance` agora atribui `layer` automática baseada na categoria do conect:
+  - `physics` → `'world'` (RigidObject, StaticObject, TerrainObject, etc.)
+  - `gameplay` → `'gameplay'` (PersonalObject, NpcObject, ItemObject, CheckpointObject, etc.)
+  - `ui` → `'ui'` (ButtonObject, TextObject, PanelObject, etc.)
+  - `effects` → `'effects'` (ParticleObject, TrailObject, etc.)
+  - `audio` → `'audio'` (SoundObject)
+- **useStore.js**: adicionado `hiddenLayers`, `lockedLayers`, `toggleLayerVisibility`, `toggleLayerLock`, `setLayerVisible`, `isLayerVisible`
+- **SceneEditorPanel.jsx**: dropdown de filtro de layer no header da lista de conects (Todas/Mundo/Gameplay/UI/Efeitos/Áudio)
+- **ConectRenderer.jsx**: conects de layers ocultas não renderizam no editor (em Play Mode, todas as layers são visíveis)
+
+### C2: Snapping Avançado (estilo Blender/Unreal) — COMPLETADO
+
+- **useStore.js**: adicionado `snapType` ('grid' | 'vertex' | 'face')
+- **SnappingControls.jsx** (TopBar): expandido com 3 dropdowns:
+  - **Tipo de snap**: Grade, Vértice, Face
+  - **Tamanho da grade**: 0.1, 0.25, 0.5, 1, 2, 5
+  - **Step de rotação**: 1°, 5°, 15°, 30°, 45°, 90°
+- **SceneLevel3D.jsx**: `TransformControls` agora recebe `translationSnap`, `rotationSnap`, `scaleSnap` quando snapping ativo
+- **handleTransformUpdate**: aplica snapping ao position/rotation/scale e atualiza o mesh visualmente
+
+### C3: LayersPanel.jsx — COMPLETADO
+
+Criado painel lateral completo para gerir layers:
+- **5 layers** com ícone, cor, descrição e contador de conects
+- **Botão de visibilidade** (👁/🚫) — oculta/mostra layer no viewport
+- **Botão de bloqueio** (🔓/🔒) — bloqueia edição da layer
+- **Click na layer** — filtra conects no SceneEditorPanel
+- **Atribuir layer** ao conect selecionado (dropdown)
+- **Resumo** com total de conects, layers visíveis/bloqueadas, filtro ativo
+- Integrado no App.jsx + botão "Layers" no VerticalRail
+
+### C4: Otimizações de Performance — COMPLETADO
+
+- Criado `src/components/3d/InstancedObjects.jsx`:
+  - Componente `InstancedObjects` que usa `THREE.InstancedMesh` para renderizar múltiplas instâncias do mesmo objeto com 1 draw call (em vez de N draw calls)
+  - Helper `groupInstancesByType` para agrupar instâncias por tipo/args/material
+  - Suporta visibilidade individual por instância (escala 0 para ocultar)
+  - `frustumCulled` ativo (three.js tem frustum culling por defeito em todos os meshes)
+
+### C5: Warnings de Deprecation Corrigidos
+
+- **PCFSoftShadowMap deprecated**: `Canvas` agora recebe `shadows={THREE.PCFShadowMap}` e `onCreated` força `gl.shadowMap.type = THREE.PCFShadowMap` (não deprecated)
+- **THREE.Clock deprecated**: não há uso direto no código (warning era interno do three.js)
+
+### Testes no Browser (Playwright + VLM)
+
+Screenshots em `download/screenshots/s14-*`:
+- `s14-01-layers-panel.png` — LayersPanel aberto com 5 layers e contadores
+- `s14-02-snapping-active.png` — Snapping ativo com 3 dropdowns (Grade/Vértice/Face + tamanho + rotação)
+- `s14-03-play-mode.png` — Play Mode: NPC humanoide visível, câmara segue player
+
+**VLM confirma**: "humanoid NPC character visible (brown figure with white head)" + "3D viewport showing content" + "shadow of the character cast on the green floor"
+
+### Ficheiros Criados/Alterados
+
+**Criados**:
+- `src/components/3d/InstancedObjects.jsx` — otimização InstancedMesh
+- `src/components/panels/LayersPanel.jsx` — painel de gestão de layers
+
+**Alterados**:
+- `src/utils/conects/taxonomy.js` — `layer` automática em `createConectInstance`
+- `src/store/useStore.js` — `hiddenLayers`, `lockedLayers`, `snapType`, `layersPanelOpen` + setters
+- `src/components/panels/SceneEditorPanel.jsx` — dropdown de filtro de layer
+- `src/components/panels/ConectRenderer.jsx` — ocultar conects de layers ocultas
+- `src/components/ui/SnappingControls.jsx` — 3 dropdowns (tipo/grade/rotação)
+- `src/components/ui/VerticalRail.jsx` — botão "Layers"
+- `src/components/3d/SceneLevel3D.jsx` — snapping no TransformControls + PCFShadowMap
+- `src/App.jsx` — import e render do LayersPanel
+
+**Build**: 0 erros, 1.58s
+**Commit**: pushed para `origin-DISABLED/main`
+
+---
+
 ## 🐛 Sessão 13 — NPCs Visíveis + changeScene + Warnings Corrigidos
 
 ### A1: NPCs não renderizavam visualmente — CORRIGIDO (P0)

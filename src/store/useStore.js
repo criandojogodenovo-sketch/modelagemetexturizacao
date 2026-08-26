@@ -1596,9 +1596,11 @@ export const useStore = create(
       snapEnabled: false,
       snapSize: 0.5, // 0.1 | 0.25 | 0.5 | 1 | 2 | 5
       snapRotationStep: 15, // graus
+      snapType: 'grid', // C2: 'grid' | 'vertex' | 'face'
       toggleSnap: () => set((s) => ({ snapEnabled: !s.snapEnabled })),
       setSnapSize: (size) => set({ snapSize: size }),
       setSnapRotationStep: (deg) => set({ snapRotationStep: deg }),
+      setSnapType: (type) => set({ snapType: type }),
       // Aplica snapping a um valor (genérico)
       snapValue: (v, type = 'translate') => {
         const { snapEnabled, snapSize, snapRotationStep } = get()
@@ -1631,6 +1633,33 @@ export const useStore = create(
       // Layers permitem organizar conects/objetos por categoria
       activeLayer: 'all', // 'all' | 'world' | 'gameplay' | 'ui' | 'effects' | 'audio'
       setActiveLayer: (layer) => set({ activeLayer: layer }),
+      // C1/C3: Layers — visibilidade e bloqueio
+      hiddenLayers: [], // array de layer names ocultos
+      lockedLayers: [], // array de layer names bloqueados
+      toggleLayerVisibility: (layer) => set((s) => ({
+        hiddenLayers: s.hiddenLayers.includes(layer)
+          ? s.hiddenLayers.filter(l => l !== layer)
+          : [...s.hiddenLayers, layer]
+      })),
+      toggleLayerLock: (layer) => set((s) => ({
+        lockedLayers: s.lockedLayers.includes(layer)
+          ? s.lockedLayers.filter(l => l !== layer)
+          : [...s.lockedLayers, layer]
+      })),
+      setLayerVisible: (layer, visible) => set((s) => ({
+        hiddenLayers: visible
+          ? s.hiddenLayers.filter(l => l !== layer)
+          : [...s.hiddenLayers, layer]
+      })),
+      isLayerVisible: (layer) => {
+        const s = get()
+        return !s.hiddenLayers.includes(layer)
+      },
+
+      // C3: LayersPanel
+      layersPanelOpen: false,
+      openLayersPanel: () => set({ layersPanelOpen: true }),
+      closeLayersPanel: () => set({ layersPanelOpen: false }),
 
       // Fase 5: Multiplayer + Performance + Post-processing
       multiplayerPanelOpen: false,
