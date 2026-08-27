@@ -28,6 +28,7 @@ import WebGLContextLossHandler from './WebGLContextLossHandler'
 import { useStore } from '../../store/useStore'
 import { DEFAULT_CAMERA_FAR } from '../../utils/navigationUtils'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
+import { getCameraState, applyCameraInput, applyCameraKeyInput, smoothRotation } from '../../utils/cameraController'
 import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
 import { createFlirCodeRuntime } from '../../utils/flirscript/flircode'
 import { FlirScriptAPI } from '../../utils/flirscript/flirScriptAPI'
@@ -278,7 +279,7 @@ function ViewModelFPS({ activeScene, isGameMode }) {
 
 // ===== Componente que gere o modo jogo dentro do canvas =====
 function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, orbitRef }) {
-  const { camera, scene } = useThree()
+  const { camera, scene, gl } = useThree()
   const physicsRef = useRef(null)
   // BUG6-FIX: Pathfinder partilhado por todos os NPCs da cena — populated uma vez
   // com as AABBs dos StaticObject (e StopObject kinemático) registados na física.
@@ -686,10 +687,45 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
       takeDamage: (instanceId, amount) => {
         // Reduzir "saúde" via globalVar _health
         const health = gameContext.getVar('_health_' + instanceId)
-        gameContext.setVar('_health_' + instanceId, Math.max(0, (health || 100) - amount))
-        debugLog(`${instanceId} sofreu ${amount} de dano (saúde: ${gameContext.getVar('_health_' + instanceId)})`, 'log', 'Combat')
+        const newHealth = Math.max(0, (health || 100) - amount)
+        gameContext.setVar('_health_' + instanceId, newHealth)
+        debugLog(`${instanceId} sofreu ${amount} de dano (saúde: ${newHealth})`, 'log', 'Combat')
+        const rt = runtimesRef.current.get(instanceId)
+        if (rt) rt.triggerEvent('onDamage', { amount, source: 'script' })
+        // S17: disparar onDeath quando a vida chega a 0 (o boss do Showcase usa)
+        if (newHealth <= 0 && rt) rt.triggerEvent('onDeath', { killer: 'script' })
       },
       getHealth: (instanceId) => gameContext.getVar('_health_' + instanceId) || 100,
+
+      // ===== S17: Diálogo (usado pelos demos flirQuest via setDialog/showDialog) =====
+      setDialog: (text) => {
+        gameContext.setVar('_dialogText', String(text ?? ''))
+        window._flirDialog = { text: String(text ?? ''), visible: false }
+      },
+      showDialog: (text) => {
+        const t = (text !== undefined && text !== null && text !== '') ? String(text)
+          : String(gameContext.getVar('_dialogText') || '')
+        window._flirDialog = { text: t, visible: true, ts: Date.now() }
+        debugLog(`Diálogo: "${t.slice(0, 60)}${t.length > 60 ? '…' : ''}"`, 'log', 'Dialogue')
+      },
+      hideDialog: () => {
+        if (window._flirDialog) window._flirDialog = { ...window._flirDialog, visible: false }
+      },
+
+      // ===== S17: Pontuação — addScore(n) =====
+      addScore: (n) => {
+        const s = (gameContext.getVar('_score') || 0) + (Number(n) || 0)
+        gameContext.setVar('_score', s)
+        debugLog(`Pontuação: ${s}`, 'log', 'Score')
+      },
+
+      // ===== S17: IA — chasePlayer()/stopChase() forçam o modo perseguição deste NPC =====
+      chasePlayer: (instanceId) => {
+        if (instanceId) gameContext.setVar('_chase_' + instanceId, true)
+      },
+      stopChase: (instanceId) => {
+        if (instanceId) gameContext.setVar('_chase_' + instanceId, false)
+      },
 
       // ===== Sinais =====
       emitSignal: (name, data) => {
@@ -931,22 +967,62 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
     window._flirInventory = inventoryRef.current
     // Fase 11 — Expor câmara para FlirScriptAPI.Camera.getPosition()/getFOV()
     window._flirCamera = camera
-    // Inicializar rotação da câmara (FPS/BR) — lida pelo GameMode no useFrame
-    // CORREÇÃO BUG1: enabled=true só quando a cena tem CameraTouchZone.
-    // Caso contrário, a rotação (0,0,0) faz a câmara olhar para -Z (vazio) → ecrã preto.
+    // S17 fix (P0-06): rotação de câmara unificada via cameraController.
+    // ANES: criava-se um objeto novo {yaw,pitch,enabled} que NUNCA recebia input —
+    // o GameUIOverlay escreve targetYaw/targetPitch no singleton do cameraController
+    // e o useFrame lia yaw/pitch do objeto separado → rotação 100% morta.
+    // AGORA: um único estado (getCameraState) partilhado via window._flirCameraRotation;
+    // o useFrame chama smoothRotation() para propagar target→actual; e sem touch zone
+    // o rato (drag no canvas) + setas funcionam como fallback (igual ao exportado).
     const hasTouchZone = (setupScene?.conects || activeScene.conects || []).some(c => c.type === 'CameraTouchZone')
-    if (!window._flirCameraRotation) {
-      window._flirCameraRotation = { yaw: 0, pitch: 0, sensitivity: 1.0, enabled: hasTouchZone }
-    } else {
-      // Reset ao re-entrar no jogo
-      window._flirCameraRotation.yaw = 0
-      window._flirCameraRotation.pitch = 0
-      window._flirCameraRotation.enabled = hasTouchZone
+    const camState = getCameraState()
+    camState.yaw = 0; camState.pitch = 0
+    camState.targetYaw = 0; camState.targetPitch = 0
+    camState.sensitivity = 1.0
+    camState.enabled = true // S17: rotação sempre disponível em modo jogo
+    camState.hasTouchZone = hasTouchZone
+    window._flirCameraRotation = camState
+
+    // S17 fix (P0-06): fallback de input de câmara quando a cena NÃO tem CameraTouchZone
+    // — drag do rato no canvas roda a câmara (estilo FPS desktop do runtime exportado)
+    // e setas também. Quando há touch zone, o CameraTouchZoneControl do GameUIOverlay
+    // regista os próprios handlers (evitar duplicação).
+    let cameraMouseDragging = false
+    let cameraMouseLast = null
+    const onCamMouseDown = (e) => {
+      if (e.button !== 0) return
+      cameraMouseDragging = true
+      cameraMouseLast = { x: e.clientX, y: e.clientY }
+    }
+    const onCamMouseMove = (e) => {
+      if (!cameraMouseDragging || !cameraMouseLast) return
+      const dx = e.clientX - cameraMouseLast.x
+      const dy = e.clientY - cameraMouseLast.y
+      cameraMouseLast = { x: e.clientX, y: e.clientY }
+      applyCameraInput(dx, dy, camState)
+    }
+    const onCamMouseUp = () => { cameraMouseDragging = false; cameraMouseLast = null }
+    const onCamKeyDown = (e) => {
+      const key = e.key.toLowerCase()
+      if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key)) {
+        e.preventDefault()
+        applyCameraKeyInput(key, camState)
+      }
+    }
+    let canvasEl = null
+    if (!hasTouchZone) {
+      canvasEl = gl?.domElement || null
+      canvasEl?.addEventListener('mousedown', onCamMouseDown)
+      window.addEventListener('mousemove', onCamMouseMove)
+      window.addEventListener('mouseup', onCamMouseUp)
+      window.addEventListener('keydown', onCamKeyDown)
     }
 
     // Física
     const gravity = setupScene.physics?.gravity || [0, -9.82, 0]
     physicsRef.current = createPhysicsSystem({ gravity: gravity[1] })
+    // S17: expor o camState num ref para o useFrame (evita ler window a cada frame)
+    camStateRef.current = camState
 
     // Registar conects com física — usar queueMicrotask em vez de setTimeout(50)
     // para evitar race condition onde a câmara ficava presa dentro do terreno
@@ -1211,10 +1287,21 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
       physicsRef.current = null
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
+      // S17 fix (P0-06): remover listeners de fallback da câmara + reset do estado
+      if (!hasTouchZone) {
+        canvasEl?.removeEventListener('mousedown', onCamMouseDown)
+        window.removeEventListener('mousemove', onCamMouseMove)
+        window.removeEventListener('mouseup', onCamMouseUp)
+        window.removeEventListener('keydown', onCamKeyDown)
+      }
+      camState.enabled = false
+      camState.hasTouchZone = false
+      camStateRef.current = null
       window._flirGameContext = null
       gameContextRef.current = null // A1 fix: limpar ref
       window._flirCamera = null
       window._flirInventory = null
+      window._flirDialog = null // S17: limpar estado de diálogo
       window._flirCameraRotation = null
       window._flirKeys = null
       window._flirCrosshair = false
@@ -1324,11 +1411,17 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
 
   // Vector3 reutilizável para câmara (evita allocation por frame)
   const _camTarget = useRef(new THREE.Vector3())
+  // S17: estado unificado da câmara (cameraController) — lido no useFrame
+  const camStateRef = useRef(null)
 
   // Loop do jogo — consolidado: 1 passagem sobre conects em vez de 8-9
   useFrame((_, delta) => {
     if (!isGameMode) return
     const conects = setupScene?.conects || []
+
+    // S17 fix (P0-06): propagar targetYaw/targetPitch → yaw/pitch (smoothing).
+    // Sem isto o input de rotação (drag/setas/touch zone) nunca era aplicado.
+    if (camStateRef.current) smoothRotation(camStateRef.current, delta)
 
     // Limpar cache de poses no início de cada frame (evita memory leak)
     clearPoseCache()

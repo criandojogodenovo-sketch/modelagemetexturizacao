@@ -5,10 +5,27 @@
  *  - FlirCode parser + runtime (cópia do flircode.js, adaptada)
  *  - Motor de física (cannon-es via CDN)
  *  - Renderização Three.js (via CDN)
- *  - GameUIOverlay
+ *  - GameUIOverlay (ecrãs de UI + diálogo)
  *  - GameMode (equivalente ao GameMode do SceneLevel3D)
+ *  - NPC AI (idle/patrol/chase/flee) + animação procedural de membros
  *
- * O runtime é funcionalmente idêntico ao "Executar Jogo" do editor.
+ * S17 (Sessão 17) — correções aplicadas neste ficheiro:
+ *  P0-01  case 'changeScene' duplicado removido (o 1º fazia shadow do real → no-op)
+ *  P0-02  contexto por-runtime: _instanceId/mesh deixaram de ser partilhados via
+ *         Object.assign(gc, ...) — cada runtime recebe rtOpts próprios
+ *  P0-03  `var player` declarado (antes: global implícita → ReferenceError em strict mode)
+ *  P0-04  changeScene recalcula activeView/hasTZ/camState (a câmara seguia a cena antiga)
+ *  P1-09  cena inicial cria humanoides (Player/NPC) + IA + animações (igual ao editor)
+ *  P1-10  física de personagens: fixedRotation=true, allowSleep=false, damping
+ *  P1-11  evalVal suporta chamadas de função como valor (getVar("x") == true funciona)
+ *  P1-12  wait() por-runtime (não bloqueia os ticks dos outros scripts)
+ *  P1-13  arranca na cena ativa (activeSceneId) em vez de scenes[0]
+ *  P2-22  touch: metade esquerda = joystick, metade direita = rotação de câmara
+ *  P2-26  objetos do catálogo procurados em data.objects (não em scene.objects)
+ *  S17+   parser suporta sintaxe legacy `evento ... end` (usada pelos demos flirQuest)
+ *  S17+   builtins de diálogo/pontuação/IA: setDialog, showDialog, hideDialog,
+ *         addScore, chasePlayer, stopChase + caixa de diálogo DOM
+ *  S17+   eventos onDeath/onHit/onPickup/onSeePlayer/onLoseSight disparados pelo runtime
  */
 
 // ===== Imports (para módulo ES no HTML exportado) =====
@@ -16,6 +33,18 @@ import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
 
 // ===== FlirCode Parser (inline, sem dependências) =====
+
+// S17: eventos conhecidos — para a sintaxe legacy `evento ... end`.
+// Inclui AMBAS as convenções: nomes internos (beginPlay, tick…) e os nomes
+// canónicos das funções FlirCode (onStart, onTick…).
+var KNOWN_EVENT_NAMES = {
+  beginPlay: 1, tick: 1, onCollision: 1, onTouch: 1, onSeePlayer: 1, onLoseSight: 1,
+  onTimer: 1, onEnterZone: 1, onExitZone: 1, onClick: 1, onChange: 1, onSubmit: 1,
+  onPlayerJoin: 1, onPlayerLeave: 1, onMessage: 1, onSignal: 1, onDamage: 1,
+  onPickup: 1, onGameStateChange: 1, onDeath: 1, onHit: 1, onCheckpoint: 1,
+  onStart: 1, onTick: 1, onCollide: 1,
+}
+
 function parseFlirCode(src) {
   var errors = [], fns = {}, lines = src.split('\n'), cl = []
   for (var i = 0; i < lines.length; i++) {
@@ -24,10 +53,32 @@ function parseFlirCode(src) {
   }
   var idx = 0
   while (idx < cl.length) {
-    var m = cl[idx].t.match(/^fun\s+(\w+)\s*\(([^)]*)\)\s*begincode$/)
+    // S17: sintaxe legacy — `evento` numa linha isolada, statements até `end`
+    if (KNOWN_EVENT_NAMES[cl[idx].t] && idx + 1 < cl.length && cl[idx].t !== 'end') {
+      var lbody = [], lj = idx + 1, lclosed = false
+      while (lj < cl.length) {
+        if (cl[lj].t === 'end') { lclosed = true; break }
+        lbody.push(cl[lj])
+        lj++
+      }
+      if (lclosed) {
+        var lstmts = []
+        for (var lk = 0; lk < lbody.length; lk++) {
+          var ls = parseStatement(lbody, lk, errors)
+          if (ls.stmt) lstmts.push(ls.stmt)
+        }
+        fns[cl[idx].t] = { name: cl[idx].t, params: [], body: lstmts, line: cl[idx].l }
+        idx = lj + 1
+        continue
+      }
+    }
+    // S17: parênteses OPCIONAIS — a documentação (ENGINE_DOC 7.4) usa
+    // `fun onSeePlayer begincode` sem (); o parser antigo exigia () e
+    // ignorava silenciosamente essas funções.
+    var m = cl[idx].t.match(/^fun\s+(\w+)\s*(?:\(([^)]*)\))?\s*begincode$/)
     if (m) {
       var body = parseBlock(cl, idx + 1, errors)
-      fns[m[1]] = { name: m[1], params: m[2].split(',').filter(function (p) { return p.trim() }), body: body.statements, line: cl[idx].l }
+      fns[m[1]] = { name: m[1], params: (m[2] || '').split(',').filter(function (p) { return p.trim() }), body: body.statements, line: cl[idx].l }
       idx = body.nextIdx
     } else { idx++ }
   }
@@ -113,43 +164,69 @@ function evalCond(cond, vars, gc) {
   return false
 }
 
-function evalVal(v, vars, gc) {
-  v = v.trim()
-  if (v.startsWith('"') && v.endsWith('"')) return v.slice(1, -1)
-  var n = parseFloat(v); if (!isNaN(n)) return n
+function evalVal(v, vars, gc, rt) {
+  v = (v || '').trim()
+  if (v.startsWith('"') && v.endsWith('"') && v.length >= 2) return v.slice(1, -1)
+  var n = parseFloat(v); if (!isNaN(n) && /^-?\d/.test(v)) return n
   if (v === 'true') return true; if (v === 'false') return false
-  return vars[v] !== undefined ? vars[v] : (gc.globalVars && gc.globalVars[v]) || 0
+  // S17 fix (P1-11): chamada de função como valor — getVar("x"), getHealth(), etc.
+  // Antes só devolvia 0 → `if (getVar("chasing") == true)` nunca funcionava no export.
+  var cm = v.match(/^(\w+)\s*\(([^)]*)\)$/)
+  if (cm) {
+    var cargs = cm[2] ? cm[2].split(',').map(function (a) { return a.trim() }).filter(Boolean) : []
+    var cvals = cargs.map(function (a) { return evalVal(a, vars, gc, rt) })
+    return execBuiltin(cm[1], cvals, gc, rt, true)
+  }
+  if (vars && vars[v] !== undefined) return vars[v]
+  return (gc.globalVars && gc.globalVars[v]) || 0
 }
 
-function createFlirCodeRuntime(src, gc) {
+/**
+ * S17 fix (P0-02): createFlirCodeRuntime(src, gc, rtOpts)
+ *  - gc: gameContext PARTILHADO (globalVars, inventário, arma, diálogo…)
+ *  - rtOpts: { _instanceId, mesh } PRÓPRIOS de cada runtime.
+ * Antes: Object.assign(gc, {...}) mutava o gc partilhado — _instanceId/mesh de
+ * TODOS os runtimes apontavam para o último objeto criado (bugs em move/rotate/
+ * destroy/takeDamage/collidingWith).
+ */
+function createFlirCodeRuntime(src, gc, rtOpts) {
   var parsed = parseFlirCode(src)
   for (var i = 0; i < parsed.errors.length; i++) dbg('FlirCode erro: ' + parsed.errors[i].message, 'error')
   var vars = {}
+  var myId = rtOpts && rtOpts._instanceId
+  var myMesh = rtOpts && rtOpts.mesh
+  // S17 fix (P1-12): wait() POR-RUNTIME — antes usava gc._waitUntil partilhado,
+  // um wait() num script bloqueava os ticks de TODOS os scripts.
+  var waitUntil = 0
   var eventMap = {
     onStart: 'beginPlay', onTick: 'tick', onCollide: 'onCollision',
     onTouch: 'onTouch', onSeePlayer: 'onSeePlayer', onLoseSight: 'onLoseSight',
     onTimer: 'onTimer', onClick: 'onClick', onChange: 'onChange', onSubmit: 'onSubmit',
-    onEnterZone: 'onEnterZone', onExitZone: 'onExitZone'
+    onEnterZone: 'onEnterZone', onExitZone: 'onExitZone',
+    onSignal: 'onSignal', onDamage: 'onDamage', onPickup: 'onPickup',
+    onPlayerJoin: 'onPlayerJoin', onPlayerLeave: 'onPlayerLeave', onMessage: 'onMessage',
+    onGameStateChange: 'onGameStateChange',
+    onDeath: 'onDeath', onHit: 'onHit', onCheckpoint: 'onCheckpoint',
   }
 
   function execStmts(stmts, params) {
     for (var i = 0; i < stmts.length; i++) {
-      // wait() deferral — se um wait está ativo, adiar as statements restantes via setTimeout
-      if (gc._waitUntil && Date.now() < gc._waitUntil) {
+      // wait() — se ativo, adiar as statements restantes via setTimeout
+      if (waitUntil && Date.now() < waitUntil) {
         var remaining = stmts.slice(i)
-        var delay = gc._waitUntil - Date.now()
-        var resume = function () { gc._waitUntil = 0; execStmts(remaining, params) }
-        setTimeout(resume, delay)
+        var delay = waitUntil - Date.now()
+        setTimeout(function () { waitUntil = 0; execStmts(remaining, params) }, delay)
         return // parar execução síncrona aqui
       }
+      if (waitUntil && Date.now() >= waitUntil) waitUntil = 0
       try { execS(stmts[i], params) } catch (e) { dbg('Erro: ' + e.message, 'error') }
     }
   }
 
   function execS(s, params) {
-    if (s.type === 'var') { vars[s.name] = evalVal(s.value, vars, gc); return }
-    if (s.type === 'assign') { vars[s.name] = evalVal(s.value, vars, gc); return }
-    // if / elseif / else — usa flag _ifChainMatched (igual ao editor flircode.js:544-565)
+    if (s.type === 'var') { vars[s.name] = evalVal(s.value, vars, gc, { id: myId, mesh: myMesh }); return }
+    if (s.type === 'assign') { vars[s.name] = evalVal(s.value, vars, gc, { id: myId, mesh: myMesh }); return }
+    // if / elseif / else — usa flag _ifChainMatched (igual ao editor flircode.js)
     if (s.type === 'if') {
       if (evalCond(s.condition, vars, gc)) {
         params._ifChainMatched = true
@@ -174,99 +251,129 @@ function createFlirCodeRuntime(src, gc) {
       return
     }
     if (s.type === 'call') {
-      var argVals = s.args.map(function (a) { return evalVal(a, vars, gc) })
-      execBuiltin(s.name, argVals, params)
+      // S17 fix (P1-12): wait() interceptado AQUI — precisa de aceder ao closure
+      // do runtime (waitUntil é por-runtime, não partilhado no gc).
+      if (s.name === 'wait') {
+        var delayS = evalVal(s.args[0], vars, gc, { id: myId, mesh: myMesh }) || 0
+        dbg('wait(' + delayS + 's)', 'log')
+        waitUntil = Date.now() + delayS * 1000
+        return
+      }
+      var argVals = s.args.map(function (a) { return evalVal(a, vars, gc, { id: myId, mesh: myMesh }) })
+      execBuiltin(s.name, argVals, gc, { id: myId, mesh: myMesh })
       return
     }
     // unknown — ignorar silenciosamente
   }
 
-  function execBuiltin(name, args, params) {
-    switch (name) {
-      case 'print': dbg(args[0], 'log'); break
-      case 'log': dbg(args[0], 'log'); break
-      case 'warn': dbg(args[0], 'warn'); break
-      case 'error': dbg(args[0], 'error'); break
-      case 'move':
-        if (gc.mesh) { gc.mesh.position.x += args[0] * 0.016; gc.mesh.position.y += args[1] * 0.016; gc.mesh.position.z += args[2] * 0.016 }
-        break
-      case 'rotate':
-        if (gc.mesh) { gc.mesh.rotation.x += args[0] * 0.016; gc.mesh.rotation.y += args[1] * 0.016; gc.mesh.rotation.z += args[2] * 0.016 }
-        break
-      case 'scale':
-        if (gc.mesh) { gc.mesh.scale.set(args[0] || 1, args[1] || 1, args[2] || 1) }
-        break
-      case 'destroy': if (gc.mesh) gc.mesh.visible = false; break
-      case 'createObject': gc.spawnObject && gc.spawnObject(args[0], [args[1], args[2], args[3]]); break
-      case 'changeScene': dbg('changeScene: ' + args[0], 'log'); break
-      case 'wait':
-        // wait(seconds) — implementa _waitUntil (igual ao editor flircode.js:673-681)
-        // O execStmts verifica _waitUntil antes de cada statement e faz setTimeout para deferir
-        gc._waitUntil = Date.now() + (args[0] || 0) * 1000
-        dbg('wait(' + args[0] + 's)', 'log')
-        break
-      case 'setVar': gc.globalVars = gc.globalVars || {}; gc.globalVars[args[0]] = args[1]; break
-      case 'getVar': return (gc.globalVars || {})[args[0]]
-      case 'setUIValue': gc.setUIValue && gc.setUIValue(args[0], args[1]); break
-      case 'getUIValue': return gc.getUIValue ? gc.getUIValue(args[0]) : ''
-      case 'showUIScreen': gc.showUIScreen && gc.showUIScreen(args[0]); break
-      case 'hideUIScreen': gc.hideUIScreen && gc.hideUIScreen(args[0]); break
-      case 'playSound': gc.playSound && gc.playSound(args[0]); break
-      case 'playAnim': dbg('playAnim: ' + args[0], 'log'); break
-      case 'collidingWith': return gc.collidingWith ? gc.collidingWith(gc._instanceId, args[0]) : false
-      case 'distanceTo': return gc.distanceTo ? gc.distanceTo(gc._instanceId, args[0]) : 0
-      case 'isTouching': return gc.isTouching ? gc.isTouching() : false
-      // Sistema 2: Armas
-      case 'shoot': gc.shoot && gc.shoot(); break
-      case 'reload': gc.reload && gc.reload(); break
-      case 'equipWeapon': gc.equipWeapon && gc.equipWeapon(args[0]); break
-      case 'getAmmo': return gc.getAmmo ? gc.getAmmo() : 0
-      case 'takeDamage': gc.takeDamage && gc.takeDamage(gc._instanceId, args[0]); break
-      case 'getHealth': return gc.getHealth ? gc.getHealth(gc._instanceId) : 100
-      // Sistema 3: Inventário
-      case 'addToInventory': gc.addToInventory && gc.addToInventory(args[0], args[1]); break
-      case 'removeFromInventory': gc.removeFromInventory && gc.removeFromInventory(args[0], args[1]); break
-      case 'getInventoryCount': return gc.getInventoryCount ? gc.getInventoryCount(args[0]) : 0
-      case 'hasItem': return gc.hasItem ? gc.hasItem(args[0]) : false
-      // Sistema 3: Sinais
-      case 'emitSignal': gc.emitSignal && gc.emitSignal(args[0], args[1]); break
-      // Aliases showUI/hideUI = showUIScreen/hideUIScreen
-      case 'showUI': gc.showUIScreen && gc.showUIScreen(args[0]); break
-      case 'hideUI': gc.hideUIScreen && gc.hideUIScreen(args[0]); break
-      // Multiplayer (básico no export)
-      case 'sendMessage': gc.sendMessage && gc.sendMessage(args[0]); break
-      case 'getPlayers': return gc.getPlayers ? gc.getPlayers() : 1
-      case 'getPlayerState': return gc.getPlayerState ? gc.getPlayerState(args[0]) : null
-      // Sistema: Links — navegar para cena ou tela
-      case 'linkTo': gc.linkTo && gc.linkTo(args[0], args[1]); break
-      // Sistema: Game State
-      case 'setGameState': gc.setGameState && gc.setGameState(args[0]); break
-      case 'getGameState': return gc.getGameState ? gc.getGameState() : 'menu'
-      // Sistema: Save/Load Progress
-      case 'saveProgress': gc.saveProgress && gc.saveProgress(args[0], args[1]); break
-      case 'loadProgress': return gc.loadProgress ? gc.loadProgress(args[0]) : null
-      // Sistema: Sequenciador
-      case 'playSequence': gc.playSequence && gc.playSequence(args[0]); break
-      // changeScene real
-      case 'changeScene':
-        if (gc.changeScene) { gc.changeScene(args[0]); break }
-        dbg('changeScene: ' + args[0], 'log'); break
-      default: dbg('Função desconhecida: ' + name, 'warn')
-    }
-  }
-
   return {
     functions: parsed.functions, hasErrors: parsed.errors.length > 0,
+    isWaiting: function () { return !!(waitUntil && Date.now() < waitUntil) },
+    clearWait: function () { waitUntil = 0 },
     triggerEvent: function (en, payload) {
+      // Se este runtime está em wait(), eventos são ignorados (cutscene sequencing)
+      if (waitUntil && Date.now() < waitUntil) return
       var fnName = null
       for (var k in eventMap) { if (eventMap[k] === en) { fnName = k; break } }
-      if (!fnName) return
-      var fn = parsed.functions[fnName]; if (!fn) return
-      gc._instanceId = gc._instanceId
-      execStmts(fn.body, payload || {})
+      // S17: funções legacy têm o nome do evento interno (ex: beginPlay)
+      var fn = (fnName && parsed.functions[fnName]) || parsed.functions[en]
+      if (!fn) return
+      // params do evento → vars locais
+      var params = payload || {}
+      if (fn.params && fn.params.length > 0) {
+        for (var pi = 0; pi < fn.params.length; pi++) {
+          vars[fn.params[pi]] = (pi === 0) ? payload : (payload && payload[fn.params[pi]])
+        }
+      }
+      execStmts(fn.body, params)
     },
-    update: function () {}, dispose: function () {}
+    update: function () {},
+    dispose: function () { waitUntil = 0 },
   }
+}
+
+// execBuiltin — despacha funções FlirCode. `rt` = { id, mesh } do runtime dono da chamada.
+function execBuiltin(name, args, gc, rt, asValue) {
+  var myId = rt && rt.id, myMesh = rt && rt.mesh
+  switch (name) {
+    case 'print': dbg(args[0], 'log'); break
+    case 'log': dbg(args[0], 'log'); break
+    case 'warn': dbg(args[0], 'warn'); break
+    case 'error': dbg(args[0], 'error'); break
+    case 'move':
+      if (myMesh) { myMesh.position.x += args[0] * 0.016; myMesh.position.y += args[1] * 0.016; myMesh.position.z += args[2] * 0.016 }
+      break
+    case 'rotate':
+      if (myMesh) { myMesh.rotation.x += args[0] * 0.016; myMesh.rotation.y += args[1] * 0.016; myMesh.rotation.z += args[2] * 0.016 }
+      break
+    case 'scale':
+      if (myMesh) { myMesh.scale.set(args[0] || 1, args[1] || 1, args[2] || 1) }
+      break
+    case 'destroy': if (myMesh) myMesh.visible = false; break
+    case 'createObject': gc.spawnObject && gc.spawnObject(args[0], [args[1], args[2], args[3]]); break
+    // S17 fix (P0-01): case 'changeScene' ÚNICO — antes havia um duplicado acima
+    // deste (apenas dbg) que fazia shadow da implementação real → no-op.
+    case 'changeScene':
+      if (gc.changeScene) { gc.changeScene(args[0]); break }
+      dbg('changeScene: ' + args[0], 'log'); break
+    case 'wait':
+      // wait() como valor (raro) — devolve os segundos; como statement é
+      // interceptado em execS antes de chegar aqui (waitUntil por-runtime)
+      return args[0] || 0
+    case 'setVar': gc.globalVars = gc.globalVars || {}; gc.globalVars[args[0]] = args[1]; break
+    case 'getVar': return (gc.globalVars || {})[args[0]]
+    case 'setUIValue': gc.setUIValue && gc.setUIValue(args[0], args[1]); break
+    case 'getUIValue': return gc.getUIValue ? gc.getUIValue(args[0]) : ''
+    case 'showUIScreen': gc.showUIScreen && gc.showUIScreen(args[0]); break
+    case 'hideUIScreen': gc.hideUIScreen && gc.hideUIScreen(args[0]); break
+    case 'playSound': gc.playSound && gc.playSound(args[0]); break
+    case 'playAnim': dbg('playAnim: ' + args[0], 'log'); break
+    case 'collidingWith': return gc.collidingWith ? gc.collidingWith(myId, args[0]) : false
+    case 'distanceTo': return gc.distanceTo ? gc.distanceTo(myId, args[0]) : 0
+    case 'isTouching': return gc.isTouching ? gc.isTouching() : false
+    // Sistema 2: Armas
+    case 'shoot': return gc.shoot ? gc.shoot() : false
+    case 'reload': gc.reload && gc.reload(); break
+    case 'equipWeapon': gc.equipWeapon && gc.equipWeapon(args[0]); break
+    case 'getAmmo': return gc.getAmmo ? gc.getAmmo() : 0
+    case 'takeDamage': gc.takeDamage && gc.takeDamage(myId, args[0]); break
+    case 'getHealth': return gc.getHealth ? gc.getHealth(myId) : 100
+    // Sistema 3: Inventário
+    case 'addToInventory': gc.addToInventory && gc.addToInventory(args[0], args[1]); break
+    case 'removeFromInventory': gc.removeFromInventory && gc.removeFromInventory(args[0], args[1]); break
+    case 'getInventoryCount': return gc.getInventoryCount ? gc.getInventoryCount(args[0]) : 0
+    case 'hasItem': return gc.hasItem ? gc.hasItem(args[0]) : false
+    // Sistema 3: Sinais
+    case 'emitSignal': gc.emitSignal && gc.emitSignal(args[0], args[1]); break
+    // Aliases showUI/hideUI = showUIScreen/hideUIScreen
+    case 'showUI': gc.showUIScreen && gc.showUIScreen(args[0]); break
+    case 'hideUI': gc.hideUIScreen && gc.hideUIScreen(args[0]); break
+    // Multiplayer (básico no export)
+    case 'sendMessage': gc.sendMessage && gc.sendMessage(args[0]); break
+    case 'getPlayers': return gc.getPlayers ? gc.getPlayers() : 1
+    case 'getPlayerState': return gc.getPlayerState ? gc.getPlayerState(args[0]) : null
+    // Sistema: Links — navegar para cena ou tela
+    case 'linkTo': gc.linkTo && gc.linkTo(args[0], args[1]); break
+    // Sistema: Game State
+    case 'setGameState': gc.setGameState && gc.setGameState(args[0]); break
+    case 'getGameState': return gc.getGameState ? gc.getGameState() : 'menu'
+    // Sistema: Save/Load Progress
+    case 'saveProgress': gc.saveProgress && gc.saveProgress(args[0], args[1]); break
+    case 'loadProgress': return gc.loadProgress ? gc.loadProgress(args[0]) : null
+    // Sistema: Sequenciador
+    case 'playSequence': gc.playSequence && gc.playSequence(args[0]); break
+    // S17: Diálogo / pontuação / IA (usados pelos demos flirQuest)
+    case 'setDialog': gc.setDialog && gc.setDialog(args[0]); break
+    case 'showDialog': gc.showDialog && gc.showDialog(args[0]); break
+    case 'hideDialog': gc.hideDialog && gc.hideDialog(); break
+    case 'addScore': gc.addScore && gc.addScore(args[0]); break
+    case 'chasePlayer': gc.chasePlayer && gc.chasePlayer(myId); break
+    case 'stopChase': gc.stopChase && gc.stopChase(myId); break
+    default:
+      if (!asValue) dbg('Função desconhecida: ' + name, 'warn')
+      return undefined
+  }
+  return undefined
 }
 
 // ===== Debug =====
@@ -279,13 +386,119 @@ function dbg(msg, type) {
     e.textContent = '[' + type + '] ' + msg
     d.appendChild(e); d.scrollTop = d.scrollHeight
   }
-  console.log(msg)
+  if (type === 'error') console.error(msg)
+  else console.log(msg)
+}
+
+// ===== S17: construtores de humanoides (iguais ao ConectRenderer do editor) =====
+function buildHumanoid(bodyColor, skinColor, isPlayer) {
+  var g = new THREE.Group()
+  var limbRefs = { armL: null, armR: null, legL: null, legR: null, torso: null }
+  var mkMat = function (color, rough) { return new THREE.MeshStandardMaterial({ color: color, roughness: rough ?? 0.7 }) }
+  // Tronco
+  var torsoPivot = new THREE.Group()
+  torsoPivot.position.y = 1.2
+  var torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.8, 4, 12), mkMat(bodyColor, 0.7))
+  torso.castShadow = true
+  torsoPivot.add(torso)
+  g.add(torsoPivot)
+  limbRefs.torso = torsoPivot
+  // Cabeça
+  var head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 16), mkMat(skinColor, 0.6))
+  head.position.y = 2.0; head.castShadow = true
+  g.add(head)
+  // Olhos
+  var eyeGeo = new THREE.SphereGeometry(0.04, 8, 8)
+  var eyeMat = new THREE.MeshBasicMaterial({ color: 0x000000 })
+  var eyeL = new THREE.Mesh(eyeGeo, eyeMat); eyeL.position.set(-0.1, 2.05, 0.22); g.add(eyeL)
+  var eyeR = new THREE.Mesh(eyeGeo, eyeMat); eyeR.position.set(0.1, 2.05, 0.22); g.add(eyeR)
+  // Braços (pivot no ombro)
+  var armGeo = new THREE.CapsuleGeometry(0.1, 0.7, 4, 8)
+  var armLp = new THREE.Group(); armLp.position.set(-0.4, 1.65, 0)
+  var armL = new THREE.Mesh(armGeo, mkMat(bodyColor, 0.7)); armL.position.y = -0.35; armL.castShadow = true
+  armLp.add(armL); g.add(armLp); limbRefs.armL = armLp
+  var armRp = new THREE.Group(); armRp.position.set(0.4, 1.65, 0)
+  var armR = new THREE.Mesh(armGeo, mkMat(bodyColor, 0.7)); armR.position.y = -0.35; armR.castShadow = true
+  armRp.add(armR); g.add(armRp); limbRefs.armR = armRp
+  // Pernas (pivot no quadril)
+  var legGeo = new THREE.CapsuleGeometry(0.13, 0.7, 4, 8)
+  var legLp = new THREE.Group(); legLp.position.set(-0.18, 0.75, 0)
+  var legL = new THREE.Mesh(legGeo, mkMat(bodyColor, 0.8)); legL.position.y = -0.35; legL.castShadow = true
+  legLp.add(legL); g.add(legLp); limbRefs.legL = legLp
+  var legRp = new THREE.Group(); legRp.position.set(0.18, 0.75, 0)
+  var legR = new THREE.Mesh(legGeo, mkMat(bodyColor, 0.8)); legR.position.y = -0.35; legR.castShadow = true
+  legRp.add(legR); g.add(legRp); limbRefs.legR = legRp
+  // Estrela indicadora de JOGADOR
+  if (isPlayer) {
+    var star = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.16),
+      new THREE.MeshStandardMaterial({ color: '#ffd700', emissive: '#ffd700', emissiveIntensity: 0.8 })
+    )
+    star.position.y = 2.5
+    g.add(star)
+    limbRefs.star = star
+  }
+  g.userData.limbs = limbRefs
+  return g
+}
+
+// Anima membros do humanoide conforme velocidade medida (igual ao editor)
+function animateHumanoid(group, speed, delta, walkState) {
+  var limbs = group && group.userData && group.userData.limbs
+  if (!limbs) return
+  if (speed > 0.4) {
+    var run = speed > 4
+    walkState.t = (walkState.t || 0) + delta * (run ? 9 : 5.5)
+    var amp = run ? 0.6 : 0.4
+    var ph = walkState.t
+    if (limbs.armL) limbs.armL.rotation.x = Math.sin(ph) * amp
+    if (limbs.armR) limbs.armR.rotation.x = -Math.sin(ph) * amp
+    if (limbs.legL) limbs.legL.rotation.x = -Math.sin(ph) * amp
+    if (limbs.legR) limbs.legR.rotation.x = Math.sin(ph) * amp
+    if (limbs.torso) limbs.torso.rotation.x = run ? 0.15 : 0.05
+  } else {
+    var b = Math.sin((walkState.clock = (walkState.clock || 0) + delta * 2)) * 0.05
+    if (limbs.torso) limbs.torso.rotation.x = b
+    if (limbs.armL) limbs.armL.rotation.x = b * 0.5
+    if (limbs.armR) limbs.armR.rotation.x = b * 0.5
+    if (limbs.legL) limbs.legL.rotation.x = 0
+    if (limbs.legR) limbs.legR.rotation.x = 0
+  }
+}
+
+// ===== S17: caixa de diálogo DOM (showDialog/setDialog do FlirCode) =====
+function ensureDialogueBox() {
+  var el = document.getElementById('flir-dialog')
+  if (!el) {
+    el = document.createElement('div')
+    el.id = 'flir-dialog'
+    el.style.cssText = 'position:fixed;left:50%;bottom:12%;transform:translateX(-50%);max-width:min(520px,86vw);' +
+      'background:rgba(13,17,23,0.92);border:1px solid #2f81f7;border-radius:10px;padding:12px 18px;color:#e6edf3;' +
+      'font-size:15px;font-family:-apple-system,sans-serif;line-height:1.45;z-index:60;pointer-events:none;' +
+      'box-shadow:0 4px 18px rgba(0,0,0,0.5);text-align:center;display:none;transition:opacity .25s;opacity:0;'
+    document.body.appendChild(el)
+  }
+  return el
+}
+var _dialogTimer = null
+function showRuntimeDialog(text) {
+  var el = ensureDialogueBox()
+  el.textContent = String(text ?? '')
+  el.style.display = 'block'
+  requestAnimationFrame(function () { el.style.opacity = '1' })
+  if (_dialogTimer) clearTimeout(_dialogTimer)
+  _dialogTimer = setTimeout(function () { hideRuntimeDialog() }, 4500)
+}
+function hideRuntimeDialog() {
+  var el = document.getElementById('flir-dialog')
+  if (el) { el.style.opacity = '0'; setTimeout(function () { el.style.display = 'none' }, 260) }
 }
 
 // ===== Game Runtime =====
 function startGame() {
   var data = window.__GAME_DATA__
-  var scene = data.scenes && data.scenes[0]
+  // S17 fix (P1-13): arrancar na cena ATIVA do projeto (antes: sempre scenes[0])
+  var scene = (data.scenes && (data.scenes.find(function (s) { return s.id === data.activeSceneId }) || data.scenes[0])) || null
   if (!scene) {
     // CORRECAO BUG8: usar textContent em vez de innerHTML (evita XSS)
     var splash = document.getElementById('splash')
@@ -324,7 +537,7 @@ function startGame() {
   var activeView = resolveActiveView(scene.conects) || scene.gameCamera
   var hasTZ = hasCameraTouchZone(scene.conects)
   var camState = createCameraState()
-  camState.enabled = hasTZ
+  camState.enabled = true // S17: rotação sempre disponível (rato/setas fallback)
   camState.hasTouchZone = hasTZ
   var cam = activeView || scene.gameCamera || { cameraType: 'perspective', position: [5, 4, 6], fov: 60, near: 0.1, far: 2000 }
   var camera = (cam.cameraType || cam.type) === 'orthographic'
@@ -344,8 +557,17 @@ function startGame() {
   var bodies = {}
   var meshMap = {}
 
+  // S17: estado de animação/IA por NPC + player
+  var animStates = {}   // instanceId → { t, clock, lastPos:{x,z} }
+  var npcAIs = {}       // instanceId → { hasSight, patrolIndex }
+
+  // S17 fix (P0-03): `player` DECLARADO — antes era global implícita (ReferenceError
+  // em strict mode no assignment + read-before-write no changeScene).
+  var player = null
+
   // FlirCode runtimes
   var runtimes = {}
+
   var gc = {
     globalVars: { _score: 0 },
     playSound: function (url) { try { new Audio(url).play() } catch (e) { } },
@@ -355,37 +577,55 @@ function startGame() {
     setUIValue: function (name, val) { var ss = data.uiScreens || []; for (var i = 0; i < ss.length; i++) { var e = ss[i].elements.find(function (e) { return e.name === name }); if (e) { e.value = val; e.text = val; e.label = val; renderUI(); return } } },
     triggerUIEvent: function (en, payload) { for (var k in runtimes) { runtimes[k].triggerEvent(en, payload) } },
     spawnObject: function (name, pos) {
-      // Procurar objeto do catálogo por nome e cloná-lo
+      // S17 fix (P2-26): procurar no CATÁLOGO (data.objects) — antes procurava em
+      // scene.objects (instâncias) e nunca encontrava o objeto a spawnar.
       var obj = (data.objects || []).find(function (o) { return o.name === name })
-      if (!obj) { dbg('spawnObject: objeto "' + name + '" não encontrado no catálogo', 'warning', 'Spawn'); return null }
-      var geo = obj.bufferGeometry || new THREE.BoxGeometry(1, 1, 1)
-      var mat = new THREE.MeshStandardMaterial({ color: obj.material?.color || '#cccccc', roughness: 0.7 })
+      if (!obj) { dbg('spawnObject: objeto "' + name + '" não encontrado no catálogo', 'warn'); return null }
+      var geo = new THREE.BoxGeometry(1, 1, 1)
+      var mat = new THREE.MeshStandardMaterial({ color: (obj.material && obj.material.color) || '#cccccc', roughness: 0.7 })
       var mesh = new THREE.Mesh(geo, mat)
       mesh.position.set(pos[0] || 0, pos[1] || 0, pos[2] || 0)
       mesh.castShadow = true; mesh.receiveShadow = true
       mesh._name = name + '_' + Date.now()
       mesh._isSpawned = true
       scene3d.add(mesh)
-      // Adicionar ao meshMap para ser encontrável por name/distanceTo
       var newId = 'spawned_' + Date.now() + '_' + Math.floor(Math.random() * 1000)
       meshMap[newId] = mesh
-      dbg('spawnObject: ' + name + ' spawnado em [' + pos.join(',') + '] (id=' + newId + ')', 'log', 'Spawn')
+      dbg('spawnObject: ' + name + ' em [' + pos.join(',') + ']', 'log')
       return newId
     },
-    collidingWith: function (id, type) { for (var k in bodies) { if (k === id) continue; if (bodies[k]._conect.type === type || bodies[k]._conect.name === type) { if (bodies[id].position.distanceTo(bodies[k].position) < 1.5) return true } } return false },
-    distanceTo: function (id, name) { for (var k in meshMap) { if (meshMap[k]._name === name) { return meshMap[id].position.distanceTo(meshMap[k].position) } } return 0 },
+    collidingWith: function (id, type) {
+      if (!bodies[id]) return false
+      for (var k in bodies) {
+        if (k === id) continue
+        var c = bodies[k]._conect
+        if (c && (c.type === type || c.name === type)) {
+          if (bodies[id].position.distanceTo(bodies[k].position) < 1.5) return true
+        }
+      }
+      return false
+    },
+    distanceTo: function (id, name) {
+      var src = meshMap[id]
+      if (!src) return 0
+      for (var k in meshMap) {
+        var m = meshMap[k]
+        if (m._name === name || (m._conect && m._conect.name === name)) {
+          return src.position.distanceTo(m.position)
+        }
+      }
+      return 0
+    },
     isTouching: function () { return joystick.active },
     // Sistema 2: Armas e combate (exportado) — implementação real com raycast
     shoot: function () {
-      if ((gc._weaponAmmo || 0) <= 0) { dbg('shoot: sem munição! Pressiona reload()', 'warning', 'Weapon'); return false }
+      if ((gc._weaponAmmo || 0) <= 0) { dbg('shoot: sem munição! Pressiona reload()', 'warn'); return false }
       gc._weaponAmmo = (gc._weaponAmmo || 0) - 1
-      // Raycast a partir da câmara
       var raycaster = new THREE.Raycaster()
       var origin = camera.position.clone()
-      var dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
-      raycaster.set(origin, dir)
+      var dirV = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
+      raycaster.set(origin, dirV)
       raycaster.far = gc._weaponRange || 100
-      // Colectar todos os meshes com _conect (inimigos/NPCs)
       var targets = []
       for (var k in meshMap) {
         if (meshMap[k]._conect && meshMap[k].visible !== false) targets.push(meshMap[k])
@@ -394,59 +634,61 @@ function startGame() {
       if (hits.length > 0) {
         var hit = hits[0]
         var hitMesh = hit.object
-        // Subir na hierarquia até encontrar um mesh com _conect
         while (hitMesh && !hitMesh._conect && hitMesh.parent) hitMesh = hitMesh.parent
         if (hitMesh && hitMesh._conect) {
           var id = hitMesh._conect.instanceId
-          dbg('shoot: atingiu ' + (hitMesh._conect.name || id) + ' a ' + hit.distance.toFixed(1) + 'm', 'log', 'Weapon')
-          // Aplicar dano
+          dbg('shoot: atingiu ' + (hitMesh._conect.name || id) + ' a ' + hit.distance.toFixed(1) + 'm', 'log')
           if (gc.takeDamage) gc.takeDamage(id, gc._weaponDamage || 25)
-          // Disparar evento onHit no target
           if (runtimes[id]) runtimes[id].triggerEvent('onHit', { damage: gc._weaponDamage || 25, point: [hit.point.x, hit.point.y, hit.point.z] })
           return id
         }
       }
-      dbg('shoot: disparou mas não atingiu nada', 'log', 'Weapon')
+      dbg('shoot: disparou mas não atingiu nada', 'log')
       return false
     },
     reload: function () {
       var max = gc._weaponMaxAmmo || 30
       gc._weaponAmmo = max
-      dbg('reload: munição restaurada para ' + max, 'log', 'Weapon')
+      dbg('reload: munição restaurada para ' + max, 'log')
     },
     equipWeapon: function (name) {
-      // Procurar WeaponObject na cena com este nome
       var w = (scene.conects || []).find(function (c) { return c.type === 'WeaponObject' && c.name === name })
-      if (!w) { dbg('equipWeapon: arma "' + name + '" não encontrada', 'warning', 'Weapon'); return false }
+      if (!w) { dbg('equipWeapon: arma "' + name + '" não encontrada', 'warn'); return false }
       gc._weaponDamage = w.damage || 25
       gc._weaponRange = w.range || 100
       gc._weaponMaxAmmo = w.maxAmmo || 30
       gc._weaponAmmo = gc._weaponMaxAmmo
-      dbg('equipWeapon: ' + name + ' equipada (dano=' + gc._weaponDamage + ', alcance=' + gc._weaponRange + ', munição=' + gc._weaponMaxAmmo + ')', 'log', 'Weapon')
+      dbg('equipWeapon: ' + name + ' equipada (dano=' + gc._weaponDamage + ', munição=' + gc._weaponMaxAmmo + ')', 'log')
       return true
     },
     getAmmo: function () { return gc._weaponAmmo || 0 },
     takeDamage: function (id, amount) {
-      for (var i = 0; i < scene.conects.length; i++) {
-        if (scene.conects[i].instanceId === id) {
-          var c = scene.conects[i]
+      var conects = (scene && scene.conects) || []
+      for (var i = 0; i < conects.length; i++) {
+        if (conects[i].instanceId === id) {
+          var c = conects[i]
           c.health = Math.max(0, (c.health || 100) - amount)
-          dbg(c.name + ' recebeu ' + amount + ' dano (vida: ' + c.health + ')', 'log', 'Combat')
+          dbg(c.name + ' recebeu ' + amount + ' dano (vida: ' + c.health + ')', 'log')
           var rt = runtimes[id]; if (rt) rt.triggerEvent('onDamage', { amount: amount, source: 'weapon' })
-          if (c.health <= 0 && meshMap[id]) meshMap[id].visible = false
+          // S17: onDeath quando a vida chega a 0
+          if (c.health <= 0) {
+            if (meshMap[id]) meshMap[id].visible = false
+            if (rt) rt.triggerEvent('onDeath', { killer: 'weapon' })
+          }
           break
         }
       }
     },
     getHealth: function (id) {
-      for (var i = 0; i < scene.conects.length; i++) { if (scene.conects[i].instanceId === id) return scene.conects[i].health || 100 }
+      var conects = (scene && scene.conects) || []
+      for (var i = 0; i < conects.length; i++) { if (conects[i].instanceId === id) return conects[i].health || 100 }
       return 100
     },
     // Sistema 3: Inventário (exportado)
     addToInventory: function (name, qty) {
       gc._inventory = gc._inventory || {}
       gc._inventory[name] = (gc._inventory[name] || 0) + (qty || 1)
-      dbg('Item "' + name + '" adicionado (' + qty + '). Total: ' + gc._inventory[name], 'log', 'Inventory')
+      dbg('Item "' + name + '" adicionado (' + qty + '). Total: ' + gc._inventory[name], 'log')
       for (var k in runtimes) { runtimes[k].triggerEvent('onPickup', { itemName: name, quantity: qty }) }
     },
     removeFromInventory: function (name, qty) {
@@ -460,37 +702,32 @@ function startGame() {
     // Sistema 3: Sinais (exportado)
     emitSignal: function (name, sigData) {
       for (var k in runtimes) { runtimes[k].triggerEvent('onSignal', { name: name, data: sigData }) }
-      dbg('Signal emitido: ' + name, 'log', 'Signals')
+      dbg('Signal emitido: ' + name, 'log')
     },
     // Sistema: Links (exportado)
     linkTo: function (target, sub) {
       if (target === 'scene') {
         var sc = (data.scenes || []).find(function (s) { return s.name === sub || s.id === sub })
-        if (sc) { data.activeSceneId = sc.id; dbg('Link: cena "' + sc.name + '"', 'log', 'Links') }
+        if (sc) { gc.changeScene(sc.id) }
       } else if (target === 'screen') {
         var ss = (data.uiScreens || []).find(function (s) { return s.name === sub || s.id === sub })
-        if (ss) { (data.uiScreens || []).forEach(function (s) { s.visible = (s.id === ss.id) }); renderUI(); dbg('Link: tela "' + ss.name + '"', 'log', 'Links') }
+        if (ss) { (data.uiScreens || []).forEach(function (s) { s.visible = (s.id === ss.id) }); renderUI(); dbg('Link: tela "' + ss.name + '"', 'log') }
       } else if (target === 'url') { window.open(sub, '_blank') }
     },
-    // changeScene real (exportado) — A2: implementação completa
-    // Antes: apenas atualizava data.activeSceneId (não recarregava meshes)
-    // Agora: limpa meshes antigos, carrega nova cena, reposiciona jogador, re-inicializa física
+    // changeScene real (exportado) — S17 fixes P0-03/P0-04
     changeScene: function (nameOrId) {
       var sc = (data.scenes || []).find(function (s) { return s.name === nameOrId || s.id === nameOrId })
-      if (!sc) { dbg('Cena não encontrada: ' + nameOrId, 'error', 'Game'); return }
-      if (sc.id === data.activeSceneId) { dbg('Já na cena: ' + sc.name, 'log', 'Game'); return }
-      dbg('A mudar para cena: ' + sc.name, 'log', 'Game')
+      if (!sc) { dbg('Cena não encontrada: ' + nameOrId, 'error'); return }
+      if (scene && sc.id === scene.id) { dbg('Já na cena: ' + sc.name, 'log'); return }
+      dbg('A mudar para cena: ' + sc.name, 'log')
 
       // 1. Guardar estado do jogador (vida, inventário, etc.)
       var savedPlayer = null
       if (player && meshMap[player.instanceId]) {
-        var pm = meshMap[player.instanceId]
         savedPlayer = {
-          position: { x: pm.position.x, y: pm.position.y, z: pm.position.z },
-          rotation: { x: pm.rotation.x, y: pm.rotation.y, z: pm.rotation.z },
           health: player.health,
-          // FlirCode pode ter guardado estado no runtime do jogador
-          runtimeState: runtimes[player.instanceId] ? { _vars: runtimes[player.instanceId]._vars || {} } : null,
+          inventory: gc._inventory || {},
+          score: gc.globalVars._score || 0,
         }
       }
 
@@ -510,6 +747,8 @@ function startGame() {
         if (runtimes[k3] && runtimes[k3].dispose) runtimes[k3].dispose()
       }
       runtimes = {}
+      npcAIs = {}
+      animStates = {}
 
       // 3. Atualizar cena ativa
       data.activeSceneId = sc.id
@@ -520,125 +759,204 @@ function startGame() {
         world.gravity.set(0, sc.physics.gravity[1], 0)
       }
 
-      // 5. Re-criar meshes da nova cena (reaproveita o forEach existente)
-      ;(sc.conects || []).forEach(function (conect) {
-        var mesh = null
-        if (['RigidObject', 'StaticObject', 'StopObject', 'PersonalObject', 'NpcObject'].indexOf(conect.type) >= 0) {
-          // A2: criar mesh humanoide para NpcObject (igual ao ConectRenderer do editor)
-          if (conect.type === 'NpcObject') {
-            var npcGroup = new THREE.Group()
-            npcGroup.position.set.apply(npcGroup, conect.position || [0, 0.5, 0])
-            var bodyColor = conect.color || '#c0392b'
-            // Tronco
-            var torso = new THREE.Mesh(
-              new THREE.CapsuleGeometry(0.3, 0.8, 4, 12),
-              new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.7 })
-            )
-            torso.position.y = 1.2; torso.castShadow = true
-            npcGroup.add(torso)
-            // Cabeça
-            var head = new THREE.Mesh(
-              new THREE.SphereGeometry(0.28, 16, 16),
-              new THREE.MeshStandardMaterial({ color: '#f4d4b8', roughness: 0.6 })
-            )
-            head.position.y = 2.0; head.castShadow = true
-            npcGroup.add(head)
-            // Braços + Pernas (simplificado — 4 cilindros)
-            var limbGeo = new THREE.CapsuleGeometry(0.12, 0.7, 4, 8)
-            var limbMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.7 })
-            ;[[-0.4, 1.3], [0.4, 1.3], [-0.18, 0.4], [0.18, 0.4]].forEach(function (p) {
-              var limb = new THREE.Mesh(limbGeo, limbMat)
-              limb.position.set(p[0], p[1], 0); limb.castShadow = true
-              npcGroup.add(limb)
-            })
-            scene3d.add(npcGroup)
-            meshMap[conect.instanceId] = npcGroup
-            npcGroup._name = conect.name; npcGroup._conect = conect
-            mesh = npcGroup
-          } else {
-            var color = conect.type === 'PersonalObject' ? 0x3fb950 : conect.type === 'StaticObject' ? 0x6e7681 : conect.type === 'NpcObject' ? 0xe63946 : 0x888888
-            var geo = conect.type === 'PersonalObject' ? new THREE.CapsuleGeometry(0.4, 1, 8, 16) : new THREE.BoxGeometry(1, 1, 1)
-            mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: color, roughness: 0.6 }))
-            mesh.position.set.apply(mesh, conect.position || [0, 0.5, 0])
-            mesh.castShadow = true; mesh.receiveShadow = true
-            scene3d.add(mesh)
-            meshMap[conect.instanceId] = mesh
-            mesh._name = conect.name; mesh._conect = conect
-          }
-          // Physics
-          var shape = new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5))
-          var body = new CANNON.Body({ mass: conect.type === 'StaticObject' ? 0 : (conect.mass || 1), shape: shape, position: new CANNON.Vec3(conect.position[0], conect.position[1], conect.position[2]) })
-          if (conect.type === 'StaticObject') { body.type = CANNON.Body.STATIC; body.mass = 0 }
-          if (conect.type === 'StopObject') { body.type = CANNON.Body.KINEMATIC; body.mass = 0 }
-          body.fixedRotation = conect.fixedRotation || false
-          body._conect = conect
-          world.addBody(body)
-          bodies[conect.instanceId] = body
-          body.addEventListener('collide', function (e) {
-            var otherId = null
-            for (var k in bodies) { if (bodies[k] === e.body) { otherId = k; break } }
-            if (otherId && runtimes[conect.instanceId]) runtimes[conect.instanceId].triggerEvent('onCollision', { other: otherId })
-          })
-        } else if (conect.type === 'TerrainObject') {
-          var seg = conect.segments || 64
-          var terrainGeo = new THREE.PlaneGeometry(conect.width || 50, conect.depth || 50, seg, seg)
-          if (conect.heightmap && conect.heightmap.length > 0) {
-            var pos = terrainGeo.attributes.position
-            var heightScale = conect.heightScale || 5
-            for (var k = 0; k < pos.count; k++) {
-              pos.setZ(k, (conect.heightmap[k] || 0) * heightScale)
-            }
-            pos.needsUpdate = true
-          }
-          terrainGeo.rotateX(-Math.PI / 2)
-          terrainGeo.computeVertexNormals()
-          var terrainMesh = new THREE.Mesh(terrainGeo, new THREE.MeshStandardMaterial({ color: conect.color || 0x4a7c3a, roughness: 0.85 }))
-          terrainMesh.position.set.apply(terrainMesh, conect.position || [0, 0, 0])
-          terrainMesh.receiveShadow = true
-          scene3d.add(terrainMesh)
-          meshMap[conect.instanceId] = terrainMesh
-          terrainMesh._name = conect.name; terrainMesh._conect = conect
-        } else if (conect.type === 'LuminousObject') {
-          var light
-          if (conect.lightType === 'directional') light = new THREE.DirectionalLight(conect.color || 0xffffff, conect.intensity || 1)
-          else if (conect.lightType === 'spot') light = new THREE.SpotLight(conect.color || 0xffffff, conect.intensity || 1)
-          else light = new THREE.PointLight(conect.color || 0xffffff, conect.intensity || 1, conect.distance || 10)
-          light.position.set.apply(light, conect.position || [0, 5, 0])
-          light.castShadow = conect.castShadow !== false
-          scene3d.add(light)
-        }
-        // FlirCode para conects (re-inicializa runtimes)
-        if (conect.flirScript && typeof conect.flirScript === 'string' && conect.flirScript.startsWith('FLIRCODE:')) {
-          var rt2 = createFlirCodeRuntime(conect.flirScript.slice(9), Object.assign(gc, { _instanceId: conect.instanceId, mesh: mesh }))
-          if (!rt2.hasErrors) { runtimes[conect.instanceId] = rt2; rt2.triggerEvent('beginPlay') }
-        }
-      })
+      // 5. Re-criar meshes/bodies/runtimes da nova cena (setup partilhado)
+      setupSceneContents(sc)
 
-      // 6. Reposicionar jogador (spawn point da nova cena)
+      // S17 fix (P0-04): RECALCULAR a câmara — activeView/hasTZ/camState ficavam
+      // apontados para a cena ANTIGA (câmara seguia o jogador inexistente).
+      activeView = resolveActiveView(sc.conects) || sc.gameCamera
+      hasTZ = hasCameraTouchZone(sc.conects)
+      camState.hasTouchZone = hasTZ
+      camState.enabled = true
+      if (activeView) {
+        camera.fov = activeView.fov || camera.fov
+        camera.near = activeView.near || camera.near
+        camera.far = activeView.far || camera.far
+        camera.updateProjectionMatrix()
+      }
+
+      // 6. Reposicionar jogador (spawn da nova cena; manter vida/inventário/score)
       player = (sc.conects || []).find(function (c) { return c.type === 'PersonalObject' })
-      if (player && meshMap[player.instanceId] && savedPlayer) {
-        // Manter vida do jogador
+      if (player && savedPlayer) {
         if (savedPlayer.health !== undefined) player.health = savedPlayer.health
-        // Posição inicial da nova cena (definida no conect)
-        // (não restaurar posição antiga — cada cena tem o seu próprio spawn)
+        gc._inventory = savedPlayer.inventory
+        gc.globalVars._score = savedPlayer.score
       }
 
       // 7. Re-render UI
       renderUI()
 
-      dbg('Cena mudou para "' + sc.name + '"', 'log', 'Game')
+      dbg('Cena mudou para "' + sc.name + '"', 'log')
     },
     // Sistema: Game State (exportado)
     _gameState: 'menu',
-    setGameState: function (s) { gc._gameState = s; dbg('Game State: ' + s, 'log', 'GameState'); for (var k in runtimes) { runtimes[k].triggerEvent('onGameStateChange', { state: s }) } },
+    setGameState: function (s) { gc._gameState = s; dbg('Game State: ' + s, 'log'); for (var k in runtimes) { runtimes[k].triggerEvent('onGameStateChange', { state: s }) } },
     getGameState: function () { return gc._gameState },
     // Sistema: Save/Load Progress (exportado — localStorage do jogador)
-    saveProgress: function (key, val) { try { localStorage.setItem('flir_progress_' + key, JSON.stringify(val)); dbg('Progresso guardado: ' + key, 'log', 'Save') } catch (e) {} },
+    saveProgress: function (key, val) { try { localStorage.setItem('flir_progress_' + key, JSON.stringify(val)); dbg('Progresso guardado: ' + key, 'log') } catch (e) {} },
     loadProgress: function (key) { try { var v = localStorage.getItem('flir_progress_' + key); return v ? JSON.parse(v) : null } catch (e) { return null } },
     // Sistema: Sequenciador (exportado — básico)
-    playSequence: function (name) { dbg('Sequência "' + name + '" iniciada', 'log', 'Sequence') },
+    playSequence: function (name) { dbg('Sequência "' + name + '" iniciada', 'log') },
+    // S17: Diálogo / pontuação / IA (demos flirQuest)
+    setDialog: function (text) { gc.globalVars._dialogText = String(text ?? '') },
+    showDialog: function (text) {
+      var t = (text !== undefined && text !== null && text !== '') ? String(text) : String(gc.globalVars._dialogText || '')
+      showRuntimeDialog(t)
+      dbg('Diálogo: "' + t.slice(0, 60) + '"', 'log')
+    },
+    hideDialog: function () { hideRuntimeDialog() },
+    addScore: function (n) {
+      gc.globalVars._score = (gc.globalVars._score || 0) + (Number(n) || 0)
+      dbg('Pontuação: ' + gc.globalVars._score, 'log')
+    },
+    chasePlayer: function (id) { if (id) gc.globalVars['_chase_' + id] = true },
+    stopChase: function (id) { if (id) gc.globalVars['_chase_' + id] = false },
   }
   window._flirGameContext = gc
+
+  // S17: setup partilhado entre arranque inicial e changeScene — cria meshes,
+  // bodies, runtimes, IA e animações de UMA cena (P1-09: humanoides também na
+  // cena inicial; antes só o caminho changeScene criava humanoides).
+  function setupSceneContents(sc) {
+    // Objects (catálogo) — S17 fix (P2-26): lookup em data.objects
+    ;(sc.objects || []).forEach(function (inst) {
+      var obj = (data.objects || []).find(function (o) { return o.id === inst.objectId })
+      if (!obj) return
+      var mesh = setupMesh(obj, inst.position, inst.rotation, inst.scale)
+      meshMap[inst.instanceId] = mesh
+      mesh._name = obj.name
+      if (obj.flirScript && typeof obj.flirScript === 'string' && obj.flirScript.startsWith('FLIRCODE:')) {
+        var rt = createFlirCodeRuntime(obj.flirScript.slice(9), gc, { _instanceId: inst.instanceId, mesh: mesh })
+        if (!rt.hasErrors) { runtimes[inst.instanceId] = rt; rt.triggerEvent('beginPlay') }
+      }
+    })
+
+    // Conects
+    ;(sc.conects || []).forEach(function (conect) {
+      var mesh = null
+      if (['RigidObject', 'StaticObject', 'StopObject', 'PersonalObject', 'NpcObject'].indexOf(conect.type) >= 0) {
+        var isChar = conect.type === 'PersonalObject' || conect.type === 'NpcObject'
+        if (conect.type === 'NpcObject') {
+          // S17 fix (P1-09): humanoide com membros animáveis (igual ao editor e
+          // ao caminho changeScene — antes a cena inicial usava um cubo)
+          mesh = buildHumanoid(conect.color || '#c0392b', '#f4d4b8', false)
+          if (conect.scale) mesh.scale.set(conect.scale[0] || 1, conect.scale[1] || 1, conect.scale[2] || 1)
+          mesh.position.set.apply(mesh, conect.position || [0, 0.5, 0])
+          scene3d.add(mesh)
+          meshMap[conect.instanceId] = mesh
+          mesh._name = conect.name; mesh._conect = conect
+          animStates[conect.instanceId] = { t: 0, clock: 0, lastPos: null }
+          npcAIs[conect.instanceId] = { hasSight: false, patrolIndex: 0 }
+        } else if (conect.type === 'PersonalObject') {
+          // S17: player humanoide (verde, com estrela) — igual ao PlayerHumanoidMesh
+          mesh = buildHumanoid('#3fb950', '#f4d4b8', true)
+          mesh.position.set.apply(mesh, conect.position || [0, 0.5, 0])
+          scene3d.add(mesh)
+          meshMap[conect.instanceId] = mesh
+          mesh._name = conect.name; mesh._conect = conect
+          animStates[conect.instanceId] = { t: 0, clock: 0, lastPos: null }
+        } else {
+          var color = conect.type === 'StaticObject' ? 0x6e7681 : 0x888888
+          var geo = new THREE.BoxGeometry(1, 1, 1)
+          mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: color, roughness: 0.6 }))
+          mesh.position.set.apply(mesh, conect.position || [0, 0.5, 0])
+          mesh.castShadow = true; mesh.receiveShadow = true
+          scene3d.add(mesh)
+          meshMap[conect.instanceId] = mesh
+          mesh._name = conect.name; mesh._conect = conect
+        }
+        // Physics
+        // S17 fix (P1-10): personagens com fixedRotation=true, allowSleep=false,
+        // damping — antes o herói caía/rolava/deslizava no jogo exportado.
+        var isCharacter = conect.type === 'PersonalObject' || conect.type === 'NpcObject'
+        var csz = conect.colliderSize || (isCharacter ? [0.7, 1.6, 0.7] : [1, 1, 1])
+        var shape = new CANNON.Box(new CANNON.Vec3(csz[0] / 2, csz[1] / 2, csz[2] / 2))
+        var body = new CANNON.Body({
+          mass: (conect.type === 'StaticObject' || conect.type === 'StopObject') ? 0 : (conect.mass || 1),
+          shape: shape,
+          position: new CANNON.Vec3(conect.position[0], conect.position[1], conect.position[2]),
+        })
+        if (conect.type === 'StaticObject') { body.type = CANNON.Body.STATIC; body.mass = 0 }
+        if (conect.type === 'StopObject') { body.type = CANNON.Body.KINEMATIC; body.mass = 0 }
+        body.fixedRotation = isCharacter ? true : (conect.fixedRotation || false)
+        body.allowSleep = isCharacter ? false : true
+        body.linearDamping = isCharacter ? 0.2 : 0.01
+        body.angularDamping = isCharacter ? 0.9 : 0.01
+        body._conect = conect
+        world.addBody(body)
+        bodies[conect.instanceId] = body
+        body.addEventListener('collide', (function (cid) {
+          return function (e) {
+            var otherId = null
+            for (var k in bodies) { if (bodies[k] === e.body) { otherId = k; break } }
+            if (otherId && runtimes[cid]) runtimes[cid].triggerEvent('onCollision', { other: otherId })
+          }
+        })(conect.instanceId))
+      } else if (conect.type === 'TerrainObject') {
+        var seg = conect.segments || 64
+        var terrainGeo = new THREE.PlaneGeometry(conect.width || 50, conect.depth || 50, seg, seg)
+        if (conect.heightmap && conect.heightmap.length > 0) {
+          var pos = terrainGeo.attributes.position
+          var heightScale = conect.heightScale || 5
+          for (var k = 0; k < pos.count; k++) {
+            pos.setZ(k, (conect.heightmap[k] || 0) * heightScale)
+          }
+          pos.needsUpdate = true
+        }
+        terrainGeo.rotateX(-Math.PI / 2)
+        terrainGeo.computeVertexNormals()
+        var terrainMesh = new THREE.Mesh(terrainGeo, new THREE.MeshStandardMaterial({ color: conect.color || 0x4a7c3a, roughness: 0.85 }))
+        terrainMesh.position.set.apply(terrainMesh, conect.position || [0, 0, 0])
+        terrainMesh.receiveShadow = true
+        scene3d.add(terrainMesh)
+        meshMap[conect.instanceId] = terrainMesh
+        terrainMesh._name = conect.name; terrainMesh._conect = conect
+        // Física: plano de chão infinito (a altura do terrain conect)
+        var planeBody = new CANNON.Body({
+          mass: 0,
+          shape: new CANNON.Plane(),
+          position: new CANNON.Vec3(conect.position?.[0] || 0, conect.position?.[1] || 0, conect.position?.[2] || 0),
+        })
+        planeBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2)
+        world.addBody(planeBody)
+        bodies[conect.instanceId] = planeBody
+        planeBody._conect = conect
+        // S17: NÃO sincronizar o quaternion deste body para o mesh (a geometria
+        // já tem rotateX(-PI/2) baked — sincronizar dobrava a rotação → parede)
+        planeBody._isTerrain = true
+      } else if (conect.type === 'LuminousObject') {
+        var light
+        if (conect.lightType === 'directional') light = new THREE.DirectionalLight(conect.color || 0xffffff, conect.intensity || 1)
+        else if (conect.lightType === 'spot') light = new THREE.SpotLight(conect.color || 0xffffff, conect.intensity || 1)
+        else light = new THREE.PointLight(conect.color || 0xffffff, conect.intensity || 1, conect.distance || 10)
+        light.position.set.apply(light, conect.position || [0, 5, 0])
+        light.castShadow = conect.castShadow !== false
+        scene3d.add(light)
+      } else if (conect.type === 'SkyObject' && conect.skyType === 'gradient') {
+        var sc = document.createElement('canvas'); sc.width = 2; sc.height = 256
+        var sctx = sc.getContext('2d')
+        var sg = sctx.createLinearGradient(0, 0, 0, 256)
+        sg.addColorStop(0, conect.topColor || '#1a4d8f'); sg.addColorStop(1, conect.bottomColor || '#aac4e8')
+        sctx.fillStyle = sg; sctx.fillRect(0, 0, 2, 256)
+        scene3d.background = new THREE.CanvasTexture(sc)
+      } else if (conect.type === 'FogObject') {
+        if (conect.fogType === 'exponential') scene3d.fog = new THREE.FogExp2(conect.color || 0xa0a0a0, conect.density || 0.02)
+        else scene3d.fog = new THREE.Fog(conect.color || 0xa0a0a0, conect.near || 5, conect.far || 50)
+      } else if (conect.type === 'SoundObject' && conect.autoplay && conect.url) {
+        try { var audio = new Audio(conect.url); audio.volume = conect.volume || 1; audio.loop = conect.loop || false; audio.play() } catch (e) { }
+      }
+
+      // FlirCode para conects — S17 fix (P0-02): rtOpts por-runtime
+      if (conect.flirScript && typeof conect.flirScript === 'string' && conect.flirScript.startsWith('FLIRCODE:')) {
+        var rt2 = createFlirCodeRuntime(conect.flirScript.slice(9), gc, { _instanceId: conect.instanceId, mesh: mesh })
+        if (!rt2.hasErrors) { runtimes[conect.instanceId] = rt2; rt2.triggerEvent('beginPlay') }
+      }
+      if (conect.flirCode && typeof conect.flirCode === 'string' && conect.flirCode.trim()) {
+        var rt3 = createFlirCodeRuntime(conect.flirCode, gc, { _instanceId: conect.instanceId, mesh: mesh })
+        if (!rt3.hasErrors) { runtimes[conect.instanceId] = rt3; rt3.triggerEvent('beginPlay') }
+      }
+    })
+  }
 
   // Setup meshes para objetos do catálogo
   function setupMesh(obj, pos, rot, scl) {
@@ -661,113 +979,58 @@ function startGame() {
     return mesh
   }
 
-  // Objects
-  (scene.objects || []).forEach(function (inst) {
-    var obj = (scene.objects || []).find(function (o) { return o.id === inst.objectId })
-    if (!obj) return
-    var mesh = setupMesh(obj, inst.position, inst.rotation, inst.scale)
-    meshMap[inst.instanceId] = mesh
-    mesh._name = obj.name
-    // FlirCode
-    if (obj.flirScript && typeof obj.flirScript === 'string' && obj.flirScript.startsWith('FLIRCODE:')) {
-      var rt = createFlirCodeRuntime(obj.flirScript.slice(9), Object.assign(gc, { _instanceId: inst.instanceId, mesh: mesh }))
-      if (!rt.hasErrors) { runtimes[inst.instanceId] = rt; rt.triggerEvent('beginPlay') }
-    }
-  })
-
-  // Conects
-  ;(scene.conects || []).forEach(function (conect) {
-    var mesh = null
-    if (['RigidObject', 'StaticObject', 'StopObject', 'PersonalObject', 'NpcObject'].indexOf(conect.type) >= 0) {
-      var color = conect.type === 'PersonalObject' ? 0x3fb950 : conect.type === 'StaticObject' ? 0x6e7681 : conect.type === 'NpcObject' ? 0xe63946 : 0x888888
-      var geo = conect.type === 'PersonalObject' ? new THREE.CapsuleGeometry(0.4, 1, 8, 16) : new THREE.BoxGeometry(1, 1, 1)
-      mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: color, roughness: 0.6 }))
-      mesh.position.set.apply(mesh, conect.position || [0, 0.5, 0])
-      mesh.castShadow = true; mesh.receiveShadow = true
-      scene3d.add(mesh)
-      meshMap[conect.instanceId] = mesh
-      mesh._name = conect.name
-      mesh._conect = conect
-      // Physics
-      var shape = new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5))
-      var body = new CANNON.Body({ mass: conect.type === 'StaticObject' ? 0 : (conect.mass || 1), shape: shape, position: new CANNON.Vec3(conect.position[0], conect.position[1], conect.position[2]) })
-      if (conect.type === 'StaticObject') { body.type = CANNON.Body.STATIC; body.mass = 0 }
-      if (conect.type === 'StopObject') { body.type = CANNON.Body.KINEMATIC; body.mass = 0 }
-      body.fixedRotation = conect.fixedRotation || false
-      body._conect = conect
-      world.addBody(body)
-      bodies[conect.instanceId] = body
-      body.addEventListener('collide', function (e) {
-        var otherId = null
-        for (var k in bodies) { if (bodies[k] === e.body) { otherId = k; break } }
-        if (otherId && runtimes[conect.instanceId]) runtimes[conect.instanceId].triggerEvent('onCollision', { other: otherId })
-      })
-    } else if (conect.type === 'LuminousObject') {
-      var light
-      if (conect.lightType === 'directional') light = new THREE.DirectionalLight(conect.color || 0xffffff, conect.intensity || 1)
-      else if (conect.lightType === 'spot') light = new THREE.SpotLight(conect.color || 0xffffff, conect.intensity || 1)
-      else light = new THREE.PointLight(conect.color || 0xffffff, conect.intensity || 1, conect.distance || 10)
-      light.position.set.apply(light, conect.position || [0, 5, 0])
-      light.castShadow = conect.castShadow !== false
-      scene3d.add(light)
-    } else if (conect.type === 'SkyObject' && conect.skyType === 'gradient') {
-      var sc = document.createElement('canvas'); sc.width = 2; sc.height = 256
-      var sctx = sc.getContext('2d')
-      var sg = sctx.createLinearGradient(0, 0, 0, 256)
-      sg.addColorStop(0, conect.topColor || '#1a4d8f'); sg.addColorStop(1, conect.bottomColor || '#aac4e8')
-      sctx.fillStyle = sg; sctx.fillRect(0, 0, 2, 256)
-      scene3d.background = new THREE.CanvasTexture(sc)
-    } else if (conect.type === 'FogObject') {
-      if (conect.fogType === 'exponential') scene3d.fog = new THREE.FogExp2(conect.color || 0xa0a0a0, conect.density || 0.02)
-      else scene3d.fog = new THREE.Fog(conect.color || 0xa0a0a0, conect.near || 5, conect.far || 50)
-    } else if (conect.type === 'TerrainObject') {
-      // CORREÇÃO BUG1: Adicionar suporte a TerrainObject no runtime exportado
-      // (antes era silently dropped — terreno não aparecia no jogo exportado)
-      var seg = conect.segments || 64
-      var terrainGeo = new THREE.PlaneGeometry(conect.width || 50, conect.depth || 50, seg, seg)
-      // Aplicar heightmap se existir (senão fica plano horizontal)
-      if (conect.heightmap && conect.heightmap.length > 0) {
-        var pos = terrainGeo.attributes.position
-        var heightScale = conect.heightScale || 5
-        for (var k = 0; k < pos.count; k++) {
-          var h = conect.heightmap[k] || 0
-          pos.setZ(k, h * heightScale)
-        }
-        pos.needsUpdate = true
-      }
-      terrainGeo.rotateX(-Math.PI / 2) // plano XZ (horizontal no chão)
-      terrainGeo.computeVertexNormals()
-      var terrainMat = new THREE.MeshStandardMaterial({
-        color: conect.color || 0x4a7c3a,
-        roughness: 0.85,
-        metalness: 0.0,
-        flatShading: false,
-      })
-      var terrainMesh = new THREE.Mesh(terrainGeo, terrainMat)
-      terrainMesh.position.set.apply(terrainMesh, conect.position || [0, 0, 0])
-      terrainMesh.receiveShadow = true
-      terrainMesh.castShadow = false
-      scene3d.add(terrainMesh)
-      meshMap[conect.instanceId] = terrainMesh
-      terrainMesh._name = conect.name
-      terrainMesh._conect = conect
-    } else if (conect.type === 'SoundObject' && conect.autoplay && conect.url) {
-      try { var audio = new Audio(conect.url); audio.volume = conect.volume || 1; audio.loop = conect.loop || false; audio.play() } catch (e) { }
-    }
-
-    // FlirCode para conects
-    if (conect.flirScript && typeof conect.flirScript === 'string' && conect.flirScript.startsWith('FLIRCODE:')) {
-      var rt2 = createFlirCodeRuntime(conect.flirScript.slice(9), Object.assign(gc, { _instanceId: conect.instanceId, mesh: mesh }))
-      if (!rt2.hasErrors) { runtimes[conect.instanceId] = rt2; rt2.triggerEvent('beginPlay') }
-    }
-  })
+  // ===== S17: arranque inicial (usa o setup partilhado) =====
+  setupSceneContents(scene)
+  player = (scene.conects || []).find(function (c) { return c.type === 'PersonalObject' }) || null
 
   // Joystick / teclado
+  // S17 fix (P2-22): touch — metade ESQUERDA do ecrã = joystick, metade DIREITA =
+  // rotação de câmara (estilo COD Mobile). Antes QUALQUER toque ativava o joystick
+  // e a rotação por toque não existia no exportado.
   var joystick = { x: 0, z: 0, active: false }
-  var touchStart = null
-  canvas.addEventListener('touchstart', function (e) { if (e.touches.length === 1) { touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY }; joystick.active = true } })
-  canvas.addEventListener('touchmove', function (e) { if (touchStart && e.touches.length === 1) { joystick.x = Math.max(-1, Math.min(1, (e.touches[0].clientX - touchStart.x) / 50)); joystick.z = Math.max(-1, Math.min(1, (e.touches[0].clientY - touchStart.y) / 50)) } })
-  canvas.addEventListener('touchend', function () { joystick.active = false; joystick.x = 0; joystick.z = 0; touchStart = null })
+  var joystickTouchId = null, joystickStart = null
+  var cameraTouchId = null, cameraLast = null
+  canvas.addEventListener('touchstart', function (e) {
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i]
+      if (t.clientX < window.innerWidth / 2 && joystickTouchId === null) {
+        joystickTouchId = t.identifier
+        joystickStart = { x: t.clientX, y: t.clientY }
+        joystick.active = true
+      } else if (cameraTouchId === null) {
+        cameraTouchId = t.identifier
+        cameraLast = { x: t.clientX, y: t.clientY }
+      }
+    }
+    e.preventDefault()
+  }, { passive: false })
+  canvas.addEventListener('touchmove', function (e) {
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i]
+      if (t.identifier === joystickTouchId && joystickStart) {
+        joystick.x = Math.max(-1, Math.min(1, (t.clientX - joystickStart.x) / 50))
+        joystick.z = Math.max(-1, Math.min(1, (t.clientY - joystickStart.y) / 50))
+      } else if (t.identifier === cameraTouchId && cameraLast) {
+        var dx = t.clientX - cameraLast.x
+        var dy = t.clientY - cameraLast.y
+        cameraLast = { x: t.clientX, y: t.clientY }
+        applyCameraInput(dx, dy, camState)
+      }
+    }
+    e.preventDefault()
+  }, { passive: false })
+  var endTouch = function (e) {
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i]
+      if (t.identifier === joystickTouchId) {
+        joystickTouchId = null; joystickStart = null
+        joystick.active = false; joystick.x = 0; joystick.z = 0
+      }
+      if (t.identifier === cameraTouchId) { cameraTouchId = null; cameraLast = null }
+    }
+  }
+  canvas.addEventListener('touchend', endTouch)
+  canvas.addEventListener('touchcancel', endTouch)
   var keys = {}
   window.addEventListener('keydown', function (e) { keys[e.key.toLowerCase()] = true })
   window.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false })
@@ -809,12 +1072,9 @@ function startGame() {
         var dom = document.createElement(el.type === 'Button' ? 'button' : el.type === 'Input' ? 'input' : 'div')
         dom.className = 'ui-el'
         // CORRECAO BUG8: sanitizar valores de CSS para evitar CSS injection
-        // (el.color, el.textColor, el.borderColor podem conter "); url(javascript:..." etc)
         var sanitizeCss = function (val, fallback) {
           if (!val || typeof val !== 'string') return fallback || ''
-          // Remover ; } { ( ) e quebras de linha — previne fechar a string cssText e injetar regras
           var cleaned = val.replace(/[;}{()\\]/g, '').replace(/[\r\n]/g, '')
-          // Limitar comprimento para evitar DoS
           return cleaned.slice(0, 50)
         }
         dom.style.position = 'absolute'
@@ -844,10 +1104,7 @@ function startGame() {
           if (el.linkType && el.linkType !== 'none' && gc.linkTo) { gc.linkTo(el.linkType, el.linkTarget); return }
           gc.triggerUIEvent(el.eventName || 'onClick', { element: el })
         }
-        // Post-Audit 4.0 — A3/S1: Substituído innerHTML por createElement + appendChild
-        // para evitar XSS via el.label / el.url / el.min / el.max / el.value não sanitizados.
-        // Antes: dom.innerHTML = '<input type="checkbox" ...> <span>' + el.label + '</span>'
-        // Agora: construção segura via DOM API.
+        // Post-Audit 4.0 — A3/S1: construção segura via DOM API (sem innerHTML)
         if (el.type === 'Checkbox') {
           var cbInput = document.createElement('input')
           cbInput.type = 'checkbox'
@@ -872,8 +1129,6 @@ function startGame() {
           slInput.oninput = function () { el.value = Number(this.value); gc.triggerUIEvent('onChange', { element: el, value: Number(this.value) }) }
         }
         if (el.type === 'Image' && el.url) {
-          // Post-Audit 4.0 — A3/S1: setAttribute('src') em vez de innerHTML.
-          // setAttribute não interpreta HTML — el.url é tratado como string literal.
           var img = document.createElement('img')
           img.setAttribute('src', el.url)
           img.style.width = '100%'
@@ -887,6 +1142,70 @@ function startGame() {
   }
   renderUI()
 
+  // ===== S17: NPC AI leve (idle/patrol/chase/flee) — igual em espírito ao npcAI.js =====
+  function updateNPCAI(delta) {
+    if (!player) return
+    var playerMesh = meshMap[player.instanceId]
+    if (!playerMesh) return
+    for (var id in npcAIs) {
+      var st = npcAIs[id]
+      var conect = bodies[id] && bodies[id]._conect
+      var npcMesh = meshMap[id]
+      if (!conect || !npcMesh || npcMesh.visible === false) continue
+      var behavior = conect.behavior || conect.aiMode || 'idle'
+      if (behavior === 'idle') continue
+      var speed = conect.moveSpeed || 3
+
+      var dx = playerMesh.position.x - npcMesh.position.x
+      var dz = playerMesh.position.z - npcMesh.position.z
+      var dist = Math.sqrt(dx * dx + dz * dz)
+      var detectR = conect.detectionRadius || 8
+      var loseR = conect.loseSightRadius || 12
+
+      // Eventos de vista
+      if (!st.hasSight && dist < detectR) {
+        st.hasSight = true
+        if (runtimes[id]) runtimes[id].triggerEvent('onSeePlayer', { player: [playerMesh.position.x, playerMesh.position.y, playerMesh.position.z] })
+      } else if (st.hasSight && dist > loseR) {
+        st.hasSight = false
+        if (runtimes[id]) runtimes[id].triggerEvent('onLoseSight', {})
+      }
+
+      var body = bodies[id]
+      if (!body) continue
+
+      if (behavior === 'chase') {
+        var chaseOverride = gc.globalVars['_chase_' + id]
+        if ((!st.hasSight && !chaseOverride) || dist < 1.2) continue
+        var d = dist || 1
+        body.velocity.x = (dx / d) * speed
+        body.velocity.z = (dz / d) * speed
+      } else if (behavior === 'flee') {
+        if (!st.hasSight) continue
+        var fd = dist || 1
+        body.velocity.x = (-dx / fd) * speed
+        body.velocity.z = (-dz / fd) * speed
+      } else if (behavior === 'patrol') {
+        var path = (scene.conects || []).find(function (c) { return c.instanceId === conect.patrolPath })
+        var pts = path && path.points
+        if (!pts || pts.length === 0) {
+          // Sem path: patrulha pequena à volta da posição inicial
+          pts = [[conect.position[0] - 3, 0, conect.position[2]], [conect.position[0] + 3, 0, conect.position[2]]]
+        }
+        var target = pts[st.patrolIndex % pts.length]
+        var pdx = target[0] - npcMesh.position.x
+        var pdz = target[2] - npcMesh.position.z
+        var pdist = Math.sqrt(pdx * pdx + pdz * pdz)
+        if (pdist < 0.6) {
+          st.patrolIndex = (st.patrolIndex + 1) % pts.length
+        } else {
+          body.velocity.x = (pdx / pdist) * speed * 0.7
+          body.velocity.z = (pdz / pdist) * speed * 0.7
+        }
+      }
+    }
+  }
+
   // Game loop
   var lastTime = performance.now()
   function animate() {
@@ -897,37 +1216,62 @@ function startGame() {
 
     // Physics
     world.step(1 / 60, delta, 3)
-    for (var id in bodies) { var b = bodies[id]; var m = meshMap[id]; if (m) { m.position.copy(b.position); m.quaternion.copy(b.quaternion) } }
-
-    // FlirCode onTick — saltar se um wait() está ativo (para evitar re-entrada no mesmo wait)
-    if (!gc._waitUntil || Date.now() >= gc._waitUntil) {
-      for (var rid in runtimes) { runtimes[rid].triggerEvent('tick', { deltaTime: delta }) }
+    for (var id in bodies) {
+      var b = bodies[id]
+      var m = meshMap[id]
+      if (m) {
+        m.position.copy(b.position)
+        // S17 (P0-05 equivalente): terreno nunca sincroniza rotação (geometria baked)
+        if (!b._isTerrain) m.quaternion.copy(b.quaternion)
+      }
     }
 
+    // FlirCode onTick — S17 fix (P1-12): cada runtime decide o seu próprio wait
+    for (var rid in runtimes) {
+      if (!runtimes[rid].isWaiting()) runtimes[rid].triggerEvent('tick', { deltaTime: delta })
+    }
+
+    // S17: NPC AI
+    updateNPCAI(delta)
+
     // PersonalObject movement — camera-relative (estilo Godot, igual ao editor)
-    var player = (scene.conects || []).find(function (c) { return c.type === 'PersonalObject' })
-    if (player && bodies[player.instanceId]) {
-      var speed = player.moveSpeed || 5
+    var playerConect = (scene.conects || []).find(function (c) { return c.type === 'PersonalObject' })
+    if (playerConect && bodies[playerConect.instanceId]) {
+      var speed = playerConect.moveSpeed || 5
       var mx = 0, mz = 0
       if (joystick.active) { mx = joystick.x * speed; mz = joystick.z * speed }
       if (keys['w'] || keys['arrowup']) mz = -speed
       if (keys['s'] || keys['arrowdown']) mz = speed
-      if (keys['a'] || keys['arrowleft']) mx = -speed
-      if (keys['d'] || keys['arrowright']) mx = speed
+      if (keys['a']) mx = -speed
+      if (keys['d']) mx = speed
       // Rodar (mx, mz) pelo yaw da câmara — movimento camera-relative
       var yaw = camState.yaw
       var cosY = Math.cos(yaw)
       var sinY = Math.sin(yaw)
-      var vx =  mx * cosY + mz * sinY
+      var vx = mx * cosY + mz * sinY
       var vz = -mx * sinY + mz * cosY
-      bodies[player.instanceId].velocity.x = vx
-      bodies[player.instanceId].velocity.z = vz
-      if ((keys[' '] || keys['space']) && player.canJump) bodies[player.instanceId].velocity.y = player.jumpForce || 8
+      bodies[playerConect.instanceId].velocity.x = vx
+      bodies[playerConect.instanceId].velocity.z = vz
+      if ((keys[' '] || keys['space']) && playerConect.canJump) bodies[playerConect.instanceId].velocity.y = playerConect.jumpForce || 8
+    }
+
+    // S17: animação procedural dos humanoides (player + NPCs) por velocidade real
+    for (var aid in animStates) {
+      var am = meshMap[aid]
+      if (!am || am.visible === false) continue
+      var stt = animStates[aid]
+      if (stt.lastPos) {
+        var adx = am.position.x - stt.lastPos.x
+        var adz = am.position.z - stt.lastPos.z
+        var aspeed = Math.sqrt(adx * adx + adz * adz) / Math.max(0.001, delta)
+        animateHumanoid(am, aspeed, delta, stt)
+      }
+      stt.lastPos = { x: am.position.x, z: am.position.z }
     }
 
     // Camera follow — usando cameraController unificado (CAMERA_CONTROLLER_SOURCE embebido)
     var av = activeView
-    var pm = (activeView && activeView.cameraRole === 'player' && player && meshMap[player.instanceId]) ? meshMap[player.instanceId] : null
+    var pm = (activeView && activeView.cameraRole === 'player' && playerConect && meshMap[playerConect.instanceId]) ? meshMap[playerConect.instanceId] : null
     var targetMeshForCam = pm
     // Verificar followTarget explícito
     if (av && av.followTarget && meshMap[av.followTarget]) {
@@ -936,7 +1280,7 @@ function startGame() {
     updateCamera(camera, av, targetMeshForCam, camState, {
       gameCamera: scene.gameCamera,
       hasTouchZone: hasTZ,
-      delta: 1/60,
+      delta: Math.min(delta || 1 / 60, 0.1),
     })
 
     renderer.render(scene3d, camera)

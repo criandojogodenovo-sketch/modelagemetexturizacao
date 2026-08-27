@@ -38,6 +38,17 @@ import { debugLog } from '../debug/debugStore'
 // Converte texto FlirCode num AST (Abstract Syntax Tree) que o runtime executa.
 // O parser é um tokenizer + recursive descent parser simples.
 
+// S17: eventos conhecidos — usados pelo parser legacy (blocos `eventName ... end`
+// sem `fun`/`begincode`) e pelo fallback de lookup em triggerEvent.
+const KNOWN_EVENT_NAMES = new Set([
+  'beginPlay', 'tick', 'onCollision', 'onTouch', 'onSeePlayer', 'onLoseSight',
+  'onTimer', 'onEnterZone', 'onExitZone', 'onClick', 'onChange', 'onSubmit',
+  'onPlayerJoin', 'onPlayerLeave', 'onMessage', 'onSignal', 'onDamage',
+  'onPickup', 'onGameStateChange', 'onDeath', 'onHit', 'onCheckpoint',
+  // nomes canónicos das funções FlirCode (onStart, onTick…) também aceites
+  'onStart', 'onTick', 'onCollide',
+])
+
 export function parseFlirCode(source) {
   const errors = []
   const lines = source.split('\n')
@@ -56,6 +67,38 @@ export function parseFlirCode(source) {
   let idx = 0
   while (idx < cleanLines.length) {
     const line = cleanLines[idx]
+
+    // S17 fix: sintaxe LEGACY — `eventName` numa linha isolada seguida de
+    // statements até `end` (usada pelos demos flirQuest*). Exemplo:
+    //   beginPlay
+    //     log("pronto")
+    //   end
+    // Antes estes blocos eram silenciosamente ignorados → scripts dos demos mortos.
+    const legacyMatch = line.text.match(/^(\w+)$/)
+    if (legacyMatch && KNOWN_EVENT_NAMES.has(legacyMatch[1]) && idx + 1 < cleanLines.length) {
+      const body = []
+      let j = idx + 1
+      let closed = false
+      while (j < cleanLines.length) {
+        if (cleanLines[j].text === 'end') { closed = true; break }
+        body.push(cleanLines[j])
+        j++
+      }
+      if (closed) {
+        // Converter cada linha do corpo em statement via parseSimpleStatement
+        const stmts = []
+        for (let k = 0; k < body.length; k++) {
+          const st = parseSimpleStatement(body[k].text, body[k].line, errors)
+          if (st) stmts.push(st)
+        }
+        functions[legacyMatch[1]] = {
+          name: legacyMatch[1], params: [], body: stmts, line: line.line, legacy: true,
+        }
+        idx = j + 1
+        continue
+      }
+      // sem `end` — cai para o parser normal (regista erro lá se aplicável)
+    }
 
     // Sistema 2: "class Nome begincode" ou "class Nome extends Base begincode"
     const classMatch = line.text.match(/^class\s+(\w+)(?:\s+extends\s+(\w+))?\s*begincode$/)
@@ -91,10 +134,10 @@ export function parseFlirCode(source) {
     }
 
     // Procurar "fun nome(params) begincode"
-    const funMatch = line.text.match(/^fun\s+(\w+)\s*\(([^)]*)\)\s*begincode$/)
+    const funMatch = line.text.match(/^fun\s+(\w+)\s*(?:\(([^)]*)\))?\s*begincode$/)
     if (funMatch) {
       const funName = funMatch[1]
-      const params = funMatch[2].split(',').map((p) => p.trim()).filter((p) => p)
+      const params = (funMatch[2] || '').split(',').map((p) => p.trim()).filter((p) => p)
       const body = parseBlock(cleanLines, idx + 1, errors)
       if (body.error) {
         errors.push({ line: line.line, message: `Função "${funName}": ${body.error}` })
@@ -134,10 +177,10 @@ function parseBlock(lines, startIdx, errors) {
     }
 
     // Sistema 2: reconhecer "fun nome(params) begincode" dentro de classes
-    const funMatch = text.match(/^fun\s+(\w+)\s*\(([^)]*)\)\s*begincode$/)
+    const funMatch = text.match(/^fun\s+(\w+)\s*(?:\(([^)]*)\))?\s*begincode$/)
     if (funMatch) {
       const funName = funMatch[1]
-      const params = funMatch[2].split(',').map((p) => p.trim()).filter((p) => p)
+      const params = (funMatch[2] || '').split(',').map((p) => p.trim()).filter((p) => p)
       const body = parseBlock(lines, idx + 1, errors)
       if (body.error) {
         errors.push({ line: line.line, message: `Função "${funName}": ${body.error}` })
@@ -437,6 +480,11 @@ export function createFlirCodeRuntime(source, gameContext) {
     onPickup: 'onPickup',
     // Sistema: Game State
     onGameStateChange: 'onGameStateChange',
+    // S17: eventos de combate — onDeath (vida a 0) e onHit (atingido por shoot)
+    onDeath: 'onDeath',
+    onHit: 'onHit',
+    // S17: checkpoint
+    onCheckpoint: 'onCheckpoint',
   }
 
   // Avaliar um valor (número, string, variável, etc.)
@@ -802,6 +850,27 @@ export function createFlirCodeRuntime(source, gameContext) {
       // Sistema: Autoloads (Singletons)
       case 'getAutoload':
         return gameContext.getAutoload?.(evaluatedArgs[0])
+      // S17: Diálogo — setDialog/showDialog/hideDialog (usados pelos demos flirQuest)
+      case 'setDialog':
+        gameContext.setDialog?.(evaluatedArgs[0])
+        break
+      case 'showDialog':
+        gameContext.showDialog?.(evaluatedArgs[0])
+        break
+      case 'hideDialog':
+        gameContext.hideDialog?.()
+        break
+      // S17: Pontuação — addScore(n) soma ao globalVar _score
+      case 'addScore':
+        gameContext.addScore?.(evaluatedArgs[0])
+        break
+      // S17: IA — chasePlayer()/stopChase() forçam/perdem perseguição deste NPC
+      case 'chasePlayer':
+        gameContext.chasePlayer?.(gameContext._instanceId)
+        break
+      case 'stopChase':
+        gameContext.stopChase?.(gameContext._instanceId)
+        break
       default:
         debugLog(`Função desconhecida: ${name}`, 'warning', 'FlirCode')
     }
@@ -817,7 +886,9 @@ export function createFlirCodeRuntime(source, gameContext) {
       // Mapear nome interno → nome da função FlirCode
       const funcName = Object.entries(eventMap).find(([_, en]) => en === eventName)?.[0]
       if (!funcName) return
-      const fn = functions[funcName]
+      // S17: funções escritas com sintaxe legacy têm o nome do evento INTERNO
+      // (ex: `beginPlay ... end` em vez de `fun onStart() begincode`). Fallback.
+      const fn = functions[funcName] || functions[eventName]
       if (!fn) return
       // Passar payload como parâmetros
       const params = {}

@@ -12,7 +12,57 @@ import { useStore } from '../../store/useStore'
 import { debugLog } from '../../utils/debug/debugStore'
 import { getCameraState, applyCameraInput, applyCameraKeyInput } from '../../utils/cameraController'
 import JoystickControl from '../ui/JoystickControl'
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState, Fragment } from 'react'
+
+// S17: DialogueBox — mostra o diálogo definido por setDialog/showDialog do FlirCode.
+// Faz poll a window._flirDialog (mutado pelo gameContext fora do ciclo React).
+// O diálogo desaparece sozinho após 4.5s ou quando hideDialog() é chamado.
+function DialogueBox() {
+  const [dialog, setDialog] = useState(null)
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const d = window._flirDialog
+      if (!d) return
+      // Auto-hide após 4.5s
+      if (d.visible && d.ts && Date.now() - d.ts > 4500) {
+        window._flirDialog = { ...d, visible: false }
+        setDialog({ ...d, visible: false })
+        return
+      }
+      setDialog((prev) => {
+        if (prev && prev.text === d.text && prev.visible === d.visible) return prev
+        return { text: d.text, visible: d.visible }
+      })
+    }, 250)
+    return () => clearInterval(iv)
+  }, [])
+  if (!dialog || !dialog.visible || !dialog.text) return null
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: '50%',
+        bottom: '12%',
+        transform: 'translateX(-50%)',
+        maxWidth: 'min(520px, 86vw)',
+        background: 'rgba(13, 17, 23, 0.92)',
+        border: '1px solid #2f81f7',
+        borderRadius: 10,
+        padding: '12px 18px',
+        color: '#e6edf3',
+        fontSize: 15,
+        fontFamily: '-apple-system, sans-serif',
+        lineHeight: 1.45,
+        pointerEvents: 'none',
+        zIndex: 95,
+        boxShadow: '0 4px 18px rgba(0,0,0,0.5)',
+        textAlign: 'center',
+      }}
+    >
+      {dialog.text}
+    </div>
+  )
+}
 
 export default function GameUIOverlay() {
   const uiScreens = useStore((s) => s.uiScreens)
@@ -33,7 +83,10 @@ export default function GameUIOverlay() {
     c.type !== 'JoystickObject' && c.type !== 'CameraTouchZone'
   )
 
-  if (visibleScreens.length === 0 && uiConects.length === 0) return null
+  // S17: DialogueBox renderiza mesmo sem ecrãs de UI — não fazer early-return
+  if (visibleScreens.length === 0 && uiConects.length === 0 && !window._flirDialog?.visible) {
+    return <DialogueBox />
+  }
 
   const handleEvent = (element, eventType, value) => {
     debugLog(`UI Event: ${element.name}.${eventType}`, 'log', 'UI')
@@ -62,8 +115,13 @@ export default function GameUIOverlay() {
 
   return (
     <div className="game-ui-overlay" style={{ pointerEvents: 'none' }}>
-      {visibleScreens.map((screen) =>
-        screen.elements.map((element) => {
+      {/* S17: caixa de diálogo (setDialog/showDialog do FlirCode) */}
+      <DialogueBox />
+      {visibleScreens.map((screen) => (
+        // S17 fix (P2-23): Fragment com key no map exterior — antes o array aninhado
+        // produzia o warning React "Each child in a list should have a unique key"
+        <Fragment key={screen.id}>
+        {screen.elements.map((element) => {
           const pos = element.position || [50, 50]
           const size = element.size || [120, 40]
           const baseStyle = {
@@ -189,8 +247,9 @@ export default function GameUIOverlay() {
             default:
               return <div key={element.id} style={baseStyle}>{element.name}</div>
           }
-        })
-      )}
+        })}
+        </Fragment>
+      ))}
 
       {/* Joysticks virtuais — renderizados a partir de JoystickObjects na cena */}
       {joysticks.map((js) => (
