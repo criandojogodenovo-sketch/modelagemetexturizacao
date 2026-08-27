@@ -155,7 +155,10 @@ export function createNPCAI(npc, helpers) {
     }
 
     const speed = npc.moveSpeed || 3
-    const behavior = npc.behavior || 'idle'
+    // S17 fix (P0-08): aceitar `behavior` OU `aiMode` — os demos (flirQuestShowcase,
+    // flirQuestArena) definem apenas `aiMode`, pelo que a IA ficava em idle mesmo com
+    // aiMode='patrol'/'chase'. Agora qualquer um dos campos controla a IA.
+    const behavior = npc.behavior || npc.aiMode || 'idle'
 
     if (behavior === 'idle') {
       // Não se move
@@ -192,7 +195,10 @@ export function createNPCAI(npc, helpers) {
     }
 
     if (behavior === 'chase') {
-      if (!hasSight || !playerPos) return
+      // S17: chasePlayer() via FlirCode força a perseguição mesmo sem linha de vista
+      const chaseOverride = (typeof window !== 'undefined' && window._flirGameContext)
+        ? window._flirGameContext.getVar('_chase_' + npc.instanceId) : false
+      if ((!hasSight || !playerPos) && !chaseOverride) return
       const pf = getPf()
       if (pf) {
         // Refrescar rota a cada PATH_REFRESH_FRAMES frames, ou se não há rota

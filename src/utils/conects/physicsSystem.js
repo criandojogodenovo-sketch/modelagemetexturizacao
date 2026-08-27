@@ -67,6 +67,9 @@ export function createPhysicsSystem(options = {}) {
 
   // Mapa instanceId → { body, mesh, conect, type, grounded, isTrigger }
   const bodies = new Map()
+  // S17 fix (P3-29): reverse lookup body.uuid → instanceId — evita [...bodies.entries()].find()
+  // O(N) com spread allocation por cada evento de colisão
+  const bodyIdToInstance = new Map()
   // Lista de triggers ativos para verificação
   const triggers = []
   // Estado de tracking de colisões para evitar duplicar eventos
@@ -173,7 +176,12 @@ export function createPhysicsSystem(options = {}) {
       // O plano aponta para +Z por defeito — rodar para apontar para +Y (chão)
       planeBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2)
       world.addBody(planeBody)
-      bodies.set(conect.instanceId, { body: planeBody, conect, mesh })
+      // S17 fix (P0-05): registar `type` na entry — antes ficava undefined, o que tornava
+      // o guard `entry.type !== 'TerrainObject'` (SceneLevel3D) ineficaz e deixava o
+      // quaternion -PI/2 do body ser copiado para o mesh cuja geometria já tem rotateX(-PI/2)
+      // baked → terreno vertical (parede gigante) em Play Mode.
+      bodies.set(conect.instanceId, { body: planeBody, conect, mesh, type: conect.type })
+      bodyIdToInstance.set(planeBody.id, conect.instanceId)
       return planeBody
     }
 
@@ -226,6 +234,7 @@ export function createPhysicsSystem(options = {}) {
     }
 
     world.addBody(body)
+    bodyIdToInstance.set(body.id, conect.instanceId)
     bodies.set(conect.instanceId, {
       body,
       mesh,
@@ -254,10 +263,9 @@ export function createPhysicsSystem(options = {}) {
 
     // Eventos de colisão do cannon
     const collideHandler = (e) => {
-      const otherBody = e.body
-      const otherEntry = [...bodies.entries()].find(([, v]) => v.body === otherBody)
-      if (!otherEntry) return
-      const [otherId] = otherEntry
+      // S17 fix (P3-29): reverse lookup O(1) em vez de [...bodies.entries()].find() O(N)
+      const otherId = bodyIdToInstance.get(e.body?.id)
+      if (!otherId) return
       const pairKey = `${conect.instanceId}:${otherId}`
       if (collisionPairs.has(pairKey)) return
       collisionPairs.add(pairKey)
@@ -281,6 +289,7 @@ export function createPhysicsSystem(options = {}) {
     const entry = bodies.get(instanceId)
     if (!entry) return
     world.removeBody(entry.body)
+    bodyIdToInstance.delete(entry.body.id)
     bodies.delete(instanceId)
     // Performance Core 3.6 — Remover do SpatialPartitionSystem
     SpatialPartitionSystem.remove(instanceId)
@@ -384,6 +393,10 @@ export function createPhysicsSystem(options = {}) {
     for (const [instanceId, entry] of bodies) {
       const { body, mesh, type, isTrigger } = entry
       if (type === 'StaticObject') continue // estáticos não se movem
+      // S17 fix (P0-05): TerrainObject NUNCA sincroniza transform com o body — a
+      // geometria já tem a rotação baked e o CANNON.Plane nunca se move. Copiar o
+      // quaternion (-PI/2) do body duplicava a rotação → terreno vertical.
+      if (type === 'TerrainObject') continue
       if (mesh) {
         mesh.position.set(body.position.x, body.position.y, body.position.z)
         mesh.quaternion.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w)
@@ -404,6 +417,9 @@ export function createPhysicsSystem(options = {}) {
         _rayResult.reset()
         world.raycastClosest(_rayFrom, _rayTo, { skipBackfaces: true, collisionFilterMask: -1 }, _rayResult)
         entry.grounded = _rayResult.hasHit
+        // S17 fix (P3-28): atualizar coyote timer / jump count — antes updatePersonalState
+        // era exportado mas nunca chamado, deixando coyote time e salto duplo inertes
+        updatePersonalState(instanceId, deltaTime)
       }
     }
 
@@ -460,6 +476,7 @@ export function createPhysicsSystem(options = {}) {
       world.removeBody(entry.body)
     }
     bodies.clear()
+    bodyIdToInstance.clear()
     triggers.length = 0
     eventListeners.onCollision.length = 0
     eventListeners.onTriggerEnter.length = 0

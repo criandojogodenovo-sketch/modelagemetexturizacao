@@ -101,7 +101,10 @@ function lerp(a, b, t) {
 }
 
 // Suavizar yaw/pitch em direção ao target
-function smoothRotation(state, dt) {
+// S17 fix (P0-06): exportada — o editor (SceneLevel3D useFrame) precisa de a chamar
+// para que targetYaw/targetPitch (escritos por applyCameraInput) se propaguem a
+// yaw/pitch. Sem isto, a rotação de câmara no Play Mode do editor estava morta.
+export function smoothRotation(state, dt) {
   const t = state.smoothing > 0 ? 1 - Math.pow(state.smoothing, dt * 60) : 1
   state.yaw = lerp(state.yaw, state.targetYaw, t)
   state.pitch = lerp(state.pitch, state.targetPitch, t)
@@ -174,7 +177,9 @@ export function updateCamera(camera, activeView, targetMesh, camState, options =
 
   } else if (mode === 'third' && targetPos) {
     // ---- THIRD PERSON ----
-    if (camState.enabled && hasTouchZone) {
+    // S17 fix (P0-06): orbit ativa sempre que camState.enabled — não exige touch
+    // zone (rato/setas funcionam como fallback em desktop, igual ao runtime exportado)
+    if (camState.enabled) {
       // Orbita à volta do jogador (FPS-style)
       const dist = followDistance
       const offsetY = Math.sin(camState.pitch) * dist
@@ -230,8 +235,8 @@ export function updateCamera(camera, activeView, targetMesh, camState, options =
     const pos = activeView?.position || gameCamera?.position || camState.lastValidPosition || [5, 4, 6]
     camera.position.set(pos[0], pos[1], pos[2])
 
-    if (camState.enabled && hasTouchZone) {
-      // Rotação pelo toque (FPS look sem movimento)
+    if (camState.enabled) {
+      // Rotação pelo toque (FPS look sem movimento) — S17: sempre ativa
       camera.rotation.set(camState.pitch, camState.yaw, 0, 'YXZ')
     } else if (activeView?.rotation) {
       // Rotação definida no ViewObject
@@ -369,7 +374,8 @@ function updateCamera(camera, activeView, targetMesh, camState, options) {
     camera.position.set(targetPos.x, targetPos.y + eyeHeight, targetPos.z)
     camera.rotation.set(camState.pitch, camState.yaw, 0, 'YXZ')
   } else if (mode === 'third' && targetPos) {
-    if (camState.enabled && hasTouchZone) {
+    // S17 fix: rotação orbit ativa sempre que camState.enabled (não exige touch zone)
+    if (camState.enabled) {
       var dist = followDistance
       var offsetY = Math.sin(camState.pitch) * dist
       var cosP = Math.cos(camState.pitch)
@@ -393,7 +399,8 @@ function updateCamera(camera, activeView, targetMesh, camState, options) {
   } else {
     var pos = (activeView && activeView.position) || (gameCamera && gameCamera.position) || camState.lastValidPosition || [5,4,6]
     camera.position.set(pos[0], pos[1], pos[2])
-    if (camState.enabled && hasTouchZone) {
+    // S17 fix: rotação ativa sempre que camState.enabled (não exige touch zone)
+    if (camState.enabled) {
       camera.rotation.set(camState.pitch, camState.yaw, 0, 'YXZ')
     } else if (activeView && activeView.rotation) {
       camera.rotation.set(activeView.rotation[0], activeView.rotation[1], activeView.rotation[2], 'YXZ')

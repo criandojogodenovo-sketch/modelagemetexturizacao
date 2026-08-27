@@ -24,21 +24,29 @@ import { createSkyProMaterial, calculateSunDirection } from '../../utils/skyShad
 import { createRealWaterMaterial } from '../../utils/realWaterShader'
 import SceneObject from '../3d/SceneObject'
 
+// S17 fix (P0-07): tipos com branch de render dedicado (mesh próprio registado pelo
+// componente) — NÃO devem receber setMeshRef(null) do useEffect de "sem visual".
+const NO_VISUAL_EXEMPT_TYPES = new Set([
+  'AmbientObject', 'AreaObject', 'ArrowMarker', 'BloomObject', 'CheckpointObject',
+  'CloudObject', 'DOFObject', 'DayNightCycleObject', 'DialogueObject', 'EmptyObject',
+  'GIProbeObject', 'ItemObject', 'LuminousMesh', 'LuminousObject', 'NavigatorObject',
+  'ParticleObject', 'PathObject', 'PointMarker', 'PointObject', 'RealWaterObject',
+  'ReferenceObject', 'ReflectObject', 'SSRObject', 'SSSObject', 'SkyObject',
+  'SpawnObject', 'SpotObject', 'SunObject', 'TerrainObject', 'TrailObject',
+  'ViewObject', 'VolumetricFogObject', 'WaterObject', 'WeaponObject', 'WindObject',
+])
+
 const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, setMeshRef }, meshRef) {
   const def = findConectDefinition(conect.type)
 
   // C1: Verificar visibilidade da layer — se a layer está oculta, não renderiza
   const hiddenLayers = useStore((s) => s.hiddenLayers)
-  const conectLayer = conect.layer || 'world'
-  const isLayerHidden = hiddenLayers.includes(conectLayer)
-  if (isLayerHidden && !useStore.getState().scenePreviewOpen) {
-    // Em Play Mode, mostrar tudo (layers só afetam o editor)
-    // Fora do Play Mode, ocultar meshes de layers ocultas
-    return null
-  }
 
-  // Post-Audit 4.0 — P3: objectsById Map para lookup O(1) em vez de objects.find() O(N).
-  // Reconstroi só quando `objects` muda (useMemo). Mesmo pattern do SceneLevel3D.
+  // S17 fix (P0-07): TODOS os hooks têm de correr ANTES de qualquer return condicional.
+  // O early-return da layer oculta estava ENTRE o useStore e o useMemo — alternar a
+  // visibilidade de uma layer mudava o número de hooks da instância → crash React
+  // "Rendered fewer hooks than expected". Agora o useMemo corre sempre e o return
+  // acontece só depois.
   const objectsById = useMemo(() => {
     const map = new Map()
     for (const obj of objects || []) {
@@ -46,6 +54,25 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
     }
     return map
   }, [objects])
+
+  const conectLayer = conect.layer || 'world'
+  const isLayerHidden = hiddenLayers.includes(conectLayer)
+
+  // S17 fix (P0-07, parte 2): este useEffect estava DENTRO do branch "sem visual"
+  // (depois de ~20 returns condicionais) — quando a layer ocultava, o hook deixava
+  // de correr → violação de ordem de hooks. Movido para o topo, incondicional:
+  // só faz setMeshRef(null) quando o conect realmente não tem visual.
+  const hasNoVisual = !def?.hasVisual && conect.type !== 'VisualObject' &&
+    !NO_VISUAL_EXEMPT_TYPES.has(conect.type)
+  useEffect(() => {
+    if (hasNoVisual) setMeshRef?.(null)
+  }, [hasNoVisual])
+
+  if (isLayerHidden && !useStore.getState().scenePreviewOpen) {
+    // Em Play Mode, mostrar tudo (layers só afetam o editor)
+    // Fora do Play Mode, ocultar meshes de layers ocultas
+    return null
+  }
 
   // Se não tem visual, não renderiza mesh — mas pode adicionar luzes, etc.
   if (conect.type === 'LuminousObject') {
@@ -169,8 +196,7 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
   }
 
   if (!def?.hasVisual && conect.type !== 'VisualObject') {
-    // Sem visual — ligar o meshRef a null para que physics não tente usar
-    useEffect(() => { setMeshRef?.(null) }, [])
+    // Sem visual — o setMeshRef(null) já foi tratado no useEffect no topo (S17 fix)
     return null
   }
 
@@ -231,7 +257,8 @@ const NpcHumanoidMesh = forwardRef(function NpcHumanoidMesh({ conect, setMeshRef
   // Cor do NPC: usa conect.color (se definido) ou vermelho por defeito (hostil)
   const bodyColor = conect.color || '#c0392b'
   const skinColor = '#f4d4b8'
-  const isHostile = conect.aiMode === 'chase'
+  // S17 fix (P0-08): hostilidade lida de behavior OU aiMode (demos só definem aiMode)
+  const isHostile = conect.aiMode === 'chase' || conect.behavior === 'chase'
   const isBoss = (conect.scale?.[0] || 1) > 1.5
 
   // B: Refs para animação procedural (walk/run/idle/attack)
@@ -240,28 +267,50 @@ const NpcHumanoidMesh = forwardRef(function NpcHumanoidMesh({ conect, setMeshRef
   const legLRef = useRef()
   const legRRef = useRef()
   const torsoRef = useRef()
+  // S17 fix (P0-08): animação baseada na VELOCIDADE REAL do group (posição dinâmica
+  // sincronizada com o body da física), como o PlayerHumanoidMesh. Antes animava
+  // conforme `conect.aiMode` estático — NPCs com aiMode='patrol'/'chase' corriam
+  // SEMPRE (mesmo parados) e NPCs com behavior (sem aiMode) nunca animavam.
+  const walkTimeRef = useRef(0)
+  const lastPosRef = useRef(null)
+  const rootGroupRef = useRef()
 
-  // Animar membros com base no modo de IA
-  useFrame((state) => {
+  // Animar membros com base na velocidade real do corpo
+  useFrame((state, delta) => {
     const t = state.clock.elapsedTime
-    const mode = conect.aiMode || 'idle'
+    const mode = conect.aiMode || conect.behavior || 'idle'
 
-    if (mode === 'patrol' || mode === 'chase') {
-      // Walk/run animation — braços e pernas balançam em oposição
-      const speed = mode === 'chase' ? 8 : 4 // chase é mais rápido
-      const amplitude = mode === 'chase' ? 0.6 : 0.4
-      const phase = t * speed
+    // Medir velocidade pela variação de posição do group registado
+    const node = rootGroupRef.current
+    if (node) {
+      const p = node.position
+      if (lastPosRef.current) {
+        const dx = p.x - lastPosRef.current.x
+        const dz = p.z - lastPosRef.current.z
+        const speed = Math.sqrt(dx * dx + dz * dz) / Math.max(0.001, delta)
+        lastPosRef.current = { x: p.x, y: p.y, z: p.z }
+        if (speed > 0.4) {
+          // Andar/correr — braços e pernas balançam em oposição
+          const runSpeed = speed > 4
+          const freq = runSpeed ? 9 : 5.5
+          walkTimeRef.current += delta * freq
+          const amplitude = runSpeed ? 0.6 : 0.4
+          const phase = walkTimeRef.current
 
-      if (armLRef.current) armLRef.current.rotation.x = Math.sin(phase) * amplitude
-      if (armRRef.current) armRRef.current.rotation.x = -Math.sin(phase) * amplitude
-      if (legLRef.current) legLRef.current.rotation.x = -Math.sin(phase) * amplitude
-      if (legRRef.current) legRRef.current.rotation.x = Math.sin(phase) * amplitude
-
-      // Torso leans forward when running
-      if (torsoRef.current) {
-        torsoRef.current.rotation.x = mode === 'chase' ? 0.2 : 0.05
+          if (armLRef.current) armLRef.current.rotation.x = Math.sin(phase) * amplitude
+          if (armRRef.current) armRRef.current.rotation.x = -Math.sin(phase) * amplitude
+          if (legLRef.current) legLRef.current.rotation.x = -Math.sin(phase) * amplitude
+          if (legRRef.current) legRRef.current.rotation.x = Math.sin(phase) * amplitude
+          // Torso leans forward when running
+          if (torsoRef.current) torsoRef.current.rotation.x = runSpeed ? 0.2 : 0.05
+          return
+        }
+      } else {
+        lastPosRef.current = { x: p.x, y: p.y, z: p.z }
       }
-    } else if (mode === 'attack') {
+    }
+
+    if (mode === 'attack') {
       // Attack animation — braço direito levanta e bate
       const phase = t * 6
       const swing = Math.sin(phase) * 0.5 + 0.5 // 0..1
@@ -284,6 +333,7 @@ const NpcHumanoidMesh = forwardRef(function NpcHumanoidMesh({ conect, setMeshRef
     <group
       ref={(node) => {
         // A1: registar o group no meshRefs para que a física e a câmara o encontrem
+        rootGroupRef.current = node
         if (typeof ref === 'function') ref(node)
         else if (ref) ref.current = node
         setMeshRef?.(node)
