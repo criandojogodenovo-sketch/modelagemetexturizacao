@@ -46,6 +46,7 @@ import MechanicsPanel from './components/panels/MechanicsPanel'
 import DialoguePanel from './components/panels/DialoguePanel'
 import UVEditor from './components/panels/UVEditor'
 import TexturingPanel from './components/panels/TexturingPanel'
+import LayersPanel from './components/panels/LayersPanel'
 import PerformanceStatsOverlay from './components/ui/PerformanceStatsOverlay'
 import MainMenu from './components/ui/MainMenu'
 import VerticalRail from './components/ui/VerticalRail'
@@ -112,6 +113,8 @@ export default function App() {
   const closeUVEditor = useStore((s) => s.closeUVEditor)
   const texturingPanelOpen = useStore((s) => s.texturingPanelOpen)
   const closeTexturingPanel = useStore((s) => s.closeTexturingPanel)
+  const layersPanelOpen = useStore((s) => s.layersPanelOpen)
+  const closeLayersPanel = useStore((s) => s.closeLayersPanel)
   const homeVisible = useStore((s) => s.homeVisible)
   const hideHome = useStore((s) => s.hideHome)
 
@@ -236,6 +239,7 @@ export default function App() {
       {dialoguePanelOpen && <DialoguePanel onClose={closeDialoguePanel} />}
       {uvEditorOpen && <UVEditor objectId={selectedId} onClose={closeUVEditor} />}
       {texturingPanelOpen && <TexturingPanel onClose={closeTexturingPanel} />}
+      {layersPanelOpen && <LayersPanel onClose={closeLayersPanel} />}
       {perfStatsVisible && <PerformanceStatsOverlay />}
       {animControllerTarget && (
         <div className="modal-backdrop" onClick={closeAnimController}>

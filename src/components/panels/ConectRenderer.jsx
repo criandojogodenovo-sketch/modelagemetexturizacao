@@ -27,6 +27,16 @@ import SceneObject from '../3d/SceneObject'
 const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, setMeshRef }, meshRef) {
   const def = findConectDefinition(conect.type)
 
+  // C1: Verificar visibilidade da layer — se a layer está oculta, não renderiza
+  const hiddenLayers = useStore((s) => s.hiddenLayers)
+  const conectLayer = conect.layer || 'world'
+  const isLayerHidden = hiddenLayers.includes(conectLayer)
+  if (isLayerHidden && !useStore.getState().scenePreviewOpen) {
+    // Em Play Mode, mostrar tudo (layers só afetam o editor)
+    // Fora do Play Mode, ocultar meshes de layers ocultas
+    return null
+  }
+
   // Post-Audit 4.0 — P3: objectsById Map para lookup O(1) em vez de objects.find() O(N).
   // Reconstroi só quando `objects` muda (useMemo). Mesmo pattern do SceneLevel3D.
   const objectsById = useMemo(() => {
@@ -193,7 +203,12 @@ const ConectRenderer = forwardRef(function ConectRenderer({ conect, objects, set
     return <NpcHumanoidMesh conect={conect} setMeshRef={setMeshRef} />
   }
 
-  // Rigid/Static/Stop/Personal: placeholder com geometria simples
+  // A1/B3: PersonalObject — humanoide com animação de andar (em vez de cápsula verde)
+  if (conect.type === 'PersonalObject') {
+    return <PlayerHumanoidMesh conect={conect} setMeshRef={setMeshRef} />
+  }
+
+  // Rigid/Static/Stop: placeholder com geometria simples
   return (
     <PlaceholderMesh
       ref={(node) => {
@@ -219,6 +234,52 @@ const NpcHumanoidMesh = forwardRef(function NpcHumanoidMesh({ conect, setMeshRef
   const isHostile = conect.aiMode === 'chase'
   const isBoss = (conect.scale?.[0] || 1) > 1.5
 
+  // B: Refs para animação procedural (walk/run/idle/attack)
+  const armLRef = useRef()
+  const armRRef = useRef()
+  const legLRef = useRef()
+  const legRRef = useRef()
+  const torsoRef = useRef()
+
+  // Animar membros com base no modo de IA
+  useFrame((state) => {
+    const t = state.clock.elapsedTime
+    const mode = conect.aiMode || 'idle'
+
+    if (mode === 'patrol' || mode === 'chase') {
+      // Walk/run animation — braços e pernas balançam em oposição
+      const speed = mode === 'chase' ? 8 : 4 // chase é mais rápido
+      const amplitude = mode === 'chase' ? 0.6 : 0.4
+      const phase = t * speed
+
+      if (armLRef.current) armLRef.current.rotation.x = Math.sin(phase) * amplitude
+      if (armRRef.current) armRRef.current.rotation.x = -Math.sin(phase) * amplitude
+      if (legLRef.current) legLRef.current.rotation.x = -Math.sin(phase) * amplitude
+      if (legRRef.current) legRRef.current.rotation.x = Math.sin(phase) * amplitude
+
+      // Torso leans forward when running
+      if (torsoRef.current) {
+        torsoRef.current.rotation.x = mode === 'chase' ? 0.2 : 0.05
+      }
+    } else if (mode === 'attack') {
+      // Attack animation — braço direito levanta e bate
+      const phase = t * 6
+      const swing = Math.sin(phase) * 0.5 + 0.5 // 0..1
+      if (armRRef.current) armRRef.current.rotation.x = -1.5 + swing * 2.5 // -1.5..1.0
+      if (armLRef.current) armLRef.current.rotation.x = 0
+      if (legLRef.current) legLRef.current.rotation.x = 0
+      if (legRRef.current) legRRef.current.rotation.x = 0
+    } else {
+      // Idle — respiração leve
+      const breathe = Math.sin(t * 2) * 0.05
+      if (torsoRef.current) torsoRef.current.rotation.x = breathe
+      if (armLRef.current) armLRef.current.rotation.x = breathe * 0.5
+      if (armRRef.current) armRRef.current.rotation.x = breathe * 0.5
+      if (legLRef.current) legLRef.current.rotation.x = 0
+      if (legRRef.current) legRRef.current.rotation.x = 0
+    }
+  })
+
   return (
     <group
       ref={(node) => {
@@ -233,11 +294,13 @@ const NpcHumanoidMesh = forwardRef(function NpcHumanoidMesh({ conect, setMeshRef
       visible={conect.visible !== false}
       userData={{ conectInstanceId: conect.instanceId }}
     >
-      {/* Tronco */}
-      <mesh position={[0, 1.2, 0]} castShadow receiveShadow>
-        <capsuleGeometry args={[0.3, 0.8, 4, 12]} />
-        <meshStandardMaterial color={bodyColor} roughness={0.7} metalness={0.1} />
-      </mesh>
+      {/* Tronco (com ref para animação de inclinação) */}
+      <group ref={torsoRef} position={[0, 1.2, 0]}>
+        <mesh castShadow receiveShadow>
+          <capsuleGeometry args={[0.3, 0.8, 4, 12]} />
+          <meshStandardMaterial color={bodyColor} roughness={0.7} metalness={0.1} />
+        </mesh>
+      </group>
       {/* Cabeça */}
       <mesh position={[0, 2.0, 0]} castShadow>
         <sphereGeometry args={[0.28, 16, 16]} />
@@ -252,26 +315,34 @@ const NpcHumanoidMesh = forwardRef(function NpcHumanoidMesh({ conect, setMeshRef
         <sphereGeometry args={[0.04, 8, 8]} />
         <meshStandardMaterial color={isHostile ? '#ff0000' : '#000000'} emissive={isHostile ? '#ff0000' : '#000000'} emissiveIntensity={isHostile ? 1 : 0} />
       </mesh>
-      {/* Braço esquerdo */}
-      <mesh position={[-0.4, 1.3, 0]} castShadow>
-        <capsuleGeometry args={[0.1, 0.7, 4, 8]} />
-        <meshStandardMaterial color={bodyColor} roughness={0.7} />
-      </mesh>
-      {/* Braço direito */}
-      <mesh position={[0.4, 1.3, 0]} castShadow>
-        <capsuleGeometry args={[0.1, 0.7, 4, 8]} />
-        <meshStandardMaterial color={bodyColor} roughness={0.7} />
-      </mesh>
-      {/* Perna esquerda */}
-      <mesh position={[-0.18, 0.4, 0]} castShadow>
-        <capsuleGeometry args={[0.13, 0.7, 4, 8]} />
-        <meshStandardMaterial color={bodyColor} roughness={0.8} />
-      </mesh>
-      {/* Perna direita */}
-      <mesh position={[0.18, 0.4, 0]} castShadow>
-        <capsuleGeometry args={[0.13, 0.7, 4, 8]} />
-        <meshStandardMaterial color={bodyColor} roughness={0.8} />
-      </mesh>
+      {/* Braço esquerdo (pivot no ombro para animação) */}
+      <group ref={armLRef} position={[-0.4, 1.65, 0]}>
+        <mesh position={[0, -0.35, 0]} castShadow>
+          <capsuleGeometry args={[0.1, 0.7, 4, 8]} />
+          <meshStandardMaterial color={bodyColor} roughness={0.7} />
+        </mesh>
+      </group>
+      {/* Braço direito (pivot no ombro para animação) */}
+      <group ref={armRRef} position={[0.4, 1.65, 0]}>
+        <mesh position={[0, -0.35, 0]} castShadow>
+          <capsuleGeometry args={[0.1, 0.7, 4, 8]} />
+          <meshStandardMaterial color={bodyColor} roughness={0.7} />
+        </mesh>
+      </group>
+      {/* Perna esquerda (pivot no quadril para animação) */}
+      <group ref={legLRef} position={[-0.18, 0.75, 0]}>
+        <mesh position={[0, -0.35, 0]} castShadow>
+          <capsuleGeometry args={[0.13, 0.7, 4, 8]} />
+          <meshStandardMaterial color={bodyColor} roughness={0.8} />
+        </mesh>
+      </group>
+      {/* Perna direita (pivot no quadril para animação) */}
+      <group ref={legRRef} position={[0.18, 0.75, 0]}>
+        <mesh position={[0, -0.35, 0]} castShadow>
+          <capsuleGeometry args={[0.13, 0.7, 4, 8]} />
+          <meshStandardMaterial color={bodyColor} roughness={0.8} />
+        </mesh>
+      </group>
       {/* Indicador de boss — coroa dourada */}
       {isBoss && (
         <mesh position={[0, 2.4, 0]}>
@@ -292,6 +363,172 @@ const NpcHumanoidMesh = forwardRef(function NpcHumanoidMesh({ conect, setMeshRef
           </mesh>
         </group>
       )}
+    </group>
+  )
+})
+
+// ===== PlayerHumanoidMesh — herói humanoide com animação de andar (B3) =====
+// Substitui a cápsula verde por um humanoide que anima braços/pernas ao mover-se.
+// A animação é baseada na velocidade do corpo físico (lida via window._flirConectMeshRefs).
+const PlayerHumanoidMesh = forwardRef(function PlayerHumanoidMesh({ conect, setMeshRef }, ref) {
+  const armLRef = useRef()
+  const armRRef = useRef()
+  const legLRef = useRef()
+  const legRRef = useRef()
+  const torsoRef = useRef()
+  const walkTimeRef = useRef(0)
+  const lastPosRef = useRef(null)
+
+  // Verificar se há ViewObject com followMode='first' (esconder player em FPS)
+  const scenePreviewOpen = useStore((s) => s.scenePreviewOpen)
+  const hasFPSView = useStore((s) => {
+    if (!scenePreviewOpen) return false
+    const activeScene = s.scenes.find((sc) => sc.id === s.activeSceneId)
+    if (!activeScene) return false
+    return (activeScene.conects || []).some((c) =>
+      c.type === 'ViewObject' && c.followMode === 'first' &&
+      (c.followTarget === conect.instanceId || c.cameraRole === 'player')
+    )
+  })
+
+  // Animar membros com base na velocidade do corpo
+  useFrame((state, delta) => {
+    if (!conect.instanceId) return
+
+    // Calcular velocidade aproximada comparando posição atual com anterior
+    const groupNode = ref
+    // Tentar obter a posição do body via conectMeshRefs
+    const meshRefs = window._flirConectMeshRefs
+    const playerMesh = meshRefs?.current?.get(conect.instanceId)
+    if (!playerMesh) return
+
+    const currentPos = playerMesh.position
+    if (lastPosRef.current) {
+      const dx = currentPos.x - lastPosRef.current.x
+      const dz = currentPos.z - lastPosRef.current.z
+      const speed = Math.sqrt(dx * dx + dz * dz) / Math.max(0.001, delta)
+
+      if (speed > 0.5) {
+        // Andar/correr — animar braços e pernas
+        const freq = speed > 3 ? 10 : 6 // correr = mais rápido
+        walkTimeRef.current += delta * freq
+        const amplitude = speed > 3 ? 0.6 : 0.4
+
+        if (armLRef.current) armLRef.current.rotation.x = Math.sin(walkTimeRef.current) * amplitude
+        if (armRRef.current) armRRef.current.rotation.x = -Math.sin(walkTimeRef.current) * amplitude
+        if (legLRef.current) legLRef.current.rotation.x = -Math.sin(walkTimeRef.current) * amplitude
+        if (legRRef.current) legRRef.current.rotation.x = Math.sin(walkTimeRef.current) * amplitude
+
+        // Torso leans forward when running
+        if (torsoRef.current) {
+          torsoRef.current.rotation.x = speed > 3 ? 0.15 : 0.05
+        }
+      } else {
+        // Idle — respiração leve
+        const t = state.clock.elapsedTime
+        const breathe = Math.sin(t * 2) * 0.03
+        if (torsoRef.current) torsoRef.current.rotation.x = breathe
+        if (armLRef.current) armLRef.current.rotation.x = breathe * 0.5
+        if (armRRef.current) armRRef.current.rotation.x = breathe * 0.5
+        if (legLRef.current) legLRef.current.rotation.x = 0
+        if (legRRef.current) legRRef.current.rotation.x = 0
+      }
+    }
+    lastPosRef.current = { x: currentPos.x, y: currentPos.y, z: currentPos.z }
+  })
+
+  // Cor do herói (verde para destacar que é o jogador)
+  const bodyColor = '#3fb950'
+  const skinColor = '#f4d4b8'
+  const pantsColor = '#1a3a5c'
+
+  return (
+    <group
+      ref={(node) => {
+        if (typeof ref === 'function') ref(node)
+        else if (ref) ref.current = node
+        setMeshRef?.(node)
+      }}
+      position={conect.position}
+      rotation={conect.rotation}
+      scale={conect.scale}
+      visible={conect.visible !== false && !hasFPSView}
+      userData={{ conectInstanceId: conect.instanceId }}
+    >
+      {/* Tronco (com ref para inclinação) */}
+      <group ref={torsoRef} position={[0, 1.2, 0]}>
+        <mesh castShadow receiveShadow>
+          <capsuleGeometry args={[0.3, 0.8, 4, 12]} />
+          <meshStandardMaterial color={bodyColor} roughness={0.7} metalness={0.1} />
+        </mesh>
+      </group>
+      {/* Cabeça */}
+      <mesh position={[0, 2.0, 0]} castShadow>
+        <sphereGeometry args={[0.28, 16, 16]} />
+        <meshStandardMaterial color={skinColor} roughness={0.6} />
+      </mesh>
+      {/* Olhos */}
+      <mesh position={[-0.1, 2.05, 0.22]}>
+        <sphereGeometry args={[0.04, 8, 8]} />
+        <meshBasicMaterial color="#000000" />
+      </mesh>
+      <mesh position={[0.1, 2.05, 0.22]}>
+        <sphereGeometry args={[0.04, 8, 8]} />
+        <meshBasicMaterial color="#000000" />
+      </mesh>
+      {/* Braço esquerdo (pivot no ombro) */}
+      <group ref={armLRef} position={[-0.4, 1.65, 0]}>
+        <mesh position={[0, -0.35, 0]} castShadow>
+          <capsuleGeometry args={[0.1, 0.7, 4, 8]} />
+          <meshStandardMaterial color={bodyColor} roughness={0.7} />
+        </mesh>
+        {/* Mão esquerda */}
+        <mesh position={[0, -0.75, 0]}>
+          <sphereGeometry args={[0.08, 8, 8]} />
+          <meshStandardMaterial color={skinColor} roughness={0.6} />
+        </mesh>
+      </group>
+      {/* Braço direito (pivot no ombro) */}
+      <group ref={armRRef} position={[0.4, 1.65, 0]}>
+        <mesh position={[0, -0.35, 0]} castShadow>
+          <capsuleGeometry args={[0.1, 0.7, 4, 8]} />
+          <meshStandardMaterial color={bodyColor} roughness={0.7} />
+        </mesh>
+        {/* Mão direita */}
+        <mesh position={[0, -0.75, 0]}>
+          <sphereGeometry args={[0.08, 8, 8]} />
+          <meshStandardMaterial color={skinColor} roughness={0.6} />
+        </mesh>
+      </group>
+      {/* Perna esquerda (pivot no quadril) */}
+      <group ref={legLRef} position={[-0.18, 0.75, 0]}>
+        <mesh position={[0, -0.35, 0]} castShadow>
+          <capsuleGeometry args={[0.13, 0.7, 4, 8]} />
+          <meshStandardMaterial color={pantsColor} roughness={0.8} />
+        </mesh>
+        {/* Pé esquerdo */}
+        <mesh position={[0, -0.75, 0.1]}>
+          <boxGeometry args={[0.18, 0.1, 0.3]} />
+          <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
+        </mesh>
+      </group>
+      {/* Perna direita (pivot no quadril) */}
+      <group ref={legRRef} position={[0.18, 0.75, 0]}>
+        <mesh position={[0, -0.35, 0]} castShadow>
+          <capsuleGeometry args={[0.13, 0.7, 4, 8]} />
+          <meshStandardMaterial color={pantsColor} roughness={0.8} />
+        </mesh>
+        {/* Pé direito */}
+        <mesh position={[0, -0.75, 0.1]}>
+          <boxGeometry args={[0.18, 0.1, 0.3]} />
+          <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
+        </mesh>
+      </group>
+      {/* Indicador "JOGADOR" — estrela acima da cabeça */}
+      <mesh position={[0, 2.6, 0]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.05, 0.15, 0.1, 5]} />
+        <meshStandardMaterial color="#3fb950" emissive="#3fb950" emissiveIntensity={1.0} />
+      </mesh>
     </group>
   )
 })
@@ -1505,21 +1742,55 @@ function RealWaterMesh({ conect, setMeshRef }) {
   )
 }
 
-// ===== Fase 8 — DialogueObject (gizmo de NPC diálogo) =====
+// ===== Fase 8 / C — DialogueObject (balão de diálogo 💬 melhorado) =====
 function DialogueMesh({ conect, setMeshRef }) {
   const ref = useRef()
-  useFrame((_, dt) => {
-    if (ref.current) ref.current.rotation.y += dt * 0.3
+  const bobRef = useRef()
+  useFrame((state, dt) => {
+    if (ref.current) ref.current.rotation.y += dt * 0.5
+    // C: bobbing animation (flutuação suave)
+    if (bobRef.current) {
+      bobRef.current.position.y = 2.5 + Math.sin(state.clock.elapsedTime * 2) * 0.15
+    }
   })
-  const npcName = conect.npcName || 'NPC'
+  const npcName = conect.npcName || conect.name || 'NPC'
+  const hasChoices = conect.choices && conect.choices.length > 0
   return (
     <group ref={setMeshRef} position={conect.position} rotation={conect.rotation} scale={conect.scale}>
-      {/* Indicador flutuante (balão de diálogo) */}
-      <mesh ref={ref} position={[0, 2.5, 0]}>
-        <sphereGeometry args={[0.3, 16, 16]} />
-        <meshStandardMaterial color="#2f81f7" emissive="#2f81f7" emissiveIntensity={0.6} transparent opacity={0.8} />
-      </mesh>
-      {/* Ponto de interação no chão */}
+      {/* C: Balão de diálogo melhorado (forma de fala) */}
+      <group ref={bobRef} position={[0, 2.5, 0]}>
+        {/* Corpo do balão (esfera achatada) */}
+        <mesh ref={ref} scale={[1, 0.8, 0.5]}>
+          <sphereGeometry args={[0.35, 16, 16]} />
+          <meshStandardMaterial color="#2f81f7" emissive="#2f81f7" emissiveIntensity={0.5} transparent opacity={0.85} />
+        </mesh>
+        {/* "Cauda" do balão (cone apontando para baixo) */}
+        <mesh position={[0, -0.3, 0]} rotation={[Math.PI, 0, 0]}>
+          <coneGeometry args={[0.12, 0.2, 8]} />
+          <meshStandardMaterial color="#2f81f7" emissive="#2f81f7" emissiveIntensity={0.5} transparent opacity={0.85} />
+        </mesh>
+        {/* Pontos "..." dentro do balão */}
+        <mesh position={[-0.12, 0, 0.18]}>
+          <sphereGeometry args={[0.04, 8, 8]} />
+          <meshBasicMaterial color="#ffffff" />
+        </mesh>
+        <mesh position={[0, 0, 0.18]}>
+          <sphereGeometry args={[0.04, 8, 8]} />
+          <meshBasicMaterial color="#ffffff" />
+        </mesh>
+        <mesh position={[0.12, 0, 0.18]}>
+          <sphereGeometry args={[0.04, 8, 8]} />
+          <meshBasicMaterial color="#ffffff" />
+        </mesh>
+        {/* Indicador de escolhas (se houver) */}
+        {hasChoices && (
+          <mesh position={[0.25, 0.2, 0.2]}>
+            <boxGeometry args={[0.1, 0.1, 0.1]} />
+            <meshStandardMaterial color="#ffd700" emissive="#ffd700" emissiveIntensity={0.8} />
+          </mesh>
+        )}
+      </group>
+      {/* Ponto de interação no chão (anel pulsante) */}
       <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.8, 1, 32]} />
         <meshBasicMaterial color="#2f81f7" transparent opacity={0.4} side={THREE.DoubleSide} />
@@ -1527,7 +1798,7 @@ function DialogueMesh({ conect, setMeshRef }) {
       {/* Raio de trigger (wireframe sphere) */}
       <mesh>
         <sphereGeometry args={[conect.triggerRadius || 3, 16, 8]} />
-        <meshBasicMaterial color="#2f81f7" wireframe transparent opacity={0.15} />
+        <meshBasicMaterial color="#2f81f7" wireframe transparent opacity={0.1} />
       </mesh>
     </group>
   )

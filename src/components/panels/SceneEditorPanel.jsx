@@ -411,6 +411,8 @@ function ConectsList({ scene }) {
   const setFlirScriptTarget = useStore((s) => s.setFlirScriptTarget)
   const conects = scene.conects || []
   const [expandedConects, setExpandedConects] = useState(new Set())
+  // C1: Filtro de layer
+  const activeLayer = useStore((s) => s.activeLayer)
 
   const toggleExpand = (instanceId) => {
     setExpandedConects(prev => {
@@ -429,8 +431,12 @@ function ConectsList({ scene }) {
       childMap.set(childId, g.instanceId)
     }
   }
+  // C1: Filtrar conects por layer ativa (mostrar todos se 'all')
+  const layerFilteredConects = activeLayer === 'all'
+    ? conects
+    : conects.filter(c => (c.layer || 'world') === activeLayer)
   // Conects sem parent (top-level)
-  const topLevelConects = conects.filter(c => !childMap.has(c.instanceId))
+  const topLevelConects = layerFilteredConects.filter(c => !childMap.has(c.instanceId))
 
   const renderConect = (conect, isChild = false, parentId = null) => {
     const isSelected = conect.instanceId === selectedConectId
@@ -502,7 +508,23 @@ function ConectsList({ scene }) {
 
   return (
     <div className="panel-section">
-      <h4>Conects na Cena ({conects.length})</h4>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h4>Conects na Cena ({conects.length})</h4>
+        {/* C1: Filtro de layer */}
+        <select
+          value={activeLayer}
+          onChange={(e) => useStore.getState().setActiveLayer(e.target.value)}
+          title="Filtrar por layer"
+          style={{ fontSize: 11, height: 24 }}
+        >
+          <option value="all">Todas as layers</option>
+          <option value="world">🌍 Mundo</option>
+          <option value="gameplay">🎮 Gameplay</option>
+          <option value="ui">📱 UI</option>
+          <option value="effects">✨ Efeitos</option>
+          <option value="audio">🔊 Áudio</option>
+        </select>
+      </div>
       {conects.length === 0 ? (
         <div className="empty-state small">
           Sem conects. Clica em "Conects" para adicionar.

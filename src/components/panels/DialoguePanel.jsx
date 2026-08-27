@@ -108,12 +108,20 @@ export default function DialoguePanel({ onClose }) {
         {/* Modo teste de diálogo */}
         {dialogueState ? (
           <div style={{ background: 'var(--bg-tertiary, #161b22)', borderRadius: 8, padding: 16 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>
-              {tree?.npcName}:
+            <div style={{ fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+              {/* C: Retrato do NPC (avatar circular) */}
+              <div style={{
+                width: 32, height: 32, borderRadius: '50%',
+                background: `linear-gradient(135deg, ${tree?.npcColor || '#2f81f7'}, #8b5cf6)`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 16, color: 'white', fontWeight: 'bold', flexShrink: 0,
+              }}>
+                {(tree?.npcName || 'N').charAt(0).toUpperCase()}
+              </div>
+              <span>{tree?.npcName}:</span>
             </div>
-            <div style={{ fontSize: 14, marginBottom: 12, lineHeight: 1.5 }}>
-              {dialogueState.text}
-            </div>
+            {/* C: Typing effect (máquina de escrever) */}
+            <TypingText text={dialogueState.text} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {dialogueState.choices.map(choice => (
                 <button
@@ -268,6 +276,44 @@ export default function DialoguePanel({ onClose }) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// C: Componente TypingText — efeito máquina de escrever para diálogo
+function TypingText({ text }) {
+  const [displayText, setDisplayText] = useState('')
+  const [isComplete, setIsComplete] = useState(false)
+
+  useEffect(() => {
+    setDisplayText('')
+    setIsComplete(false)
+    if (!text) return
+
+    let i = 0
+    const interval = setInterval(() => {
+      if (i < text.length) {
+        setDisplayText(text.slice(0, i + 1))
+        i++
+      } else {
+        clearInterval(interval)
+        setIsComplete(true)
+      }
+    }, 30) // 30ms por caractere ~ 33 chars/sec
+
+    return () => clearInterval(interval)
+  }, [text])
+
+  return (
+    <div style={{ fontSize: 14, marginBottom: 12, lineHeight: 1.5, minHeight: 42 }}>
+      {displayText}
+      {!isComplete && <span style={{ animation: 'blink 0.5s infinite' }}>▊</span>}
+      <style>{`
+        @keyframes blink {
+          0%, 50% { opacity: 1; }
+          51%, 100% { opacity: 0; }
+        }
+      `}</style>
     </div>
   )
 }

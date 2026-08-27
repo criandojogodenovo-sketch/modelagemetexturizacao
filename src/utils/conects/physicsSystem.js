@@ -33,9 +33,13 @@ export function createPhysicsSystem(options = {}) {
     gravity: new CANNON.Vec3(0, options.gravity ?? -9.82, 0),
   })
   world.broadphase = new CANNON.SAPBroadphase(world)
+  // A1 fix: allowSleep=true faz bodies adormecerem e ignorar velocity changes.
+  // Mesmo com wakeUp(), o body volta a adormecer rapidamente se estiver parado.
+  // Para personagens (player + NPCs), desativamos sleep individualmente.
+  // Para o world, mantemos allowSleep=true para otimizar objetos estáticos.
   world.allowSleep = true
-  world.defaultContactMaterial.friction = 0.3
-  world.defaultContactMaterial.restitution = 0.3
+  world.defaultContactMaterial.friction = 0.4
+  world.defaultContactMaterial.restitution = 0.2
 
   // Objectos reutilizáveis para raycast (evita allocations por frame)
   const _rayFrom = new CANNON.Vec3()
@@ -53,8 +57,12 @@ export function createPhysicsSystem(options = {}) {
   world.addContactMaterial(new CANNON.ContactMaterial(materials.ground, materials.default, {
     friction: 0.6, restitution: 0.1,
   }))
+  // A1 fix: atrito alto entre player e ground para evitar deslize
   world.addContactMaterial(new CANNON.ContactMaterial(materials.player, materials.ground, {
-    friction: 0.4, restitution: 0,
+    friction: 0.8, restitution: 0,
+  }))
+  world.addContactMaterial(new CANNON.ContactMaterial(materials.player, materials.default, {
+    friction: 0.6, restitution: 0,
   }))
 
   // Mapa instanceId → { body, mesh, conect, type, grounded, isTrigger }
@@ -187,11 +195,17 @@ export function createPhysicsSystem(options = {}) {
       mass: isTrigger ? 0 : (conect.mass ?? defaultMass),
       shape,
       position: bodyPos,
-      material: conect.type === 'PersonalObject' ? materials.player : materials.default,
+      material: isCharacter ? materials.player : materials.default,
     })
-    body.linearDamping = conect.linearDamping ?? (isCharacter ? 0.4 : 0.01) // characters need higher damping to stop quickly
-    body.angularDamping = conect.angularDamping ?? 0.01
-    body.fixedRotation = conect.fixedRotation ?? isCharacter // characters should not tip over
+    // A1 fix: characters NUNCA adormecem (allowSleep=false individual)
+    // Isto garante que velocity changes em movePersonal/jumpPersonal são sempre aplicadas
+    body.allowSleep = isCharacter ? false : true
+    // A1 fix: linearDamping moderado para characters — suficiente para parar mas não abrupto
+    body.linearDamping = conect.linearDamping ?? (isCharacter ? 0.2 : 0.01)
+    // A1 fix: angularDamping alto para characters (impede rotação residual)
+    body.angularDamping = conect.angularDamping ?? (isCharacter ? 0.9 : 0.01)
+    // A1 fix: fixedRotation SEMPRE true para characters (impede cair/rolar)
+    body.fixedRotation = isCharacter ? true : (conect.fixedRotation ?? false)
 
     // Tipos especiais
     if (conect.type === 'StaticObject') {
@@ -296,6 +310,9 @@ export function createPhysicsSystem(options = {}) {
     const entry = bodies.get(instanceId)
     // BUG6-FIX: aceitar NpcObject em paralelo com PersonalObject
     if (!entry || !isCharacterType(entry.type)) return
+    // A fix: acordar o body se estiver a dormir (cannon-es allowSleep=true
+    // faz bodies adormecerem após inatividade, ignorando velocity changes)
+    if (entry.body.wakeUp) entry.body.wakeUp()
     // Aplicar velocidade horizontal diretamente
     entry.body.velocity.x = direction[0] * speed
     entry.body.velocity.z = direction[2] * speed
@@ -308,6 +325,7 @@ export function createPhysicsSystem(options = {}) {
   function moveNpc(instanceId, direction, speed) {
     const entry = bodies.get(instanceId)
     if (!entry || entry.type !== 'NpcObject') return
+    if (entry.body.wakeUp) entry.body.wakeUp()
     entry.body.velocity.x = direction[0] * speed
     entry.body.velocity.z = direction[2] * speed
   }
@@ -316,6 +334,7 @@ export function createPhysicsSystem(options = {}) {
     const entry = bodies.get(instanceId)
     // BUG6-FIX: aceitar NpcObject
     if (!entry || !isCharacterType(entry.type)) return
+    if (entry.body.wakeUp) entry.body.wakeUp()
     // FASE 9: Coyote time + salto duplo configurável
     const coyoteTime = entry.conect.coyoteTime ?? 0.15
     const maxJumps = entry.conect.maxJumps ?? 1

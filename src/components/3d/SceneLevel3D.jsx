@@ -1741,14 +1741,31 @@ export default function SceneLevel3D() {
 
   const handleTransformUpdate = useCallback(() => {
     if (!selectedMesh || !selectedInstanceId) return
-    const transform = {
+    // C2: Aplicar snapping se ativo
+    const state = useStore.getState()
+    let transform = {
       position: [selectedMesh.position.x, selectedMesh.position.y, selectedMesh.position.z],
       rotation: [selectedMesh.rotation.x, selectedMesh.rotation.y, selectedMesh.rotation.z],
       scale: [selectedMesh.scale.x, selectedMesh.scale.y, selectedMesh.scale.z],
     }
+    if (state.snapEnabled) {
+      const snapSize = state.snapSize || 0.5
+      const snapRot = (state.snapRotationStep || 15) * Math.PI / 180
+      if (transformMode === 'translate') {
+        transform.position = transform.position.map(v => Math.round(v / snapSize) * snapSize)
+      } else if (transformMode === 'rotate') {
+        transform.rotation = transform.rotation.map(v => Math.round(v / snapRot) * snapRot)
+      } else if (transformMode === 'scale') {
+        transform.scale = transform.scale.map(v => Math.max(0.01, Math.round(v / snapSize) * snapSize))
+      }
+      // Aplicar ao mesh visualmente também
+      selectedMesh.position.set(...transform.position)
+      selectedMesh.rotation.set(...transform.rotation)
+      selectedMesh.scale.set(...transform.scale)
+    }
     if (selectedType === 'conect') updateConect(selectedInstanceId, transform)
     else updateSceneInstance(selectedInstanceId, transform)
-  }, [selectedMesh, selectedInstanceId, selectedType, updateConect, updateSceneInstance])
+  }, [selectedMesh, selectedInstanceId, selectedType, updateConect, updateSceneInstance, transformMode])
 
   if (!activeScene) {
     return (
@@ -1774,10 +1791,14 @@ export default function SceneLevel3D() {
   return (
     <div className="viewport" onDragOver={(e) => !isGameMode && e.preventDefault()} onDrop={handleDrop}>
       <Canvas
-        shadows={shadowsEnabled || !isGameMode}
+        shadows={shadowsEnabled || !isGameMode ? THREE.PCFShadowMap : false}
         dpr={[1, dprMax]}
         camera={{ position: [8, 6, 10], fov: 50, near: 0.1, far: DEFAULT_CAMERA_FAR }}
         gl={{ antialias: true, preserveDrawingBuffer, alpha: false }}
+        onCreated={({ gl }) => {
+          // C5: Forçar PCFShadowMap (não deprecated) em vez de PCFSoftShadowMap
+          gl.shadowMap.type = THREE.PCFShadowMap
+        }}
         onPointerMissed={() => {
           if (!isGameMode) {
             setSelectedInstanceId(null)
@@ -1868,9 +1889,15 @@ export default function SceneLevel3D() {
             <GameCameraGizmo camera={activeScene.gameCamera} />
           )}
 
-          {/* TransformControls — só no editor */}
+          {/* TransformControls — só no editor (C2: com snapping) */}
           {!isGameMode && selectedMesh && selectedInstanceId && (
-            <TransformControls object={selectedMesh} mode={transformMode} size={1.2}
+            <TransformControls
+              object={selectedMesh}
+              mode={transformMode}
+              size={1.2}
+              translationSnap={useStore.getState().snapEnabled ? useStore.getState().snapSize : null}
+              rotationSnap={useStore.getState().snapEnabled ? (useStore.getState().snapRotationStep * Math.PI / 180) : null}
+              scaleSnap={useStore.getState().snapEnabled ? useStore.getState().snapSize : null}
               onMouseDown={() => { if (orbitRef.current) orbitRef.current.enabled = false }}
               onMouseUp={() => { if (orbitRef.current) orbitRef.current.enabled = true; handleTransformUpdate() }}
               onObjectChange={handleTransformUpdate}
