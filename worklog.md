@@ -4738,3 +4738,81 @@ Verificado via `grep -n "projectSettings|editorSettings|physicsSettings|audioSet
 ================================================================================
 ## FIM BUG-A-INVEST
 ================================================================================
+
+---
+
+## Sessão 20 — Realismo Ultragigantesco + Node Editor + Animação Complexa + APK (Task ID: S20)
+
+**Data**: 2026-08-29 · **Agente**: main (GLM) · **Resultado**: 17/17 testes PASS + regressão 3 demos OK + build limpo
+
+### Parte A — Correções prioritárias
+
+**A1 — Física de personagens no editor (`src/utils/conects/physicsSystem.js`)**:
+- `body.updateMassProperties()` após `fixedRotation=true` (antes: invInertia não-zero → NPCs tombavam com impulsos de contacto)
+- ContactMaterials player→ground e player→default com **friction=0** (antes 0.8/0.6 → personagens "colados" ao chão)
+- `materials.player.friction = 0` ao nível do material
+- **BUG ADICIONAL descoberto em debug**: o plano do TerrainObject não tinha `material` → contactos personagem-terreno caíam no `defaultContactMaterial` (friction 0.4) — os ContactMaterials friction=0 nunca eram usados! Fix: `material: materials.ground` no plano
+- Clamp de spawn do S19 (export) faltava no editor: spawns penetrantes lançavam player a y=12+ sem aterrar. Agora `y ≥ halfHeight + 0.02`
+- `world.step` maxSubSteps 3 → 10 (câmara lenta a ~6fps de software WebGL)
+- **Diagnóstico-chave**: a 6.5fps o teste inicial mostrava NPCs parados — instrumentação (window.__flirPlayState com vx/vz + contadores no moveNpc) revelou velocity=3 setada mas efetiva 0.001 → fricção do default contact no plano sem material
+
+**A2 — ItemObject/CheckpointObject no runtime exportado (`gameRuntime.js`)**:
+- ItemObject: octaedro emissivo (MeshStandardMaterial) com rotação + bobbing sinusoidal + pickup automático por pickupRadius → `gc.addToInventory` + evento `onPickup` + mesh escondido
+- CheckpointObject: bandeira (poste metálico + pano DoubleSide + base) com onda no pano; ativação por raio 2.5 → flag verde emissiva + `respawnPoint` + evento `onCheckpoint`; respawn ao cair (y < -20)
+- Reset de items/checkpoints no changeScene
+- **BUG CRÍTICO encontrado e corrigido**: ao remover o `var` duplicado de playerConect no animate(), eliminei a ÚNICA declaração → ReferenceError "playerConect is not defined" no 1º frame do export (T2 inicialmente a falhar). Fix: declaração única no topo do bloco de items
+
+### Parte B — Pipeline de realismo
+
+Novos ficheiros em `src/utils/rendering/`: `flirDDGI.js`, `ssrHiZ.js`, `volumetricFog.js`, `fsrUpscale.js`, `fullscreenQuad.js` + `src/components/3d/RealismController.jsx`:
+- **DDGI**: grelha 4×3×4 de probes (CubeCamera 64px partilhada), staggered 2 probes/frame, PMREMGenerator → envMap por mesh (probe mais próximo), probes fallback com fade de intensidade fora da grelha
+- **SSR Hi-Z**: pirâmide MIN-depth (nível 0 = depth texture da cena), travessia adaptativa com subida/descida de níveis + teste de espessura + refinação binária 5 iterações, reflectivity pass por troca temporária de materiais (quantizados a 1/8), temporal blend 0.25/0.85 com reprojeção via uPrevViewProj
+- **Fog volumétrico**: raymarch 24 steps depth-aware, HG phase, Beer-Lambert, god rays direcionais com penumbra, IGN jitter + acumulação temporal 75/25, half-res com upsample bilinear
+- **FSR**: EASU-style (12 taps, deteção de direção de edge por gradientes de luma, kernel alongado ao longo do edge) + RCAS (clamp por min/max local), presets 0.5/0.67/0.77/0.9
+- **RealismController**: assume o render loop (useFrame prioridade 1) quando ssr/volumetricFog/fsr ativos OU SSRObject/VolumetricFogObject na cena; pipeline: sceneRT (×fsrScale) → SSR half → composite → fog half → FSR → ecrã
+- SettingsPanel: secção "Realismo (S20)" com todos os controlos
+- **FlirGIController atualizado**: ddgi=true monta createDDGI com update por useFrame (antes setInterval)
+
+### Parte C — Node Editor
+
+`src/components/panels/node/NodeEditor.jsx` + `src/utils/materials/nodeGraphCompiler.js`:
+- 14 tipos de nó (Principled BSDF, Texture, UV, Color, Value, Noise fbm, Color Ramp, Map Range, Mix/Add/Multiply, AO, Normal Map, Emissive, Material Output)
+- Canvas com snap 20px, pan/zoom, edges bezier SVG deletáveis, ligação drag output→input com type check, Shift+F focus, Del apaga
+- Compilador GLSL com inferência de tipos, cache de expressões, GLSL ES 1.00-safe (sem construtores de array — atribuição elemento a elemento)
+- **BUGS GLSL encontrados e corrigidos via mensagens de erro do compilador**:
+  1. `max(0.001, 1)` — int/float mix (GLSL ES 1.00 sem conversão implícita) → helper `ff()` em todas as emissões numéricas
+  2. Injeção de roughnessFactor/metalnessFactor após `color_fragment` — variáveis só declaradas em `roughnessmap_fragment`/`metalnessmap_fragment` (mais à frente no shader) → injeções separadas nos 4 chunks corretos
+  3. Return do compilador sem os novos campos → "undefined" literal no shader
+- Bake CPU espelhado (evaluateGraphCPU) → color/roughness/metalness PNGs 256²
+- **BUG React corrigido**: MaterialEditor crashava com `m.repeat[0]` após bake (material sem repeat definido) → guards repeat/offset
+- SceneObject: `applyNodeGraphToMaterial` via useEffect keyed em nodeGraph._rev; flag `__flirNodeGraphApplied` para NUNCA reverter onBeforeCompile de água/céu (customProgramCacheKey=null rebentava o renderer — three chama-o sempre)
+
+### Parte D — Animação complexa
+
+Novos: `src/utils/animation/animationLayers.js`, `springBones.js`, `motionValues.js`, `animationRuntime.js` + `AnimationSystemsBridge` no SceneLevel3D:
+- Layers: override ponderado + additive, máscaras all/upper/lower/arms/legs (regex por boneId), fadeTo com fadeSpeed
+- Spring bones: verlet com inércia/drag/gravity/wind oscilante, restrição de comprimento, stiffness para pose animada, rotação por setFromUnitVectors(+Y→head-tail) com transform para espaço local do pai
+- Motion values: spring semi-implícito com subscribe/onComplete/isSettled
+- AnimationPanel: 3 secções novas (criar/remover/parametrizar layers, cadeias spring, motion values com slider de alvo)
+- Timeline: yoyo, additive, labels com seek (marcadores clicáveis)
+
+### Parte E — APK
+
+`capacitor.config.json` + `scripts/build-apk.sh` + npm scripts. **Geração real do APK requer Android Studio local** (sandbox sem SDK — documentado no README e no script).
+
+### Parte F — Validação
+
+- `scripts/test-s20.mjs` — **17/17 PASS**: T1 física editor (3 sub-testes), T2 export itens/checkpoints (6), T3 realismo (2), T4 node editor (3), T5 animação (3)
+- Regressão: showcase/arena/saga exports smoke PASS + botões TIRO/RELOAD/PULAR OK
+- `npm run build` limpo
+- Screenshots: `download/screenshots/s20-*` (t1-editor-npc, t2-export-checkpoint/final, t3-antes/depois, t4-node-editor, t5-animation-layers)
+- Entregáveis extra: `download/showcase-s20-items.html` (export com ItemObject/CheckpointObject de teste)
+
+### Conhecimento-chave desta sessão
+
+1. cannon-es: ContactMaterial só se aplica se AMBOS os bodies têm material — um plano sem material cai no defaultContactMaterial; o bug "NPCs colados" tinha DUAS camadas (fricção alta + plano sem material)
+2. three.js: `material.customProgramCacheKey` é método de protótipo — NUNCA atribuir null (o renderer chama-o); usar `delete` para restaurar
+3. Injeção GLSL no MeshStandardMaterial: roughnessFactor/metalnessFactor só existem após os chunks roughnessmap/metalnessmap — injetar cada efeito no seu chunk
+4. GLSL ES 1.00: sem conversão implícita int→float em overloads (max/clamp) e sem construtores de array
+5. Euler XYZ pode representar uma rotação Y pura como (π, y', π) — testes de "upright" devem usar quaternion.x/z, nunca Euler.x
+6. R3F: useFrame com prioridade 1 assume o render loop — condicionar a montagem do componente à feature estar ativa

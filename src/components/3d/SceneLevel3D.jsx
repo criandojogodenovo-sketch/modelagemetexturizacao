@@ -30,6 +30,9 @@ import { useStore } from '../../store/useStore'
 import { DEFAULT_CAMERA_FAR } from '../../utils/navigationUtils'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
 import { applyFlirGI } from '../../utils/flirGI'
+import { createDDGI } from '../../utils/rendering/flirDDGI'
+import RealismController from './RealismController'
+import { bindAnimationRuntime, disposeAnimationRuntime, updateAnimationRuntime } from '../../utils/animation/animationRuntime'
 import { getCameraState, applyCameraInput, applyCameraKeyInput, smoothRotation } from '../../utils/cameraController'
 import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
 import { createFlirCodeRuntime } from '../../utils/flirscript/flircode'
@@ -119,13 +122,31 @@ function FogApplier({ conects }) {
 
 // S19 fix (P3-34): FlirGI ligado ao renderSettings — o checkbox do SettingsPanel
 // escrevia renderSettings.flirGI mas nada o consumia (setting quebrado).
-function FlirGIController({ enabled }) {
-  const { scene } = useThree()
+// S20: modo DDGI (renderSettings.ddgi) — probes dinâmicos com PMREM (Parte B1).
+function FlirGIController({ enabled, ddgi, intensity }) {
+  const { scene, gl } = useThree()
+  const ddgiRef = useRef(null)
   useEffect(() => {
-    if (!scene || !enabled) return
+    if (!scene || !enabled) return undefined
+    if (ddgi) {
+      const gi = createDDGI(scene, gl, {
+        gridDivisions: [4, 3, 4],
+        probeResolution: 64,
+        probesPerFrame: 2,
+      })
+      ddgiRef.current = gi
+      return () => { gi.dispose(); ddgiRef.current = null }
+    }
     const gi = applyFlirGI(scene)
     return () => gi.dispose()
-  }, [scene, enabled])
+  }, [scene, gl, enabled, ddgi])
+  useFrame((_, delta) => {
+    const gi = ddgiRef.current
+    if (gi) {
+      if (intensity != null && gi.setIntensity) gi.setIntensity(intensity)
+      gi.update(Math.min(delta || 1 / 60, 0.1))
+    }
+  })
   return null
 }
 
@@ -166,6 +187,21 @@ function InstancingRenderer() {
     }
   }, [scene])
 
+  return null
+}
+
+// ===== S20/Parte D: AnimationSystemsBridge — layers + spring bones + motion values =====
+// Liga o registry global (animationRuntime.js) ao render loop. A UI
+// (AnimationPanel/Timeline) cria/configura os sistemas; este bridge atualiza-os.
+function AnimationSystemsBridge() {
+  const { scene, gl } = useThree()
+  useEffect(() => {
+    bindAnimationRuntime(scene, gl)
+    return () => disposeAnimationRuntime()
+  }, [scene, gl])
+  useFrame((_, delta) => {
+    updateAnimationRuntime(delta)
+  })
   return null
 }
 
@@ -1467,6 +1503,27 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
       }
     }
 
+    // S20/F: hook de debug/testes — estado de jogo legível por Playwright
+    // (player + NPCs + items/checkpoints da cena ativa)
+    try {
+      const st = { t: performance.now(), player: null, npcs: [], items: [], checkpoints: [], fps: null }
+      for (const c of conects) {
+        const m = conectMeshRefs.current.get(c.instanceId)
+        if (!m) continue
+        // Upright via QUATERNION (Euler X=π pode ser ambiguidade de gimbal de rotação Y pura)
+        const p = { id: c.instanceId, x: +m.position.x.toFixed(3), y: +m.position.y.toFixed(3), z: +m.position.z.toFixed(3), qx: +m.quaternion.x.toFixed(3), qz: +m.quaternion.z.toFixed(3), visible: m.visible !== false }
+        // S20/debug: velocidade do body (diagnóstico de movimento)
+        const entry = physicsRef.current?.bodies?.get?.(c.instanceId)
+        if (entry) { p.vx = +entry.body.velocity.x.toFixed(3); p.vz = +entry.body.velocity.z.toFixed(3) }
+        if (c.type === 'PersonalObject') st.player = p
+        else if (c.type === 'NpcObject') { p.type = c.aiMode || c.behavior || 'patrol'; st.npcs.push(p) }
+        else if (c.type === 'ItemObject') st.items.push(p)
+        else if (c.type === 'CheckpointObject') st.checkpoints.push(p)
+      }
+      st.inventory = gameContextRef.current?._inventory || {}
+      window.__flirPlayState = st
+    } catch (e) { /* não crítico */ }
+
     // === PASSAGEM ÚNICA sobre conects ===
     // Pré-resolver PersonalObject para que checkpoints/navigators/items funcionem
     // independentemente da ordem no array conects[]
@@ -1948,9 +2005,20 @@ export default function SceneLevel3D() {
           <SceneBackgroundSolid background={background} />
           {/* S19 fix (P3-34): FlirGI ligado ao renderSettings (antes o checkbox não
               fazia nada — nada consumia renderSettings.flirGI) */}
-          <FlirGIController enabled={!!renderSettings?.flirGI} />
+          <FlirGIController enabled={!!(renderSettings?.flirGI || renderSettings?.ddgi)} ddgi={!!renderSettings?.ddgi} intensity={renderSettings?.ddgiIntensity} />
           <FogApplier conects={activeScene?.conects} />
           <PerformanceTracker />
+
+          {/* S20 (Parte B): pipeline de realismo — SSR Hi-Z + Fog volumétrico + FSR.
+              Monta quando: setting manual OU SSRObject/VolumetricFogObject na cena
+              (os parâmetros do conect controlam o efeito). */}
+          {(!!renderSettings?.ssr || !!renderSettings?.volumetricFog || !!renderSettings?.fsr ||
+            (activeScene?.conects || []).some((c) => c.type === 'SSRObject' || c.type === 'VolumetricFogObject')) && (
+            <RealismController />
+          )}
+
+          {/* S20/Parte D: layers de animação + spring bones + motion values */}
+          <AnimationSystemsBridge />
 
           {/* Performance Core 3.2 — Adaptive Quality (só em Play Mode, estado temporário) */}
           <AdaptiveQuality

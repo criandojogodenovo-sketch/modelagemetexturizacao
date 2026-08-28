@@ -1,0 +1,87 @@
+[
+  {
+    "name": "T1 NPCs patrulham (movimento horizontal)",
+    "pass": true,
+    "detail": "3/3 moveram"
+  },
+  {
+    "name": "T1 NPCs de pé (sem tombar/afundar)",
+    "pass": true,
+    "detail": "qx médio=0.000, y=[1.0,1.0,1.0]"
+  },
+  {
+    "name": "T1 player de pé",
+    "pass": true,
+    "detail": "qx=0, y=1"
+  },
+  {
+    "name": "T2 export com ItemObject/CheckpointObject embutidos",
+    "pass": true,
+    "detail": "498 KB"
+  },
+  {
+    "name": "T2 ItemObject presente no runtime exportado",
+    "pass": true,
+    "detail": "items totais=5"
+  },
+  {
+    "name": "T2 Item apanhado (pickup por proximidade)",
+    "pass": true,
+    "detail": "inventory={\"Moeda\":3} player=(0,4.651)"
+  },
+  {
+    "name": "T2 Inventário atualizado",
+    "pass": true,
+    "detail": "Moeda=3"
+  },
+  {
+    "name": "T2 Checkpoint ativado ao passar",
+    "pass": true,
+    "detail": "active=true, player=(0,-1.065)"
+  },
+  {
+    "name": "T2 NPCs do export estáveis",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "T3 Realismo altera visualmente a cena",
+    "pass": true,
+    "detail": "diferença média por canal=31.54 (limiar 1.5)"
+  },
+  {
+    "name": "T3 Sem crashes WebGL com pipeline de realismo",
+    "pass": true,
+    "detail": "0 erros registados"
+  },
+  {
+    "name": "T4 Node Editor abre com canvas de grafo",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "T4 grafo criado com nós",
+    "pass": true,
+    "detail": "7 elementos-nó"
+  },
+  {
+    "name": "T4 aplicar + bake sem crash",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "T5 secção Animation Layers existe na UI",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "T5 layer criada via UI",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "T5 motion value criado com spring",
+    "pass": true,
+    "detail": ""
+  }
+]

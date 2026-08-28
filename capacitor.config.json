@@ -1,0 +1,14 @@
+{
+  "appId": "com.flir.engine",
+  "appName": "Flir Engine",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

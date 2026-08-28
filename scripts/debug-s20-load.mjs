@@ -1,0 +1,15 @@
+import { chromium } from 'playwright'
+const browser = await chromium.launch()
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+const errors = []
+page.on('pageerror', (e) => errors.push(e.message))
+page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
+await page.goto('http://localhost:5173/')
+await page.waitForTimeout(4000)
+await page.screenshot({ path: '/tmp/s20-debug-load.png' })
+console.log('URL:', page.url())
+console.log('TITLE:', await page.title())
+console.log('errors:', errors.slice(0, 8))
+const btns = await page.locator('button').allTextContents()
+console.log('buttons:', btns.filter(Boolean).slice(0, 20))
+await browser.close()

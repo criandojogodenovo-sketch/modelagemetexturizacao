@@ -31,16 +31,38 @@ import {
   updateTargetToSelection,
 } from '../../utils/navigationUtils'
 import { applyFlirGI } from '../../utils/flirGI'
+import { createDDGI } from '../../utils/rendering/flirDDGI'
+import RealismController from './RealismController'
 
 // S19 fix (P3-34): FlirGI — o checkbox do SettingsPanel escrevia renderSettings.flirGI
 // mas NADA o consumia (setting quebrado). Agora aplica/remove as luzes GI na cena.
-function FlirGIController({ enabled }) {
-  const { scene } = useThree()
+// S20: modo DDGI (renderSettings.ddgi) — probes dinâmicos com PMREM (Parte B1).
+function FlirGIController({ enabled, ddgi, intensity }) {
+  const { scene, gl } = useThree()
+  const ddgiRef = useRef(null)
   useEffect(() => {
-    if (!scene || !enabled) return
+    if (!scene || !enabled) return undefined
+    if (ddgi) {
+      // S20/B1: DDGI — grelha de probes + PMREM + fallback
+      const gi = createDDGI(scene, gl, {
+        gridDivisions: [4, 3, 4],
+        probeResolution: 64,
+        probesPerFrame: 2,
+      })
+      ddgiRef.current = gi
+      return () => { gi.dispose(); ddgiRef.current = null }
+    }
     const gi = applyFlirGI(scene)
     return () => gi.dispose()
-  }, [scene, enabled])
+  }, [scene, gl, enabled, ddgi])
+  // Atualização por frame das probes (staggered) + intensidade
+  useFrame((_, delta) => {
+    const gi = ddgiRef.current
+    if (gi) {
+      if (intensity != null && gi.setIntensity) gi.setIntensity(intensity)
+      gi.update(Math.min(delta || 1 / 60, 0.1))
+    }
+  })
   return null
 }
 
@@ -182,6 +204,11 @@ export default function Scene3D() {
   const lights = useStore((s) => s.lights)
   const mode = useStore((s) => s.mode)
   const renderSettings = useStore((s) => s.renderSettings)
+  // S20/B: conects da cena ativa — para auto-ativar o pipeline de realismo
+  // (SSRObject/VolumetricFogObject) também no modo modelagem
+  const scenes = useStore((s) => s.scenes)
+  const activeSceneId = useStore((s) => s.activeSceneId)
+  const conects = scenes?.find((sc) => sc.id === activeSceneId)?.conects || []
   const modifierBrushActive = useStore((s) => s.modifierBrushActive)
 
   const orbitRef = useRef(null)
@@ -274,7 +301,14 @@ export default function Scene3D() {
     >
       <Suspense fallback={null}>
         <SceneBackground background={background} />
-        <FlirGIController enabled={!!renderSettings?.flirGI} />
+        <FlirGIController enabled={!!(renderSettings?.flirGI || renderSettings?.ddgi)} ddgi={!!renderSettings?.ddgi} intensity={renderSettings?.ddgiIntensity} />
+
+        {/* S20 (Parte B): pipeline de realismo — SSR Hi-Z + Fog volumétrico + FSR.
+            Só monta (e assume o render loop) quando alguma feature está ativa. */}
+        {(!!renderSettings?.ssr || !!renderSettings?.volumetricFog || !!renderSettings?.fsr ||
+          conects?.some((c) => c.type === 'SSRObject' || c.type === 'VolumetricFogObject')) && (
+          <RealismController />
+        )}
 
         {/* Performance Core 3.2 — ShadowOptimizer no Editor (distance culling) */}
         <ShadowOptimizer meshRefs={meshRefs} enabled={true} />

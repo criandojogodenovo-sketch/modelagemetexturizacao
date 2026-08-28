@@ -30,6 +30,7 @@ import {
   weldVertices,
 } from '../../utils/meshOperations'
 import { compositeTextureLayers } from '../../utils/textureCompositor'
+import { applyNodeGraphToMaterial } from '../../utils/materials/nodeGraphCompiler'
 
 // Cache de texturas carregadas a partir de dataURLs
 // Performance Core 3.8 — Consolidado: apenas StreamingManager LRU cache
@@ -268,11 +269,19 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
   // ----- Material -----
   const material = useMemo(() => {
     const m = obj.material || {}
-    const mat = new THREE.MeshStandardMaterial({
+    // S20/B5: MeshPhysicalMaterial quando há features PBR avançadas
+    // (transmission/clearcoat/sheen/anisotropy/iridescence), senão Standard.
+    const hasPhysical = (
+      (m.transmission ?? 0) > 0 || (m.clearcoat ?? 0) > 0 || (m.sheen ?? 0) > 0 ||
+      (m.anisotropy ?? 0) > 0 || (m.iridescence ?? 0) > 0 ||
+      m.roughnessMap || m.metalnessMap || m.aoMap
+    )
+    const MatClass = hasPhysical ? THREE.MeshPhysicalMaterial : THREE.MeshStandardMaterial
+    const mat = new MatClass({
       color: new THREE.Color(m.color || '#cccccc'),
       roughness: m.roughness ?? 0.7,
       metalness: m.metalness ?? 0.0,
-      transparent: m.transparent || (m.opacity ?? 1) < 1,
+      transparent: m.transparent || (m.opacity ?? 1) < 1 || ((m.transmission ?? 0) > 0),
       opacity: m.opacity ?? 1,
       wireframe: m.wireframe || false,
       flatShading: m.flatShading || false,
@@ -283,6 +292,61 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     if (m.emissive && m.emissive !== '#000000') {
       mat.emissive = new THREE.Color(m.emissive)
       mat.emissiveIntensity = m.emissiveIntensity ?? 1
+    }
+
+    // S20/B5: PBR avançado (MeshPhysicalMaterial)
+    if (hasPhysical) {
+      // Transmission (vidro real com refração)
+      if ((m.transmission ?? 0) > 0) {
+        mat.transmission = m.transmission
+        mat.thickness = m.thickness ?? 1.0
+        mat.ior = m.ior ?? 1.5
+        mat.attenuationDistance = m.attenuationDistance ?? Infinity
+        if (m.attenuationColor) mat.attenuationColor = new THREE.Color(m.attenuationColor)
+      }
+      // Clearcoat (verniz automotivo)
+      if ((m.clearcoat ?? 0) > 0) {
+        mat.clearcoat = m.clearcoat
+        mat.clearcoatRoughness = m.clearcoatRoughness ?? 0.1
+        if (m.clearcoatNormalMap) {
+          const ccn = loadTextureTracked(m.clearcoatNormalMap, loadedTextureCounts.current)
+          if (ccn) mat.clearcoatNormalMap = ccn
+        }
+      }
+      // Sheen (tecidos)
+      if ((m.sheen ?? 0) > 0) {
+        mat.sheen = m.sheen
+        mat.sheenColor = new THREE.Color(m.sheenColor || '#ffffff')
+        mat.sheenRoughness = m.sheenRoughness ?? 0.5
+      }
+      // Anisotropy (cabelo, metal escovado) — requer tangentes
+      if ((m.anisotropy ?? 0) > 0) {
+        mat.anisotropy = m.anisotropy
+        if (m.anisotropyRotation) mat.anisotropyRotation = m.anisotropyRotation
+        if (m.anisotropyMap) {
+          const at = loadTextureTracked(m.anisotropyMap, loadedTextureCounts.current)
+          if (at) mat.anisotropyMap = at
+        }
+      }
+      // Iridescência (bolha de sabão, insetos)
+      if ((m.iridescence ?? 0) > 0) {
+        mat.iridescence = m.iridescence
+        mat.iridescenceIOR = m.iridescenceIOR ?? 1.3
+        mat.iridescenceThicknessRange = m.iridescenceThicknessRange || [100, 400]
+      }
+      // Roughness/Metalness/AO maps (PBR completo)
+      if (m.roughnessMap) {
+        const t = loadTextureTracked(m.roughnessMap, loadedTextureCounts.current)
+        if (t) mat.roughnessMap = t
+      }
+      if (m.metalnessMap) {
+        const t = loadTextureTracked(m.metalnessMap, loadedTextureCounts.current)
+        if (t) mat.metalnessMap = t
+      }
+      if (m.aoMap) {
+        const t = loadTextureTracked(m.aoMap, loadedTextureCounts.current)
+        if (t) mat.aoMap = t
+      }
     }
 
     if (m.map) {
@@ -314,6 +378,30 @@ const SceneObject = forwardRef(function SceneObject({ obj, isSelected, onSelect 
     mat.needsUpdate = true
     return mat
   }, [obj.material, obj.type])
+
+  // ----- S20/Parte C: Node Graph (GLSL procedural no material) -----
+  // Quando obj.material.nodeGraph existe, injeta o shader compilado via
+  // onBeforeCompile (herda sombras/luzes do MeshStandardMaterial).
+  useEffect(() => {
+    const g = obj.material?.nodeGraph
+    if (!g || !g.nodes || g.nodes.length === 0) {
+      // SÓ reverter se fomos nós que aplicámos (água/céu têm onBeforeCompile próprio)
+      if (material.userData?.__flirNodeGraphApplied) {
+        material.onBeforeCompile = null
+        // restaurar customProgramCacheKey do protótipo (NUNCA null — three chama-o)
+        delete material.customProgramCacheKey
+        material.userData.__flirNodeGraphApplied = false
+        material.needsUpdate = true
+      }
+      return
+    }
+    const compiled = applyNodeGraphToMaterial(material, g, material.map || null)
+    if (compiled.ok) {
+      material.userData.__flirNodeGraphApplied = true
+    } else {
+      console.warn('[NodeGraph]', compiled.error)
+    }
+  }, [obj.material?.nodeGraph?._rev, material])
 
   // ----- Compositing de camadas de textura (assíncrono) -----
   // Quando há múltiplas camadas, compõe-as num único mapa e aplica ao material.

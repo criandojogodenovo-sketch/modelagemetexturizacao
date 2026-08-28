@@ -566,6 +566,9 @@ function startGame() {
   var bodies = {}
   var meshMap = {}
   var triggers = {}     // S19: instanceId → { size, position, previousContacts } — TriggerObject
+  var items = {}        // S20/A2: instanceId → { position, radius, autoPickup, taken, baseY } — ItemObject
+  var checkpoints = {}  // S20/A2: instanceId → { position, radius, checkpointId, isStart, active, flag } — CheckpointObject
+  var respawnPoint = null // S20/A2: último checkpoint ativado [x, y, z]
 
   // S17: estado de animação/IA por NPC + player
   var animStates = {}   // instanceId → { t, clock, lastPos:{x,z} }
@@ -749,6 +752,8 @@ function startGame() {
       }
       meshMap = {}
       triggers = {}
+      items = {}        // S20/A2: limpar itens da cena antiga
+      checkpoints = {}  // S20/A2: limpar checkpoints da cena antiga
       for (var k2 in bodies) {
         if (bodies[k2]) world.removeBody(bodies[k2])
       }
@@ -1009,6 +1014,72 @@ function startGame() {
         meshMap[conect.instanceId] = mesh
         mesh._name = conect.name; mesh._conect = conect
         triggers[conect.instanceId] = { size: tSize, position: conect.position || [0, 1, 0], previousContacts: {} }
+      } else if (conect.type === 'ItemObject') {
+        // S20/A2 FIX: ItemObject — antes não tinha mesh NENHUM no runtime
+        // exportado (ficava invisível e sem pickup). Octaedro emissivo com
+        // rotação + flutuação + deteção de pickup por proximidade no animate().
+        var iRadius = conect.pickupRadius || 2
+        var iColor = conect.color || '#ffd700'
+        var iGeo = new THREE.OctahedronGeometry(0.45, 0)
+        var iMat = new THREE.MeshStandardMaterial({
+          color: iColor, emissive: iColor, emissiveIntensity: 0.85,
+          roughness: 0.25, metalness: 0.55,
+        })
+        mesh = new THREE.Mesh(iGeo, iMat)
+        var iPos = conect.position || [0, 1, 0]
+        mesh.position.set(iPos[0], iPos[1], iPos[2])
+        mesh.castShadow = true
+        scene3d.add(mesh)
+        meshMap[conect.instanceId] = mesh
+        mesh._name = conect.name; mesh._conect = conect
+        items[conect.instanceId] = {
+          position: iPos, radius: iRadius,
+          autoPickup: conect.autoPickup !== false,
+          itemName: conect.itemName || 'Item',
+          quantity: conect.quantity || 1,
+          taken: false, baseY: iPos[1], t: Math.random() * Math.PI * 2,
+        }
+        dbg('Item "' + (conect.itemName || conect.name) + '" criado em [' + iPos.join(',') + ']', 'log')
+      } else if (conect.type === 'CheckpointObject') {
+        // S20/A2 FIX: CheckpointObject — antes não tinha mesh NENHUM no runtime
+        // exportado. Bandeira (poste + pano + base) com ativação de respawn
+        // por proximidade: ao passar, guarda o ponto de renascimento e o pano
+        // muda de cor (feedback visual). Respawn ao cair do mundo (y < -20).
+        var cPos = conect.position || [0, 0, 0]
+        var flagGroup = new THREE.Group()
+        var pole = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.05, 0.06, 2.2, 10),
+          new THREE.MeshStandardMaterial({ color: '#dcdcdc', metalness: 0.75, roughness: 0.3 })
+        )
+        pole.position.y = 1.1; pole.castShadow = true
+        flagGroup.add(pole)
+        var cFlagMat = new THREE.MeshStandardMaterial({
+          color: conect.color || '#94a3b8', side: THREE.DoubleSide, roughness: 0.85,
+        })
+        var cFlag = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 0.58), cFlagMat)
+        cFlag.position.set(0.5, 1.86, 0)
+        flagGroup.add(cFlag)
+        var cBase = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.22, 0.3, 0.16, 14),
+          new THREE.MeshStandardMaterial({ color: '#3b4048', roughness: 0.55, metalness: 0.35 })
+        )
+        cBase.position.y = 0.08
+        flagGroup.add(cBase)
+        flagGroup.position.set(cPos[0], cPos[1], cPos[2])
+        scene3d.add(flagGroup)
+        mesh = flagGroup
+        meshMap[conect.instanceId] = mesh
+        mesh._name = conect.name; mesh._conect = conect
+        checkpoints[conect.instanceId] = {
+          position: cPos, radius: conect.radius || 2.5,
+          checkpointId: conect.checkpointId || 0,
+          isStart: !!conect.isStart,
+          active: false, flag: cFlag, flagMat: cFlagMat, t: Math.random() * Math.PI * 2,
+        }
+        if (conect.isStart) {
+          respawnPoint = [cPos[0], cPos[1] + 0.5, cPos[2]]
+          dbg('Checkpoint inicial definido (' + conect.name + ')', 'log')
+        }
       }
 
       // FlirCode para conects — S17 fix (P0-02): rtOpts por-runtime
@@ -1361,8 +1432,80 @@ function startGame() {
       trg.previousContacts = tcontacts
     }
 
+    // S20/A2: ItemObject — animação (rotação + flutuação) + pickup por proximidade
+    // (var playerConect: ÚNICA declaração no animate() — a atribuição em baixo
+    // reutiliza esta declaração hoisted; sem ela: ReferenceError no 1º frame)
+    var playerConect = (scene.conects || []).find(function (c) { return c.type === 'PersonalObject' }) || null
+    var playerBody = playerConect ? bodies[playerConect.instanceId] || null : null
+    for (var iid in items) {
+      var itm = items[iid]
+      var im = meshMap[iid]
+      if (itm.taken || !im || im.visible === false) continue
+      // Animação: rotação contínua + bobbing sinusoidal
+      itm.t += delta
+      im.rotation.y += delta * 1.6
+      im.position.y = itm.baseY + Math.sin(itm.t * 2.2) * 0.14
+      // Pickup (auto): distância ao player < pickupRadius
+      if (itm.autoPickup && playerBody) {
+        var idx = playerBody.position.x - itm.position[0]
+        var idy = playerBody.position.y - itm.position[1]
+        var idz = playerBody.position.z - itm.position[2]
+        if (idx * idx + idy * idy + idz * idz < itm.radius * itm.radius) {
+          itm.taken = true
+          im.visible = false
+          if (gc.addToInventory) gc.addToInventory(itm.itemName, itm.quantity)
+          if (runtimes[iid]) runtimes[iid].triggerEvent('onPickup', { item: itm.itemName, quantity: itm.quantity })
+          dbg('Item apanhado: ' + itm.itemName + ' x' + itm.quantity, 'log')
+        }
+      }
+    }
+
+    // S20/A2: CheckpointObject — ativação por proximidade + respawn ao cair
+    for (var ckid in checkpoints) {
+      var ck = checkpoints[ckid]
+      ck.t += delta
+      // Onda do pano da bandeira
+      if (ck.flag) ck.flag.rotation.y = Math.sin(ck.t * 3.1) * 0.16
+      if (!ck.active && playerBody) {
+        var cdx = playerBody.position.x - ck.position[0]
+        var cdy = playerBody.position.y - ck.position[1]
+        var cdz = playerBody.position.z - ck.position[2]
+        if (cdx * cdx + cdy * cdy + cdz * cdz < ck.radius * ck.radius) {
+          ck.active = true
+          // Feedback visual: pano verde + emissivo
+          if (ck.flagMat) { ck.flagMat.color.set('#22c55e'); ck.flagMat.emissive = new THREE.Color('#0f5132'); ck.flagMat.emissiveIntensity = 0.6 }
+          respawnPoint = [ck.position[0], ck.position[1] + 0.6, ck.position[2]]
+          if (runtimes[ckid]) runtimes[ckid].triggerEvent('onCheckpoint', { id: ck.checkpointId })
+          dbg('Checkpoint ' + ck.checkpointId + ' ativado!', 'log')
+        }
+      }
+    }
+    // S20/A2: respawn — se o player cair do mundo (y < -20), volta ao último checkpoint
+    if (playerBody && respawnPoint && playerBody.position.y < -20) {
+      playerBody.position.set(respawnPoint[0], respawnPoint[1], respawnPoint[2])
+      playerBody.velocity.set(0, 0, 0)
+      dbg('Respawn no checkpoint', 'log')
+    }
+
+    // S20/A2+F: hook de debug/testes — estado do jogo exportado (player/NPCs/items/checkpoints)
+    try {
+      var dbgSt = { t: performance.now(), player: null, npcs: [], items: [], checkpoints: [], inventory: gc._inventory || {} }
+      for (var cid2 in meshMap) {
+        var cm = meshMap[cid2]
+        var cc = cm._conect
+        if (!cc) continue
+        var cp2 = { id: cid2, x: +cm.position.x.toFixed(3), y: +cm.position.y.toFixed(3), z: +cm.position.z.toFixed(3), qx: +cm.quaternion.x.toFixed(3), qz: +cm.quaternion.z.toFixed(3), visible: cm.visible !== false }
+        if (cc.type === 'PersonalObject') dbgSt.player = cp2
+        else if (cc.type === 'NpcObject') { cp2.type = cc.aiMode || cc.behavior || 'patrol'; dbgSt.npcs.push(cp2) }
+        else if (cc.type === 'ItemObject') dbgSt.items.push(cp2)
+        else if (cc.type === 'CheckpointObject') { cp2.active = !!(checkpoints[cid2] && checkpoints[cid2].active); dbgSt.checkpoints.push(cp2) }
+      }
+      window.__flirPlayState = dbgSt
+    } catch (e) { }
+
     // PersonalObject movement — camera-relative (estilo Godot, igual ao editor)
-    var playerConect = (scene.conects || []).find(function (c) { return c.type === 'PersonalObject' })
+    // (S20/A2: playerConect/playerBody já resolvidos acima — sem re-declaração)
+    playerConect = (scene.conects || []).find(function (c) { return c.type === 'PersonalObject' }) || null
     if (playerConect && bodies[playerConect.instanceId]) {
       var speed = playerConect.moveSpeed || 5
       var mx = 0, mz = 0

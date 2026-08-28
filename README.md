@@ -6,6 +6,65 @@ Engine web de modelagem, texturização, animação e edição de cenas 3D — f
 
 ---
 
+## 🚀 Sessão 20 — Realismo "Ultragigantesco" + Node Editor + Animação Complexa + APK
+
+**17/17 testes automatizados PASS** (`scripts/test-s20.mjs`) + regressão dos 3 demos OK + build limpo.
+
+### Parte A — Correções prioritárias de física
+
+- **NPCs já não "tombam" no editor** (`physicsSystem.js`): três causas raiz corrigidas —
+  1. `fixedRotation=true` era definido APÓS a construção do body sem `updateMassProperties()` → `invInertia` ficava não-zero e os impulsos de contacto rodavam os personagens. Agora `updateMassProperties()` + `angularVelocity.zero()` após o set.
+  2. O plano de terreno não tinha `material` → contactos personagem-chão caíam no `defaultContactMaterial` (friction 0.4) que "colava" os bodies ao solo (velocidade real 0.001 m/s medida). Agora o plano usa `materials.ground` e o ContactMaterial player→ground tem **friction=0** (character controller padrão da indústria).
+  3. Clamp de spawn do export S19 faltava no editor: spawns a atravessar o chão (y=0.05 com meio-colisor 0.8) lançavam player/NPCs ao ar (y=12+). Agora `y ≥ halfHeight + 0.02` também no editor. E `maxSubSteps` 3 → 10 (câmara lenta em dispositivos lentos).
+- **ItemObject e CheckpointObject visíveis e interativos no export** (`gameRuntime.js`): octaedro emissivo rotativo/flutuante com pickup automático por proximidade (inventário + evento `onPickup`) e bandeira animada com ativação de respawn (evento `onCheckpoint`, flag fica verde, respawn ao cair do mundo).
+
+### Parte B — Pipeline de realismo (nível Flax 1.12 / UE5-lite)
+
+Novo módulo `src/utils/rendering/` + `RealismController` (assume o render loop do R3F quando ativo):
+
+| Sistema | Ficheiro | Técnica |
+|---|---|---|
+| **DDGI** (GI dinâmica) | `flirDDGI.js` | Grelha de light probes com CubeCameras de 64px atualizadas de forma escalonada (2/frame) → PMREM (irradiância + specular pre-filtered) atribuído por mesh ao probe mais próximo, com **probes fallback** (fade para intensidade base fora da grelha, estilo Flax 1.12) |
+| **SSR Hi-Z** | `ssrHiZ.js` | Pirâmide de profundidade MIN (downsampling 2×2) + travessia adaptativa Hi-Z (Vilar/GPU Pro 5) + refinação binária + **filtragem temporal com reprojeção** + buffer de reflectividade (metalness/roughness) renderizado por troca temporária de materiais |
+| **Fog volumétrico** | `volumetricFog.js` | Raymarching 24 passos depth-aware, fase de Henyey-Greenstein (anisotropia = god rays direccionais), **jitter temporal IGN + acumulação 75/25** a meia resolução, penumbra configurável |
+| **FSR** | `fsrUpscale.js` | Upscaling espacial edge-adaptive (EASU-style, 12 taps direccionais com lóbulo negativo) + **RCAS** (Robust Contrast-Adaptive Sharpening) — presets 0.5/0.67/0.77/0.9, sharpness 0–2 |
+| **PBR avançado** | `MaterialEditor` + `SceneObject` | `MeshPhysicalMaterial` com transmission (vidro+IOR+thickness), clearcoat, sheen, anisotropy, iridescência + mapas roughnessMap/metalnessMap/aoMap |
+
+Ativação: secção **"Realismo (S20)"** no SettingsPanel OU colocando `SSRObject`/`VolumetricFogObject` na cena (os parâmetros do conect controlam o efeito).
+
+### Parte C — Node Editor de materiais (estilo Blender/Unreal)
+
+`src/components/panels/node/NodeEditor.jsx` + `src/utils/materials/nodeGraphCompiler.js`:
+
+- Canvas de grafo com grelha + snap 20px, pan/zoom, nós arrastáveis com headers coloridos por categoria, edges bezier SVG (clicáveis para remover), ligação output→input com type-check, **Shift+F foca seleção**, Del apaga nó.
+- Nós: **Principled BSDF**, Texture (usa o map do material ou checker procedural), UV, Color, Value, **Color Ramp** (stops editáveis), **Map Range** (clamp + suavização), **Noise fbm**, **Mix/Add/Multiply**, **Ambient Occlusion**, **Normal Map**, **Emissive** (com bloom support via totalEmissiveRadiance).
+- **Compilação GLSL**: o grafo gera funções tipadas injetadas via `onBeforeCompile` nos chunks corretos do MeshStandardMaterial (`color_fragment`, `roughnessmap_fragment`, `metalnessmap_fragment`, `emissivemap_fragment`) → **herda shadow mapping, luzes e tonemapping** do pipeline standard. Compatível com o formato glTF/Principled.
+- **Bake para mobile**: avaliador CPU espelhado gera color/roughness/metalness maps como PNG dataURL (256²) — zero custo de shader em runtime.
+
+### Parte D — Animação complexa
+
+`src/utils/animation/` (novos: `animationLayers.js`, `springBones.js`, `motionValues.js`, `animationRuntime.js`):
+
+- **Animation Layers** (estilo Babylon 7): layers paralelas com peso 0–1, fade suave (`fadeTo`), modo **override** (blending ponderado) ou **additive** (vibração/respiração), **máscaras por ossos** (all/upper/lower/arms/legs).
+- **Spring Bones**: cadeias verlet com inércia, gravidade, **vento oscilante**, rigidez/drag/inércia configuráveis — rotação derivada do vetor head→tail (integra-se com o skeleton animado, não o destrói).
+- **Motion Values**: valores persistentes e assináveis com spring physics (stiffness/damping/mass, integração semi-implícita de Euler) — **interrupções naturais sem snapping**.
+- **Timeline S20**: repeat/**yoyo** (ping-pong), **labels nomeados com seek** (marcadores laranja clicáveis), flag **additive**.
+- Integração: secções "Animation Layers (S20)", "Spring Bones (S20)" e "Motion Values (S20)" no AnimationPanel + `AnimationSystemsBridge` no render loop.
+
+### Parte E — Export APK Android (Capacitor)
+
+- `capacitor.config.json` (appId `com.flir.engine`, webDir `dist`) + `scripts/build-apk.sh` + scripts npm `build:apk` / `cap:sync` / `cap:open`.
+- **Geração do APK requer Android Studio/SDK em máquina local** (este ambiente Linux sandbox não tem SDK — documentado honestamente). Fluxo: `npm run build:apk` → `adb install android/app/build/outputs/apk/debug/app-debug.apk`.
+
+### Validação (Parte F)
+
+- `npm run build` limpo (2.0s).
+- **17/17 testes S20** (`scripts/test-s20.mjs`): física do editor (NPCs patrulham de pé), export com itens/checkpoints interativos (pickup → inventário Moeda:3, checkpoint ativa), realismo ON vs OFF (diferença visual média 31.5/canal), Node Editor (grafo criado, GLSL aplicado, bake), animação (layer criada, motion value com spring).
+- **Regressão**: Showcase/Arena/Saga exports smoke PASS + botões TIRO/RELOAD/PULAR funcionais.
+- Hook de debug `window.__flirPlayState` (editor + export) para testes automatizados de estado de jogo.
+
+---
+
 ## 📦 Sessão 19 — Export Standalone Validado + Pendências P2/P3 Resolvidas
 
 ### Export de Jogos (HTML standalone) — FUNCIONAL E VALIDADO

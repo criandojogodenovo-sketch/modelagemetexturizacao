@@ -156,6 +156,74 @@ export default function SettingsPanel({ onClose }) {
             </Row>
           </Section>
 
+          {/* === S20: REALISMO AVANÇADO (Parte B) === */}
+          <Section title="Realismo (S20)" icon="✨">
+            <div className="small muted mb-2">
+              Pipeline de realismo da Sessão 20 — DDGI, SSR Hi-Z, fog volumétrico e FSR.
+              Também ativa automaticamente ao adicionar SSRObject/VolumetricFogObject à cena.
+            </div>
+
+            {/* --- DDGI --- */}
+            <Row label="DDGI (GI dinâmica por probes)">
+              <input type="checkbox" checked={!!renderSettings.ddgi} onChange={(e) => setRenderSettings({ ddgi: e.target.checked })} />
+            </Row>
+            {renderSettings.ddgi && (
+              <>
+                <Slider label="Intensidade DDGI" value={renderSettings.ddgiIntensity ?? 1.0} min={0.1} max={3} step={0.1} onChange={(v) => setRenderSettings({ ddgiIntensity: v })} fmt={(v) => v.toFixed(1)} />
+                <div className="small muted mb-1">A luz "salta" entre superfícies (probes PMREM atualizadas de forma escalonada).</div>
+              </>
+            )}
+
+            {/* --- SSR --- */}
+            <Row label="SSR (reflexos Hi-Z)">
+              <input type="checkbox" checked={!!renderSettings.ssr} onChange={(e) => setRenderSettings({ ssr: e.target.checked })} />
+            </Row>
+            {renderSettings.ssr && (
+              <>
+                <Slider label="Intensidade SSR" value={renderSettings.ssrIntensity ?? 0.8} min={0.1} max={2} step={0.05} onChange={(v) => setRenderSettings({ ssrIntensity: v })} fmt={(v) => v.toFixed(2)} />
+                <div className="small muted mb-1">Reflexos screen-space com pirâmide Hi-Z + filtragem temporal.</div>
+              </>
+            )}
+
+            {/* --- Fog volumétrico --- */}
+            <Row label="Fog volumétrico (god rays)">
+              <input type="checkbox" checked={!!renderSettings.volumetricFog} onChange={(e) => setRenderSettings({ volumetricFog: e.target.checked })} />
+            </Row>
+            {renderSettings.volumetricFog && (
+              <>
+                <Slider label="Densidade" value={renderSettings.fogDensity ?? 0.02} min={0.005} max={0.3} step={0.005} onChange={(v) => setRenderSettings({ fogDensity: v })} fmt={(v) => v.toFixed(3)} />
+                <Slider label="Scattering" value={renderSettings.fogScattering ?? 0.5} min={0} max={2} step={0.05} onChange={(v) => setRenderSettings({ fogScattering: v })} fmt={(v) => v.toFixed(2)} />
+                <Slider label="Anisotropia (god rays)" value={renderSettings.fogAnisotropy ?? 0.6} min={-0.95} max={0.95} step={0.05} onChange={(v) => setRenderSettings({ fogAnisotropy: v })} fmt={(v) => v.toFixed(2)} />
+                <Slider label="Penumbra" value={renderSettings.fogPenumbra ?? 0.35} min={0.01} max={1} step={0.01} onChange={(v) => setRenderSettings({ fogPenumbra: v })} fmt={(v) => v.toFixed(2)} />
+                <Row label="God rays">
+                  <input type="checkbox" checked={renderSettings.fogGodRays !== false} onChange={(e) => setRenderSettings({ fogGodRays: e.target.checked })} />
+                </Row>
+                <Row label="Cor do fog">
+                  <input type="color" value={renderSettings.fogColor || '#a0c4ff'} onChange={(e) => setRenderSettings({ fogColor: e.target.value })} />
+                </Row>
+              </>
+            )}
+
+            {/* --- FSR --- */}
+            <Row label="FSR (upscaling)">
+              <input type="checkbox" checked={!!renderSettings.fsr} onChange={(e) => setRenderSettings({ fsr: e.target.checked })} />
+            </Row>
+            {renderSettings.fsr && (
+              <>
+                <Row label="Escala de render">
+                  <select value={renderSettings.fsrScale ?? 0.77} onChange={(e) => setRenderSettings({ fsrScale: Number(e.target.value) })}>
+                    <option value={0.5}>Performance (0.50x)</option>
+                    <option value={0.67}>Balanced (0.67x)</option>
+                    <option value={0.77}>Quality (0.77x)</option>
+                    <option value={0.9}>Ultra Quality (0.90x)</option>
+                  </select>
+                </Row>
+                <Slider label="Nitidez RCAS" value={renderSettings.fsrSharpness ?? 0.87} min={0} max={2} step={0.05} onChange={(v) => setRenderSettings({ fsrSharpness: v })} fmt={(v) => v.toFixed(2)} />
+                <div className="small muted">Renderiza a baixa resolução + EASU/RCAS — tipicamente +50-100% FPS em mobile.</div>
+              </>
+            )}
+          </Section>
+
           {/* === EDITOR === */}
           <Section title="Editor" icon="🖊️">
             <Row label="Tema">

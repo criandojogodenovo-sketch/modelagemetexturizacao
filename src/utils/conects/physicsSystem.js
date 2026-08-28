@@ -54,15 +54,27 @@ export function createPhysicsSystem(options = {}) {
     ground: new CANNON.Material('ground'),
     player: new CANNON.Material('player'),
   }
+  // S20/A1 fix: fricção do material dos personagens = 0.
+  // cannon-es: se AMBOS os materiais em contacto têm friction >= 0, usa
+  // friction = matA.friction * matB.friction; e se friction resolve para 0,
+  // NENHUMA equação de fricção é criada (createFrictionEquationsFromContact
+  // só cria equações quando friction > 0) → personagens deslizam livremente,
+  // sem serem "colados" ao chão pelo integrador.
+  materials.player.friction = 0
+  materials.player.restitution = 0
   world.addContactMaterial(new CANNON.ContactMaterial(materials.ground, materials.default, {
     friction: 0.6, restitution: 0.1,
   }))
-  // A1 fix: atrito alto entre player e ground para evitar deslize
+  // S20/A1 fix: personagem-chão com friction=0. Personagens movidos por
+  // velocity por código (movePersonal) precisam de fricção ZERO contra o
+  // chão — fricção elevada "cola" o body ao solo e o torna imóvel
+  // (bug confirmado no export S19; agora corrigido também no editor).
   world.addContactMaterial(new CANNON.ContactMaterial(materials.player, materials.ground, {
-    friction: 0.8, restitution: 0,
+    friction: 0, restitution: 0,
   }))
+  // S20/A1 fix: personagem-default (paredes, objetos) com friction=0
   world.addContactMaterial(new CANNON.ContactMaterial(materials.player, materials.default, {
-    friction: 0.6, restitution: 0,
+    friction: 0, restitution: 0,
   }))
 
   // Mapa instanceId → { body, mesh, conect, type, grounded, isTrigger }
@@ -172,6 +184,12 @@ export function createPhysicsSystem(options = {}) {
           conect.position?.[1] || 0,
           conect.position?.[2] || 0
         ),
+        // S20/A1 fix: material GROUND no plano — antes era null e os contactos
+        // personagem-terreno caíam no defaultContactMaterial (friction 0.4) que
+        // "colava" os personagens ao chão. Com materials.ground, o par
+        // player→ground usa o ContactMaterial friction=0 (personagens deslizam
+        // livremente; rigid objects mantêm ground→default 0.6).
+        material: materials.ground,
       })
       // O plano aponta para +Z por defeito — rodar para apontar para +Y (chão)
       planeBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2)
@@ -213,7 +231,19 @@ export function createPhysicsSystem(options = {}) {
     // A1 fix: angularDamping alto para characters (impede rotação residual)
     body.angularDamping = conect.angularDamping ?? (isCharacter ? 0.9 : 0.01)
     // A1 fix: fixedRotation SEMPRE true para characters (impede cair/rolar)
-    body.fixedRotation = isCharacter ? true : (conect.fixedRotation ?? false)
+    // S20/A1 fix (CRÍTICO): updateMassProperties() é chamado no construtor do
+    // Body ANTES desta linha — fixedRotation=true pós-construção sem
+    // updateMassProperties() deixa invInertia != 0, permitindo que impulsos
+    // de contacto/gravidade rodem o body → NPCs "tombam" ao mover-se.
+    // Chamando updateMassProperties() agora, invInertia fica a zeros e a
+    // rotação fica realmente bloqueada.
+    if (isCharacter || conect.fixedRotation) {
+      body.fixedRotation = true
+      body.updateMassProperties()
+      body.angularVelocity.set(0, 0, 0)
+    } else {
+      body.fixedRotation = conect.fixedRotation ?? false
+    }
 
     // Tipos especiais
     if (conect.type === 'StaticObject') {
@@ -231,6 +261,20 @@ export function createPhysicsSystem(options = {}) {
     // Aplicar rotação inicial
     if (conect.rotation) {
       body.quaternion.setFromEuler(...conect.rotation)
+    }
+
+    // S20/A1 fix (CRÍTICO — igual ao export S19): clamp de spawn para
+    // personagens. Um spawn com o colisor a atravessar o chão (ex.: y=0.05
+    // com meio-colisor 0.8) gera penetração profunda; o cannon-es resolve
+    // com um impulso gigante e lança o corpo ao ar (player ia a y=12+ e
+    // nunca aterrava; NPCs bobavam entre y=3-4). Clampear o spawn para o
+    // topo do colisor elimina o lançamento.
+    if (isCharacter) {
+      let halfH = 0.8
+      if (shape.halfExtents) halfH = shape.halfExtents.y
+      else if (shape.radius && !shape.height) halfH = shape.radius
+      else if (shape.height) halfH = shape.height / 2
+      if (body.position.y < halfH + 0.02) body.position.y = halfH + 0.02
     }
 
     world.addBody(body)
@@ -387,7 +431,10 @@ export function createPhysicsSystem(options = {}) {
   // Atualiza o mundo e sincroniza transforms
   function update(deltaTime) {
     // Step do mundo físico (fixed timestep)
-    world.step(1 / 60, deltaTime, 3)
+    // S20/A1: maxSubSteps 10 (igual ao export S19) — em dispositivos lentos
+    // (software WebGL ~6fps) a simulação avançava só 0.05s por 0.15s real
+    // (câmara lenta). Com 10 substeps a física mantém-se próxima do tempo real.
+    world.step(1 / 60, deltaTime, 10)
 
     // Sincronizar transforms dos corpos para os meshes
     for (const [instanceId, entry] of bodies) {

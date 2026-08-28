@@ -82,6 +82,21 @@ const initialScene = {
   renderSettings: {
     qualityLevel: 'balanced', // performance | balanced | realista | super-realista | hiper-realista
     flirGI: false,
+    // S20 — Realismo (Parte B)
+    ddgi: false,              // Dynamic Diffuse GI (probes)
+    ddgiIntensity: 1.0,
+    ssr: false,               // SSR com Hi-Z
+    ssrIntensity: 0.8,
+    volumetricFog: false,     // Fog volumétrico + god rays
+    fogDensity: 0.02,
+    fogScattering: 0.5,
+    fogAnisotropy: 0.6,
+    fogGodRays: true,
+    fogColor: '#a0c4ff',
+    fogPenumbra: 0.35,
+    fsr: false,               // AMD FSR upscaling
+    fsrScale: 0.77,           // 0.5 | 0.67 | 0.77 | 0.9
+    fsrSharpness: 0.87,       // 0..2
     flirAdaptiveMesh: false,
     shadowOptimizations: true,
     shadowDistance: 20,

@@ -12,13 +12,14 @@
  *  - Tiling UV (repeat X/Y) e offset (X/Y)
  *  - Remover texturas
  */
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import * as THREE from 'three'
 import { useStore } from '../../store/useStore'
 import { fileToDataURL } from '../../utils/helpers'
 import { IconImage, IconTrash } from '../ui/Icons'
 import CollapseSection from '../ui/CollapseSection'
 import { applyPOMPro, removePOMPro } from '../../utils/parallaxOcclusionMappingPro'
+import NodeEditor from './node/NodeEditor'
 
 const SWATCHES = [
   '#ffffff', '#cccccc', '#888888', '#444444', '#000000',
@@ -34,8 +35,15 @@ export default function MaterialEditor({ obj }) {
   const mapInputRef = useRef()
   const normalInputRef = useRef()
   const heightInputRef = useRef()
+  const roughnessMapRef = useRef()
+  const metalnessMapRef = useRef()
+  const aoMapRef = useRef()
+  const [showNodeEditor, setShowNodeEditor] = useState(false)
 
   const m = obj.material
+  // S20 fix: guards — materiais criados por bake/import podem não ter repeat/offset
+  const repeat = m?.repeat || [1, 1]
+  const offset = m?.offset || [0, 0]
 
   // Atualiza um campo do material (em tempo real, sem histórico)
   const set = (patch) => updateMaterial(obj.id, patch)
@@ -84,6 +92,21 @@ export default function MaterialEditor({ obj }) {
     const dataURL = await fileToDataURL(file)
     commitMaterial(obj.id, { heightMap: dataURL })
     toast('Height map carregado', 'success')
+    e.target.value = ''
+  }
+
+  // S20/B5: uploads de mapas PBR (roughness/metalness/AO)
+  const handlePBRMapUpload = async (e, key, label) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.match(/^image\/(png|jpe?g)$/i)) {
+      toast('Apenas PNG ou JPG', 'error')
+      return
+    }
+    _pushHistory()
+    const dataURL = await fileToDataURL(file)
+    commitMaterial(obj.id, { [key]: dataURL })
+    toast(label + ' aplicado', 'success')
     e.target.value = ''
   }
 
@@ -255,47 +278,47 @@ export default function MaterialEditor({ obj }) {
             </div>
 
             <div className="prop-row">
-              <label>Tiling U (repetição horizontal): {m.repeat[0]}</label>
+              <label>Tiling U (repetição horizontal): {repeat[0]}</label>
               <input
                 type="range"
                 min="0.1"
                 max="10"
                 step="0.1"
-                value={m.repeat[0]}
-                onChange={(e) => set({ repeat: [Number(e.target.value), m.repeat[1]] })}
+                value={repeat[0]}
+                onChange={(e) => set({ repeat: [Number(e.target.value), repeat[1]] })}
               />
             </div>
             <div className="prop-row">
-              <label>Tiling V (repetição vertical): {m.repeat[1]}</label>
+              <label>Tiling V (repetição vertical): {repeat[1]}</label>
               <input
                 type="range"
                 min="0.1"
                 max="10"
                 step="0.1"
-                value={m.repeat[1]}
-                onChange={(e) => set({ repeat: [m.repeat[0], Number(e.target.value)] })}
+                value={repeat[1]}
+                onChange={(e) => set({ repeat: [repeat[0], Number(e.target.value)] })}
               />
             </div>
             <div className="prop-row">
-              <label>Offset U: {m.offset[0].toFixed(2)}</label>
+              <label>Offset U: {offset[0].toFixed(2)}</label>
               <input
                 type="range"
                 min="0"
                 max="1"
                 step="0.01"
-                value={m.offset[0]}
-                onChange={(e) => set({ offset: [Number(e.target.value), m.offset[1]] })}
+                value={offset[0]}
+                onChange={(e) => set({ offset: [Number(e.target.value), offset[1]] })}
               />
             </div>
             <div className="prop-row">
-              <label>Offset V: {m.offset[1].toFixed(2)}</label>
+              <label>Offset V: {offset[1].toFixed(2)}</label>
               <input
                 type="range"
                 min="0"
                 max="1"
                 step="0.01"
-                value={m.offset[1]}
-                onChange={(e) => set({ offset: [m.offset[0], Number(e.target.value)] })}
+                value={offset[1]}
+                onChange={(e) => set({ offset: [offset[0], Number(e.target.value)] })}
               />
             </div>
           </>
@@ -340,6 +363,151 @@ export default function MaterialEditor({ obj }) {
             </div>
           </div>
         )}
+      </CollapseSection>
+
+      {/* S20/B5: PBR Avançado — MeshPhysicalMaterial */}
+      <CollapseSection title="PBR Avançado (S20)" icon="gem" defaultOpen={false} storageKey="mat_pbr_advanced">
+        <div className="small muted mb-2">
+          Transmission (vidro), Clearcoat (verniz), Sheen (tecidos), Anisotropy (metal escovado) e mapas PBR completos.
+        </div>
+
+        {/* Transmission */}
+        <div className="prop-row">
+          <label>Transmission (vidro): {(m.transmission ?? 0).toFixed(2)}</label>
+          <input type="range" min="0" max="1" step="0.01" value={m.transmission ?? 0}
+            onChange={(e) => set({ transmission: Number(e.target.value) })}
+            onMouseUp={(e) => commit({ transmission: Number(e.target.value) })} />
+        </div>
+        {(m.transmission ?? 0) > 0 && (
+          <>
+            <div className="prop-row">
+              <label>Thickness: {(m.thickness ?? 1).toFixed(2)}</label>
+              <input type="range" min="0" max="5" step="0.05" value={m.thickness ?? 1}
+                onChange={(e) => set({ thickness: Number(e.target.value) })}
+                onMouseUp={(e) => commit({ thickness: Number(e.target.value) })} />
+            </div>
+            <div className="prop-row">
+              <label>IOR (refração): {(m.ior ?? 1.5).toFixed(2)}</label>
+              <input type="range" min="1" max="2.33" step="0.01" value={m.ior ?? 1.5}
+                onChange={(e) => set({ ior: Number(e.target.value) })}
+                onMouseUp={(e) => commit({ ior: Number(e.target.value) })} />
+            </div>
+          </>
+        )}
+
+        {/* Clearcoat */}
+        <div className="prop-row">
+          <label>Clearcoat (verniz): {(m.clearcoat ?? 0).toFixed(2)}</label>
+          <input type="range" min="0" max="1" step="0.01" value={m.clearcoat ?? 0}
+            onChange={(e) => set({ clearcoat: Number(e.target.value) })}
+            onMouseUp={(e) => commit({ clearcoat: Number(e.target.value) })} />
+        </div>
+        {(m.clearcoat ?? 0) > 0 && (
+          <div className="prop-row">
+            <label>Clearcoat roughness: {(m.clearcoatRoughness ?? 0.1).toFixed(2)}</label>
+            <input type="range" min="0" max="1" step="0.01" value={m.clearcoatRoughness ?? 0.1}
+              onChange={(e) => set({ clearcoatRoughness: Number(e.target.value) })}
+              onMouseUp={(e) => commit({ clearcoatRoughness: Number(e.target.value) })} />
+          </div>
+        )}
+
+        {/* Sheen */}
+        <div className="prop-row">
+          <label>Sheen (tecidos): {(m.sheen ?? 0).toFixed(2)}</label>
+          <input type="range" min="0" max="1" step="0.01" value={m.sheen ?? 0}
+            onChange={(e) => set({ sheen: Number(e.target.value) })}
+            onMouseUp={(e) => commit({ sheen: Number(e.target.value) })} />
+        </div>
+        {(m.sheen ?? 0) > 0 && (
+          <div className="prop-row">
+            <label>Cor do sheen</label>
+            <input type="color" value={m.sheenColor || '#ffffff'}
+              onChange={(e) => set({ sheenColor: e.target.value })}
+              onBlur={(e) => commit({ sheenColor: e.target.value })} />
+          </div>
+        )}
+
+        {/* Anisotropy */}
+        <div className="prop-row">
+          <label>Anisotropy (metal escovado): {(m.anisotropy ?? 0).toFixed(2)}</label>
+          <input type="range" min="0" max="1" step="0.01" value={m.anisotropy ?? 0}
+            onChange={(e) => set({ anisotropy: Number(e.target.value) })}
+            onMouseUp={(e) => commit({ anisotropy: Number(e.target.value) })} />
+        </div>
+
+        {/* Iridescência */}
+        <div className="prop-row">
+          <label>Iridescência: {(m.iridescence ?? 0).toFixed(2)}</label>
+          <input type="range" min="0" max="1" step="0.01" value={m.iridescence ?? 0}
+            onChange={(e) => set({ iridescence: Number(e.target.value) })}
+            onMouseUp={(e) => commit({ iridescence: Number(e.target.value) })} />
+        </div>
+
+        {/* Mapas PBR */}
+        <div className="small muted mt-2 mb-1" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Mapas PBR</div>
+        <div className="prop-row">
+          <div className="file-input-wrap">
+            <button onClick={() => roughnessMapRef.current?.click()}>
+              <IconImage width={14} height={14} /> {m.roughnessMap ? 'Substituir roughness' : 'Roughness map'}
+            </button>
+            <input ref={roughnessMapRef} type="file" accept="image/png,image/jpeg" hidden
+              onChange={(e) => handlePBRMapUpload(e, 'roughnessMap', 'Roughness map')} />
+          </div>
+        </div>
+        {m.roughnessMap && (
+          <div className="prop-row">
+            <button className="danger" style={{ width: '100%' }}
+              onClick={() => { _pushHistory(); commitMaterial(obj.id, { roughnessMap: null }) }}>
+              <IconTrash width={14} height={14} /> Remover roughness map
+            </button>
+          </div>
+        )}
+        <div className="prop-row">
+          <div className="file-input-wrap">
+            <button onClick={() => metalnessMapRef.current?.click()}>
+              <IconImage width={14} height={14} /> {m.metalnessMap ? 'Substituir metalness' : 'Metalness map'}
+            </button>
+            <input ref={metalnessMapRef} type="file" accept="image/png,image/jpeg" hidden
+              onChange={(e) => handlePBRMapUpload(e, 'metalnessMap', 'Metalness map')} />
+          </div>
+        </div>
+        {m.metalnessMap && (
+          <div className="prop-row">
+            <button className="danger" style={{ width: '100%' }}
+              onClick={() => { _pushHistory(); commitMaterial(obj.id, { metalnessMap: null }) }}>
+              <IconTrash width={14} height={14} /> Remover metalness map
+            </button>
+          </div>
+        )}
+        <div className="prop-row">
+          <div className="file-input-wrap">
+            <button onClick={() => aoMapRef.current?.click()}>
+              <IconImage width={14} height={14} /> {m.aoMap ? 'Substituir AO' : 'Ambient occlusion map'}
+            </button>
+            <input ref={aoMapRef} type="file" accept="image/png,image/jpeg" hidden
+              onChange={(e) => handlePBRMapUpload(e, 'aoMap', 'AO map')} />
+          </div>
+        </div>
+        {m.aoMap && (
+          <div className="prop-row">
+            <button className="danger" style={{ width: '100%' }}
+              onClick={() => { _pushHistory(); commitMaterial(obj.id, { aoMap: null }) }}>
+              <IconTrash width={14} height={14} /> Remover AO map
+            </button>
+          </div>
+        )}
+      </CollapseSection>
+
+      {/* S20/Parte C: Node Editor — shaders por node graph (estilo Blender/Unreal) */}
+      <CollapseSection title="Node Editor (shaders)" icon="git-branch" defaultOpen={false} storageKey="mat_node_editor">
+        <div className="small muted mb-2">
+          Material procedural por nós (Principled BSDF, Color Ramp, Map Range, Noise…).
+          Compila para GLSL no MeshStandardMaterial (herda sombras) ou faz bake para mobile.
+        </div>
+        <button className="primary" style={{ width: '100%' }} onClick={() => setShowNodeEditor(!showNodeEditor)}>
+          {showNodeEditor ? 'Fechar Node Editor' : 'Abrir Node Editor'}
+        </button>
+        {showNodeEditor && <NodeEditor obj={obj} />}
       </CollapseSection>
 
       {/* POM — Parallax Occlusion Mapping Pro */}

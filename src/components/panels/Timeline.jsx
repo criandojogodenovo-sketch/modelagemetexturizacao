@@ -25,7 +25,6 @@ const INTERPOLATION_MODES = [
   { id: 'easeOut', label: 'Ease Out', icon: '◑' },
   { id: 'easeInOut', label: 'Ease In-Out', icon: '◐◑' },
 ]
-
 // Cores para faixas (ciclo)
 const TRACK_COLORS = [
   '#3b82f6', // azul
@@ -49,6 +48,11 @@ export default function Timeline() {
   const [selectedBoneId, setSelectedBoneId] = useState(null)
   // Fase 7 — Modo de interpolação ativo para novos keyframes
   const [interpolation, setInterpolation] = useState('easeInOut')
+  // S20/D3 — labels + seek + yoyo/repeat + additive
+  const [labelDraft, setLabelDraft] = useState('')
+  const labels = animation.labels || []
+  const yoyo = !!animation.yoyo
+  const additive = !!animation.additive
 
   if (!selected) return null
   const hasSkeleton = selected.skeleton && selected.skeleton.bones.length > 0
@@ -131,6 +135,55 @@ export default function Timeline() {
             </option>
           ))}
         </select>
+        {/* S20/D3 — Yoyo (ida-e-volta) */}
+        <button
+          className={`icon ${yoyo ? 'primary' : ''}`}
+          onClick={() => setAnimation({ yoyo: !yoyo })}
+          title="Yoyo: reproduzir em ida-e-volta (ping-pong)"
+          style={{ fontSize: 11, padding: '2px 6px' }}
+        >
+          ⇄
+        </button>
+        {/* S20/D3 — Additive (vibração/respiração) */}
+        <button
+          className={`icon ${additive ? 'primary' : ''}`}
+          onClick={() => setAnimation({ additive: !additive })}
+          title="Additive: somar aos ossos em vez de substituir (vibração, respiração)"
+          style={{ fontSize: 11, padding: '2px 6px' }}
+        >
+          Σ
+        </button>
+        {/* S20/D3 — Labels (marcadores nomeados para seek/debugging) */}
+        <input
+          value={labelDraft}
+          onChange={(e) => setLabelDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && labelDraft.trim()) {
+              const next = [...labels, { name: labelDraft.trim(), time: animation.currentTime }]
+              setAnimation({ labels: next })
+              setLabelDraft('')
+            }
+          }}
+          placeholder="label + Enter"
+          style={{ width: 84, fontSize: 10, padding: '2px 6px' }}
+          title="Criar label no tempo atual (para seek/debugging)"
+        />
+        {labels.length > 0 && (
+          <select
+            value=""
+            onChange={(e) => {
+              const lb = labels.find((l) => l.name === e.target.value)
+              if (lb) setAnimation({ currentTime: lb.time })
+            }}
+            style={{ width: 'auto', maxWidth: 70, fontSize: 10 }}
+            title="Seek para label"
+          >
+            <option value="">seek…</option>
+            {labels.map((l) => (
+              <option key={l.name} value={l.name}>{l.name} @{l.time.toFixed(1)}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Faixas por osso — cada uma com cor distinta */}
@@ -189,6 +242,18 @@ export default function Timeline() {
           className="timeline-track"
           onClick={handleTrackClick}
         >
+          {/* S20/D3 — labels como marcadores verticais */}
+          {labels.map((l) => (
+            <div
+              key={l.name}
+              title={`${l.name} @ ${l.time.toFixed(1)}s — clique para seek`}
+              onClick={(e) => { e.stopPropagation(); setAnimation({ currentTime: l.time }) }}
+              style={{
+                position: 'absolute', left: `${(l.time / Math.max(0.001, animation.duration)) * 100}%`,
+                top: 0, bottom: 0, width: 2, background: '#f0a020', cursor: 'pointer', zIndex: 2,
+              }}
+            />
+          ))}
           <div
             className="timeline-progress"
             style={{ width: `${progress * 100}%` }}
