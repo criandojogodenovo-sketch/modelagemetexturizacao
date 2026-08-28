@@ -333,6 +333,33 @@ function PropertyField({ propDef, value, onChange, onFocus }) {
         </div>
       )
 
+    case 'json':
+      // S18: editor de JSON (ex.: patrolPoints inline do NpcObject).
+      // Textarea com validação — só escreve no store quando o JSON é válido.
+      const jsonStr = typeof value === 'string' ? value : (value != null ? JSON.stringify(value, null, 0) : '')
+      return (
+        <div className="prop-row">
+          <label>{label}</label>
+          <textarea
+            rows={3}
+            placeholder={propDef.placeholder || '[...]'}
+            defaultValue={jsonStr}
+            onFocus={onFocus}
+            onBlur={(e) => {
+              const raw = e.target.value.trim()
+              if (!raw) { onChange(null); return }
+              try {
+                onChange(JSON.parse(raw))
+                e.target.style.borderColor = ''
+              } catch {
+                e.target.style.borderColor = '#f85149' // JSON inválido — não escreve
+              }
+            }}
+            style={{ fontFamily: 'monospace', fontSize: 11, width: '100%', resize: 'vertical' }}
+          />
+        </div>
+      )
+
     default:
       return null
   }

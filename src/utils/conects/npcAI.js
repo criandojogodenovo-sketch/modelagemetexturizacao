@@ -166,7 +166,11 @@ export function createNPCAI(npc, helpers) {
     }
 
     if (behavior === 'patrol') {
-      const pathPoints = getPathPoints?.(npc.patrolPath)
+      // S18 fix: aceitar waypoints INLINE (npc.patrolPoints = [[x,y,z],...])
+      // além de PathObject via npc.patrolPath. Os demos (flirQuestShowcase)
+      // definem patrolPoints diretamente no NPC — antes o IA só lia o
+      // PathObject e, sem patrolPath, fazia return imediato → NPC congelado.
+      const pathPoints = getPathPoints?.(npc.patrolPath) || npc.patrolPoints
       if (!pathPoints || pathPoints.length === 0) return
       const target = pathPoints[patrolIndex % pathPoints.length]
       // Se perdeu vista do jogador e está em patrol, continua a patrulhar normalmente

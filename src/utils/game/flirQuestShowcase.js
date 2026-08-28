@@ -203,6 +203,34 @@ const templeObjects = [
   { id: uid(), type: 'cylinder', name: 'PillarBR', position: [3, 3, 3], rotation: [0, 0, 0], scale: [0.3, 6, 0.3], args: { radius: 1, height: 1, segments: 12 }, material: { color: '#e8e8e8', roughness: 0.7 }, visible: true },
 ]
 
+// ===== S18 FIX: schema correto de instâncias =====
+// A engine espera scene.objects = [{ instanceId, objectId, position, rotation,
+// scale }] + catálogo top-level `objects`. Antes os objetos brutos iam direto
+// para scene.objects (sem instanceId/objectId) e NUNCA renderizavam — a cidade
+// ficava invisível e o SceneEditorPanel dava warning de keys undefined.
+const catalog = []
+const catalogIds = new Set()
+
+// Regista uma definição no catálogo (sem duplicados) e devolve a instância
+// posicionada. Várias cenas podem instanciar o MESMO objeto do catálogo.
+const toInstance = (obj, posOffset = [0, 0, 0]) => {
+  if (!catalogIds.has(obj.id)) { catalog.push(obj); catalogIds.add(obj.id) }
+  return {
+    instanceId: `inst_${obj.id}`,
+    objectId: obj.id,
+    position: [
+      (obj.position?.[0] || 0) + posOffset[0],
+      (obj.position?.[1] || 0) + posOffset[1],
+      (obj.position?.[2] || 0) + posOffset[2],
+    ],
+    rotation: obj.rotation || [0, 0, 0],
+    scale: obj.scale || [1, 1, 1],
+  }
+}
+
+// Converte um grupo inteiro de objetos em instâncias (registando no catálogo)
+const toInstances = (objs, posOffset) => objs.map((o) => toInstance(o, posOffset))
+
 // ===== Conects Cena 1 (Cidade Inicial) =====
 const conectsScene1 = []
 
@@ -643,11 +671,31 @@ const uiScreens = [{
 }]
 
 // ===== Cenas =====
+// S18 FIX: instâncias com schema correto; playerObjectId aponta para o
+// instanceId do tronco (antes apontava para um id de catálogo e o marcador
+// JOGADOR nunca aparecia no editor).
+const scene1Instances = [
+  ...toInstances(playerParts),        // estátua/manequim do herói no centro da praça
+  ...toInstances(cityObjects),
+  ...toInstances(treeObjects),
+  ...toInstances(lampObjects),
+]
+const player1InstanceId = `inst_${playerId}`
+
+// Cena 2 reutiliza o MESMO catálogo (playerParts/temple/trees) com novas
+// instâncias — é exatamente o propósito do catálogo de objetos.
+const scene2Instances = [
+  ...toInstances(playerParts),
+  ...toInstances(templeObjects),
+  ...toInstances(treeObjects.slice(0, 6)),
+]
+const player2InstanceId = `inst_${playerId}`
+
 const scenes = [
   {
     id: uid(),
     name: 'Cidade Inicial',
-    objects: [...playerParts, ...cityObjects, ...treeObjects, ...lampObjects],
+    objects: scene1Instances,
     conects: conectsScene1,
     gameCamera: {
       cameraType: 'perspective',
@@ -658,12 +706,12 @@ const scenes = [
       far: 500,
     },
     physics: { gravity: [0, -9.82, 0] },
-    playerObjectId: playerId,
+    playerObjectId: player1InstanceId,
   },
   {
     id: uid(),
     name: 'Floresta Sombria',
-    objects: [...playerParts.map(p => ({ ...p, id: uid() })), ...templeObjects, ...treeObjects.slice(0, 6)],
+    objects: scene2Instances,
     conects: conectsScene2,
     gameCamera: {
       cameraType: 'perspective',
@@ -674,7 +722,7 @@ const scenes = [
       far: 500,
     },
     physics: { gravity: [0, -9.82, 0] },
-    playerObjectId: playerId,
+    playerObjectId: player2InstanceId,
   },
 ]
 
@@ -683,7 +731,7 @@ const project = {
   version: 4,
   projectName: 'FlirQuest Showcase — RPG/FPS Demo',
   appMode: 'scene',
-  objects: [], // objetos estão dentro de cada scene
+  objects: catalog, // definições — as cenas referem-nas via objectId (S18 FIX)
   scenes,
   activeSceneId: scenes[0].id,
   background: { type: 'gradient', gradientTop: '#4a90e2', gradientBottom: '#b8d4f0', color: '#0d1117' },

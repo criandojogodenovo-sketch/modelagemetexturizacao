@@ -217,9 +217,12 @@ export default function SceneEditorPanel({ onClose }) {
                   {activeScene.objects.map((instance) => {
                     const obj = objects.find((o) => o.id === instance.objectId)
                     const isPlayer = instance.instanceId === activeScene.playerObjectId
+                    // S18: chave robusta — projetos legados podem ter objetos
+                    // brutos (sem instanceId) no scene.objects
+                    const itemKey = instance.instanceId || instance.id || JSON.stringify(instance.position || '')
                     return (
                       <div
-                        key={instance.instanceId}
+                        key={itemKey}
                         className="outliner-item"
                       >
                         <span
@@ -228,9 +231,9 @@ export default function SceneEditorPanel({ onClose }) {
                         />
                         <span
                           style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                          title={obj?.name || '—'}
+                          title={obj?.name || instance.name || '—'}
                         >
-                          {obj?.name || '—'}
+                          {obj?.name || instance.name || '—'}
                           {isPlayer && <span className="tag accent" style={{ marginLeft: 4 }}>JOGADOR</span>}
                         </span>
                         <div className="actions">

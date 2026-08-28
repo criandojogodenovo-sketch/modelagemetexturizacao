@@ -1822,19 +1822,22 @@ export const useStore = create(
 
       // ---------- Projeto: guardar/carregar ----------
       exportProjectJSON: () => {
-        const { objects, background, grid, lights, scenes, activeSceneId, appMode, uiScreens, activeUIScreenId, renderSettings, projectName } = get()
+        const { objects, background, grid, lights, scenes, activeSceneId, appMode, uiScreens, activeUIScreenId, renderSettings, projectName, projectSettings } = get()
         return JSON.stringify(
           {
-            version: 3,
+            version: 4,
             createdAt: new Date().toISOString(),
-            projectName, // S17 fix (P2-20): round-trip .flirengine perdia o nome
-            renderSettings, // S17 fix (P2-20): e os settings de render (qualidade, sombras, GI…)
             scene: { objects, background, grid, lights },
             scenes,
             activeSceneId,
             appMode,
             uiScreens,
             activeUIScreenId,
+            // S17 fix (P2-20): round-trip .flirengine perdia o nome e os settings
+            // S18: + projectSettings (autor, versão, descrição, ícone)
+            projectName,
+            renderSettings,
+            projectSettings,
           },
           null,
           2
@@ -1845,9 +1848,56 @@ export const useStore = create(
         try {
           const data = JSON.parse(jsonString)
           const scene = data.scene || data
+
+          // S18 FIX: normalizar projetos legados onde scene.objects continha
+          // objetos BRUTOS do catálogo (com type/args mas sem instanceId/objectId
+          // — ex.: demos Showcase antigos). Essas entradas nunca renderizavam
+          // (o renderer faz lookup por objectId) e provocavam keys undefined no
+          // SceneEditorPanel. Migração: mover a definição para o catálogo global
+          // e substituir por uma instância com schema correto.
+          const rawObjects = Array.isArray(scene.objects) ? scene.objects : []
+          const legacyScenes = Array.isArray(data.scenes) ? data.scenes : []
+          const migratedObjects = []
+          const migratedScenes = legacyScenes.map((sc) => {
+            if (!sc || !Array.isArray(sc.objects)) return sc
+            let changed = false
+            const newObjs = sc.objects.map((entry) => {
+              const isRaw = entry && !entry.objectId && entry.type // bruto: tem type, não tem objectId
+              if (!isRaw) return entry
+              changed = true
+              const defId = entry.id || `obj_${Math.random().toString(36).slice(2, 10)}`
+              // Instância fica com a colocação do objeto bruto
+              const instance = {
+                instanceId: `inst_${defId}`,
+                objectId: defId,
+                position: entry.position || [0, 0.5, 0],
+                rotation: entry.rotation || [0, 0, 0],
+                scale: entry.scale || [1, 1, 1],
+              }
+              // Definição vai para o catálogo (posição default neutra)
+              const { position, ...def } = entry
+              migratedObjects.push({ ...def, id: defId })
+              return instance
+            })
+            return changed ? { ...sc, objects: newObjs } : sc
+          })
+          const hasMigration = migratedObjects.length > 0
+          if (hasMigration) {
+            // playerObjectId pode apontar para um id de catálogo bruto → mapear
+            // para o instanceId correspondente
+            for (const sc of migratedScenes) {
+              if (sc?.playerObjectId && !sc.objects?.some((o) => o.instanceId === sc.playerObjectId)) {
+                const match = sc.objects?.find((o) => o.objectId === sc.playerObjectId)
+                if (match) sc.playerObjectId = match.instanceId
+              }
+            }
+          }
+
           get()._pushHistory()
           set({
-            objects: scene.objects || [],
+            objects: hasMigration
+              ? [...(rawObjects || []), ...migratedObjects]
+              : rawObjects || [],
             selectedId: null,
             // Preservar defaults de Modelagem quando o projecto é de Cena
             // (evita que bg/grid/lights dos demos contaminem o editor de Modelos)
@@ -1860,7 +1910,7 @@ export const useStore = create(
             lights: data.appMode === 'modeling'
               ? { ...initialScene.lights, ...(scene.lights || {}) }
               : initialScene.lights,
-            scenes: data.scenes || [],
+            scenes: hasMigration ? migratedScenes : (data.scenes || []),
             activeSceneId: data.activeSceneId || (data.scenes && data.scenes[0]?.id) || null,
             appMode: data.appMode || (data.scenes && data.scenes.length > 0 ? 'scene' : 'modeling'),
             // P1: limpar state que não é exportado mas deve ser resetado

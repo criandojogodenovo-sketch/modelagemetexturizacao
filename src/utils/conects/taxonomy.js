@@ -182,6 +182,7 @@ export const CONECT_TAXONOMY = [
       detectionRadius: 8,
       loseSightRadius: 12,
       patrolPath: null, // instanceId de PathObject
+      patrolPoints: null, // S18: waypoints inline [[x,y,z],...] — alternativa ao PathObject
       patrolIndex: 0,
       health: 100,
       fixedRotation: true,
@@ -193,6 +194,8 @@ export const CONECT_TAXONOMY = [
       prop('detectionRadius', 'Raio de deteção', 'number', 8, { min: 1, max: 50, step: 1 }),
       prop('loseSightRadius', 'Raio de perda de vista', 'number', 12, { min: 2, max: 60, step: 1 }),
       prop('patrolPath', 'Path de patrulha', 'objectRef', null),
+      // S18: waypoints inline — o IA lê patrolPath (PathObject) OU patrolPoints
+      prop('patrolPoints', 'Waypoints de patrulha (inline)', 'json', null, { placeholder: '[[0,0.5,0],[5,0.5,5]]' }),
       prop('health', 'Vida', 'number', 100, { min: 0, max: 1000, step: 10 }),
       prop('fixedRotation', 'Fixar rotação', 'boolean', true),
       prop('sourceObjectId', 'Modelo do catálogo (com esqueleto)', 'objectRef', null),

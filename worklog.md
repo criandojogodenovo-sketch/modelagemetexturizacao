@@ -1,4 +1,36 @@
 ---
+Task ID: S18
+Agent: main (GLM)
+Task: Sessão 18 — 2 novos bugs graves descobertos e corrigidos (cidade Showcase invisível, NPCs congelados) + validação browser do estado pós-S17
+
+Work Log:
+- Verificado estado: working tree tinha os fixes P1-14/15/16 + P2-23/24 (já pushed no remote como 7d17408 S17-FIXES-2 — o "erro de sintaxe" `const obilePanel,` era artefacto do terminal a comer "[m" como ANSI, ficheiro sempre correto)
+- Rebase sobre 7d17408: conflitos em useAutosave (mantida versão remote), useStore (merge: migration S18 + projectSettings no export), worklog (registos fundidos)
+- Arrancado dev server (daemon detached) e validada baseline no browser (agent-browser)
+- DIAGNÓSTICO 1 — Warning React "unique key prop" (SceneEditorPanel) em TODOS os loads:
+  - Causa raiz: flirQuestShowcase.js colocava objetos BRUTOS do catálogo direto em scene.objects (com id/type/args mas SEM instanceId/objectId)
+  - Consequências: (a) keys undefined no outliner; (b) lookup objectsById.get(undefined) → return null → CIDADE INTEIRA INVISÍVEL (casas, árvores, postes nunca renderizaram em nenhuma sessão); (c) nomes "—" no SceneEditorPanel; (d) playerObjectId apontava para id de catálogo (marcador JOGADOR nunca aparecia)
+  - Validado com VLM: "Cidade Inicial" era um campo vazio com 3 NPCs (s18-02 vs s18-03)
+- FIX 1 — flirQuestShowcase.js: helpers toInstance()/toInstances() com catálogo deduplicado; cenas recebem instâncias {instanceId, objectId, position, rotation, scale}; playerObjectId → instanceId do tronco; cena 2 reutiliza o MESMO catálogo (propósito real do catálogo)
+- FIX 2 — loadProjectJSON: migração automática de projetos legados (raw → catálogo + instância; playerObjectId remapeado). Aplica-se a .flirengine antigos e projects em cache
+- FIX 3 — SceneEditorPanel: chave robusta (instanceId || id || position) + nome fallback instance.name
+- DIAGNÓSTICO 2 — NPCs parados no Showcase (3/3 congelados, validado no browser):
+  - Causa raiz: npcAI.js patrol só lia waypoints de PathObject via npc.patrolPath; os NPCs do demo definem patrolPoints INLINE → getPathPoints(undefined) → return imediato
+  - FIX 4 — npcAI.js: pathPoints = getPathPoints(patrolPath) || npc.patrolPoints (fallback inline)
+  - FIX 5 — taxonomy.js: patrolPoints como prop editável (tipo 'json'); ConectPropertiesPanel: novo case 'json' com textarea + validação (só escreve JSON válido; borda vermelha em erro)
+- FIX 6 — useAutosave.js (P2-19): o remote (commit 7d17408, S17-FIXES-2) já trazia o guard completo (markDirty skip + snapshot silencioso + interval + useIndexedDBSync); rebase manteve a versão remote (mais refinada — atualiza o snapshot silenciosamente para que sair do Play também não marque dirty)
+- FIX 7 — exportProjectJSON (P2-20): remote já exportava renderSettings/projectName; S18 acrescenta projectSettings (autor, versão, descrição, ícone) — version 4
+- Fixes da sessão anterior validados no browser: atalhos layers 1-5 (toast "Layer Mundo visível", meshes 15→0→15 sem crash — P0-07 fix confirmado), painel CAMADAS com z-order (▲▼⤒⤓ + 👁 toggle: elemento some/volta no canvas), Snap ON/OFF, 4 handles de resize nos cantos + handle de rotação, drawers mobile do UI Editor 375px (☰/⚙ flutuantes, transform -260→0, sem overlaps — VLM confirmou)
+- Regressão: os 3 demos carregam sem erros (Arena 27 itens nomeados, Saga 54, Showcase 57); Play Mode Showcase: herói move (0,0.05,8)→(8.09,1,-5.26), câmara roda (yaw 0→-0.6), terreno horizontal, 3/3 NPCs patrulham
+- Screenshots: s18-01..13 (home, showcase antes/depois, playmode, NPCs a mover, layers, UI editor desktop+mobile, arena, saga)
+- Build de produção verificado (vite build exit 0)
+
+Stage Summary:
+- 2 bugs novos graves descobertos e corrigidos: cidade do Showcase invisível desde sempre (schema errado das instâncias — warning "unique key" documentado como known issue no remote era EXATAMENTE este bug) e NPCs congelados (patrol só via PathObject)
+- Migração automática de projetos legados no load (retro-compatibilidade com .flirengine antigos)
+- Warning "unique key prop" do SceneEditorPanel RESOLVIDO (era o bug do schema, não "estado duplicado num fluxo específico" como especulado no remote)
+- Todos os 3 demos verificados sem erros de consola e sem warnings React
+---
 Task ID: S17-AUDIT
 Agent: main (GLM)
 Task: Análise exaustiva da Flir Engine — Sessão 17 (bugs, código morto, divergências editor/runtime, performance, segurança)
