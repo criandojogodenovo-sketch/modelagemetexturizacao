@@ -16,6 +16,25 @@ import { saveProject, loadProject, listProjects, isIndexedDBAvailable } from '..
 const PROJECT_ID = 'default'
 const AUTOSAVE_INTERVAL = 30_000 // 30 segundos
 
+// S17 (P2-19/P2-20): construir o snapshot do projeto para IndexedDB.
+// Inclui renderSettings/projectName (round-trip completo, igual ao
+// exportProjectJSON) e NADA é guardado durante o Play Mode — o estado em
+// jogo (spawns, portais, prefabs expandidos) não é estado de edição.
+function buildProjectSnapshot(state) {
+  return {
+    name: 'Projeto atual',
+    objects: state.objects,
+    background: state.background,
+    grid: state.grid,
+    lights: state.lights,
+    scenes: state.scenes,
+    activeSceneId: state.activeSceneId,
+    appMode: state.appMode,
+    projectName: state.projectName,
+    renderSettings: state.renderSettings,
+  }
+}
+
 export function useIndexedDBSync() {
   const initialized = useRef(false)
 
@@ -49,18 +68,10 @@ export function useIndexedDBSync() {
       const state = useStore.getState()
       // Só guarda se houver conteúdo
       if (state.objects.length === 0 && state.scenes.length === 0) return
-      const data = {
-        name: 'Projeto atual',
-        objects: state.objects,
-        background: state.background,
-        grid: state.grid,
-        lights: state.lights,
-        scenes: state.scenes,
-        activeSceneId: state.activeSceneId,
-        appMode: state.appMode,
-      }
+      // S17 fix (P2-19): nunca guardar durante o Play Mode
+      if (state.scenePreviewOpen) return
       try {
-        await saveProject(PROJECT_ID, data)
+        await saveProject(PROJECT_ID, buildProjectSnapshot(state))
       } catch (err) {
         console.warn('[IndexedDB] Falha no auto-save:', err)
       }
@@ -74,18 +85,11 @@ export function useIndexedDBSync() {
     const handler = async () => {
       const state = useStore.getState()
       if (state.objects.length === 0 && state.scenes.length === 0) return
-      const data = {
-        name: 'Projeto atual',
-        objects: state.objects,
-        background: state.background,
-        grid: state.grid,
-        lights: state.lights,
-        scenes: state.scenes,
-        activeSceneId: state.activeSceneId,
-        appMode: state.appMode,
-      }
+      // S17 fix (P2-19): se a página fechar durante o Play, o estado em jogo
+      // (spawns/portais) não deve sobrescrever o projeto guardado
+      if (state.scenePreviewOpen) return
       try {
-        await saveProject(PROJECT_ID, data)
+        await saveProject(PROJECT_ID, buildProjectSnapshot(state))
       } catch {}
     }
     window.addEventListener('beforeunload', handler)
@@ -101,17 +105,7 @@ export function useIndexedDBSync() {
 export async function saveCurrentProjectToIndexedDB() {
   if (!isIndexedDBAvailable()) return false
   const state = useStore.getState()
-  const data = {
-    name: 'Projeto atual',
-    objects: state.objects,
-    background: state.background,
-    grid: state.grid,
-    lights: state.lights,
-    scenes: state.scenes,
-    activeSceneId: state.activeSceneId,
-    appMode: state.appMode,
-  }
-  await saveProject(PROJECT_ID, data)
+  await saveProject(PROJECT_ID, buildProjectSnapshot(state))
   return true
 }
 

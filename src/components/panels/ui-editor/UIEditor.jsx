@@ -46,6 +46,7 @@ export default function UIEditor() {
   const removeUIElement = useStore((s) => s.removeUIElement)
   const updateUIElement = useStore((s) => s.updateUIElement)
   const selectUIElement = useStore((s) => s.selectUIElement)
+  const moveUIElement = useStore((s) => s.moveUIElement) // S17 (P1-16): z-order
   const selectedUIElementId = useStore((s) => s.selectedUIElementId)
   // Fase 5: mostrar JoystickObjects da cena ativa como preview
   const scenes = useStore((s) => s.scenes)
@@ -55,13 +56,33 @@ export default function UIEditor() {
 
   const [resolution, setResolution] = useState('medium')
   const [editingScreenName, setEditingScreenName] = useState(null)
+  // S17 (P1-15): painéis em drawers no mobile — estado de abertura
+  const [mobilePanel, setMobilePanel] = useState(null) // 'left' | 'right' | null
+  // S17 (P1-16): snapping à grelha (posição em % e tamanho em px)
+  const [uiSnap, setUiSnap] = useState(true)
 
   const res = RESOLUTIONS.find((r) => r.id === resolution)
 
   return (
     <div className="ui-editor-full">
+      {/* S17 (P1-15): toggles de drawers — visíveis só em ecrãs pequenos (CSS) */}
+      <button
+        className="ui-editor-drawer-toggle ui-editor-drawer-toggle-left"
+        title="Telas e elementos"
+        onClick={() => setMobilePanel(mobilePanel === 'left' ? null : 'left')}
+      >
+        ☰
+      </button>
+      <button
+        className="ui-editor-drawer-toggle ui-editor-drawer-toggle-right"
+        title="Propriedades"
+        onClick={() => setMobilePanel(mobilePanel === 'right' ? null : 'right')}
+      >
+        ⚙
+      </button>
+
       {/* ===== Painel esquerdo: telas + outliner ===== */}
-      <aside className="panel left ui-editor-left">
+      <aside className={`panel left ui-editor-left ${mobilePanel === 'left' ? 'open' : ''}`}>
         <div className="panel-header">
           <span>UI Editor</span>
         </div>
@@ -237,6 +258,15 @@ export default function UIEditor() {
               <option key={r.id} value={r.id}>{r.label} ({r.w}×{r.h})</option>
             ))}
           </select>
+          {/* S17 (P1-16): toggle de snapping à grelha */}
+          <button
+            className={uiSnap ? 'primary' : ''}
+            style={{ fontSize: 11, padding: '3px 8px' }}
+            title="Snapping à grelha (posição 1%, tamanho 10px)"
+            onClick={() => setUiSnap(!uiSnap)}
+          >
+            ⌗ Snap {uiSnap ? 'ON' : 'OFF'}
+          </button>
           {activeScreen && <span className="small muted">Tela: {activeScreen.name}</span>}
         </div>
 
@@ -257,6 +287,7 @@ export default function UIEditor() {
                   isSelected={el.id === selectedUIElementId}
                   onSelect={() => selectUIElement(el.id)}
                   onUpdate={(patch) => updateUIElement(el.id, patch)}
+                  snap={uiSnap}
                 />
               ))}
               {/* Fase 5: Preview de JoystickObjects da cena ativa */}
@@ -277,11 +308,47 @@ export default function UIEditor() {
       </div>
 
       {/* ===== Painel direito: propriedades ===== */}
-      <aside className="panel right ui-editor-right">
+      <aside className={`panel right ui-editor-right ${mobilePanel === 'right' ? 'open' : ''}`}>
         <div className="panel-header">
           <span>Propriedades</span>
         </div>
         <div className="panel-body">
+          {/* S17 (P1-16): painel de camadas UI (z-order) — topo primeiro */}
+          {activeScreen && activeScreen.elements.length > 0 && (
+            <div className="panel-section">
+              <h4>Camadas ({activeScreen.elements.length})</h4>
+              <div className="outliner" style={{ maxHeight: 180, overflowY: 'auto' }}>
+                {[...activeScreen.elements].reverse().map((el) => (
+                  <div
+                    key={el.id}
+                    className={`outliner-item ${el.id === selectedUIElementId ? 'selected' : ''}`}
+                    onClick={() => selectUIElement(el.id)}
+                  >
+                    <button
+                      className="icon"
+                      style={{ padding: '1px 3px', fontSize: 10, opacity: el.visible === false ? 0.4 : 1 }}
+                      title={el.visible === false ? 'Mostrar' : 'Ocultar'}
+                      onClick={(e) => { e.stopPropagation(); updateUIElement(el.id, { visible: el.visible === false ? true : false }) }}
+                    >
+                      {el.visible === false ? '🚫' : '👁'}
+                    </button>
+                    <span style={{ flex: 1, fontSize: 11, opacity: el.visible === false ? 0.45 : 1 }}>
+                      {el.name || el.type}
+                    </span>
+                    <button className="icon" style={{ padding: '1px 3px', fontSize: 10 }} title="Subir (para o topo)"
+                      onClick={(e) => { e.stopPropagation(); moveUIElement(el.id, 'up') }}>▲</button>
+                    <button className="icon" style={{ padding: '1px 3px', fontSize: 10 }} title="Descer (para o fundo)"
+                      onClick={(e) => { e.stopPropagation(); moveUIElement(el.id, 'down') }}>▼</button>
+                    <button className="icon" style={{ padding: '1px 3px', fontSize: 10 }} title="Topo"
+                      onClick={(e) => { e.stopPropagation(); moveUIElement(el.id, 'front') }}>⤒</button>
+                    <button className="icon" style={{ padding: '1px 3px', fontSize: 10 }} title="Fundo"
+                      onClick={(e) => { e.stopPropagation(); moveUIElement(el.id, 'back') }}>⤓</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {selectedElement ? (
             <UIElementProperties element={selectedElement} onUpdate={(patch) => updateUIElement(selectedElement.id, patch)} />
           ) : (
@@ -297,10 +364,14 @@ export default function UIEditor() {
 
 // ===== Fase 9 — DraggableUIElement: drag + resize + rotação no canvas =====
 // Wrapper que envolve o UIElementRenderer no modo editor.
-// Permite arrastar, redimensionar e rotacionar elementos no canvas.
-function DraggableUIElement({ element, isSelected, onSelect, onUpdate }) {
+// Permite arrastar, redimensionar (4 cantos) e rotacionar elementos no canvas.
+// S17 (P1-16): snapping à grelha — posição arredondada a 1%, tamanho a 10px.
+function DraggableUIElement({ element, isSelected, onSelect, onUpdate, snap }) {
   const dragRef = useRef(null)
   const dragState = useRef({ mode: null, startX: 0, startY: 0, startPos: [0,0], startSize: [0,0], startRot: 0 })
+
+  const snapPos = useCallback((v) => (snap ? Math.round(v) : Math.round(v * 10) / 10), [snap])
+  const snapSize = useCallback((v) => (snap ? Math.round(v / 10) * 10 : Math.round(v)), [snap])
 
   const handlePointerDown = useCallback((e, mode) => {
     e.stopPropagation()
@@ -324,19 +395,33 @@ function DraggableUIElement({ element, isSelected, onSelect, onUpdate }) {
       const ch = canvas.offsetHeight
 
       if (dragState.current.mode === 'drag') {
-        // Mover — converte pixels para percentagem
-        const newPosX = dragState.current.startPos[0] + (dx / cw) * 100
-        const newPosY = dragState.current.startPos[1] + (dy / ch) * 100
-        onUpdate({ position: [Math.round(newPosX * 10) / 10, Math.round(newPosY * 10) / 10] })
-      } else if (dragState.current.mode === 'resize') {
-        // Redimensionar — pixels absolutos
-        const newW = Math.max(30, dragState.current.startSize[0] + dx)
-        const newH = Math.max(20, dragState.current.startSize[1] + dy)
-        onUpdate({ size: [Math.round(newW), Math.round(newH)] })
+        // Mover — converte pixels para percentagem (com snap de 1%)
+        const newPosX = snapPos(dragState.current.startPos[0] + (dx / cw) * 100)
+        const newPosY = snapPos(dragState.current.startPos[1] + (dy / ch) * 100)
+        onUpdate({ position: [newPosX, newPosY] })
+      } else if (dragState.current.mode.startsWith('resize-')) {
+        // Redimensionar — 4 cantos; apenas o canto arrastado se move
+        const corner = dragState.current.mode.slice(7) // 'nw' | 'ne' | 'sw' | 'se'
+        const sX = corner.includes('e') ? 1 : -1  // cantos 'e' crescem com dx
+        const sY = corner.includes('s') ? 1 : -1  // cantos 's' crescem com dy
+        const newW = Math.max(30, snapSize(dragState.current.startSize[0] + dx * sX))
+        const newH = Math.max(20, snapSize(dragState.current.startSize[1] + dy * sY))
+        // Para cantos N/O, o centro desloca-se metade do delta para manter o canto oposto fixo
+        const growW = newW - dragState.current.startSize[0]
+        const growH = newH - dragState.current.startSize[1]
+        const posShiftX = corner.includes('w') ? -(growW / 2 / cw) * 100 : (growW / 2 / cw) * 100
+        const posShiftY = corner.includes('n') ? -(growH / 2 / ch) * 100 : (growH / 2 / ch) * 100
+        onUpdate({
+          size: [newW, newH],
+          position: [
+            snapPos(dragState.current.startPos[0] + posShiftX),
+            snapPos(dragState.current.startPos[1] + posShiftY),
+          ],
+        })
       } else if (dragState.current.mode === 'rotate') {
-        // Rotacionar — converte dx em graus
-        const newRot = dragState.current.startRot + (dx * 0.5)
-        onUpdate({ rotation: Math.round(newRot) })
+        // Rotacionar — converte dx em graus (snap de 5°)
+        const raw = dragState.current.startRot + (dx * 0.5)
+        onUpdate({ rotation: snap ? Math.round(raw / 5) * 5 : Math.round(raw) })
       }
     }
 
@@ -348,11 +433,22 @@ function DraggableUIElement({ element, isSelected, onSelect, onUpdate }) {
 
     window.addEventListener('pointermove', handleMove)
     window.addEventListener('pointerup', handleUp)
-  }, [element, onSelect, onUpdate])
+  }, [element, onSelect, onUpdate, snapPos, snapSize, snap])
 
   const pos = element.position || [50, 50]
   const size = element.size || [120, 40]
   const rotation = element.rotation || 0
+
+  // S17: elementos ocultos (via painel de camadas) não se renderizam no editor
+  if (element.visible === false) return null
+
+  // S17 (P1-16): 4 handles de resize nos cantos
+  const cornerHandles = [
+    { id: 'nw', style: { top: -6, left: -6, cursor: 'nwse-resize' } },
+    { id: 'ne', style: { top: -6, right: -6, cursor: 'nesw-resize' } },
+    { id: 'sw', style: { bottom: -6, left: -6, cursor: 'nesw-resize' } },
+    { id: 'se', style: { bottom: -6, right: -6, cursor: 'nwse-resize' } },
+  ]
 
   return (
     <div
@@ -365,6 +461,7 @@ function DraggableUIElement({ element, isSelected, onSelect, onUpdate }) {
         height: size[1],
         transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
         cursor: isSelected ? 'move' : 'pointer',
+        zIndex: element.z ?? 1,
       }}
       onPointerDown={(e) => { if (isSelected) handlePointerDown(e, 'drag'); else onSelect() }}
     >
@@ -379,27 +476,29 @@ function DraggableUIElement({ element, isSelected, onSelect, onUpdate }) {
       {/* Handles de edição — só quando selecionado */}
       {isSelected && (
         <>
-          {/* Handle de resize (canto inferior direito) */}
-          <div
-            style={{
-              position: 'absolute',
-              bottom: -6,
-              right: -6,
-              width: 12,
-              height: 12,
-              background: '#2f81f7',
-              border: '2px solid #fff',
-              borderRadius: '50%',
-              cursor: 'nwse-resize',
-              zIndex: 100,
-            }}
-            onPointerDown={(e) => handlePointerDown(e, 'resize')}
-          />
+          {/* Handles de resize — 4 cantos (S17) */}
+          {cornerHandles.map((h) => (
+            <div
+              key={h.id}
+              style={{
+                position: 'absolute',
+                ...h.style,
+                width: 12,
+                height: 12,
+                background: '#2f81f7',
+                border: '2px solid #fff',
+                borderRadius: '25%',
+                cursor: h.style.cursor,
+                zIndex: 100,
+              }}
+              onPointerDown={(e) => handlePointerDown(e, 'resize-' + h.id)}
+            />
+          ))}
           {/* Handle de rotação (topo centro) */}
           <div
             style={{
               position: 'absolute',
-              top: -20,
+              top: -22,
               left: '50%',
               transform: 'translateX(-50%)',
               width: 12,

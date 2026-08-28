@@ -958,8 +958,10 @@ label {
     grid-template-rows: auto 1fr auto !important;
   }
 
+  /* S17: os painéis do UI editor são drawers full-height (o max-height de 200px
+     antigo cortava-os a meio em ecrãs pequenos) */
   .ui-editor-left, .ui-editor-right {
-    max-height: 200px;
+    max-height: none;
     overflow-y: auto;
   }
 
@@ -4412,16 +4414,39 @@ label {
   outline-offset: 2px;
 }
 
+/* S17 (P1-15): botões de toggle dos drawers do UI Editor (só mobile ≤1024px) */
+.ui-editor-drawer-toggle {
+  display: none;
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 30;
+  width: 34px;
+  height: 44px;
+  border: 1px solid var(--border, #30363d);
+  border-radius: 8px;
+  background: var(--panel-bg, #161b22);
+  color: var(--text, #e6edf3);
+  font-size: 15px;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+}
+.ui-editor-drawer-toggle-left { left: 4px; }
+.ui-editor-drawer-toggle-right { right: 4px; }
+
 @media (max-width: 1024px) {
+  .ui-editor-drawer-toggle { display: flex; align-items: center; justify-content: center; }
   .ui-editor-full {
     grid-template-columns: 1fr;
   }
-  /* Fase 5: UI editor panels as drawers on mobile */
+  /* Fase 5 + S17: UI editor panels as drawers on mobile — agora com toggles */
   .ui-editor-left,
   .ui-editor-right {
     position: absolute;
     top: 0;
     bottom: 0;
+    height: 100%;
+    max-height: none;
     width: 280px;
     max-width: 85vw;
     z-index: 25;
@@ -4442,6 +4467,13 @@ label {
   }
   .ui-editor-right.open {
     transform: translateX(0);
+  }
+  /* S17: canvas central usa toda a largura em mobile */
+  .ui-editor-center {
+    min-width: 0;
+  }
+  .ui-canvas {
+    max-width: 94vw;
   }
 }
 

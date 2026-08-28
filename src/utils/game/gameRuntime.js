@@ -1069,6 +1069,7 @@ function startGame() {
     ;(data.uiScreens || []).forEach(function (screen) {
       if (screen.visible === false) return
       screen.elements.forEach(function (el) {
+        if (el.visible === false) return // S17: elemento oculto via painel de camadas
         var dom = document.createElement(el.type === 'Button' ? 'button' : el.type === 'Input' ? 'input' : 'div')
         dom.className = 'ui-el'
         // CORRECAO BUG8: sanitizar valores de CSS para evitar CSS injection

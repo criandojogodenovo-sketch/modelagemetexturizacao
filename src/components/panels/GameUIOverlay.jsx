@@ -121,7 +121,8 @@ export default function GameUIOverlay() {
         // S17 fix (P2-23): Fragment com key no map exterior — antes o array aninhado
         // produzia o warning React "Each child in a list should have a unique key"
         <Fragment key={screen.id}>
-        {screen.elements.map((element) => {
+        {/* S17: elementos ocultos (painel de camadas do UI Editor) não renderizam */}
+        {screen.elements.filter((el) => el.visible !== false).map((element) => {
           const pos = element.position || [50, 50]
           const size = element.size || [120, 40]
           const baseStyle = {

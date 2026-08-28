@@ -25,6 +25,7 @@ import LODManager from './LODManager'
 import RaycastManager from './RaycastManager'
 import StreamingManagerComponent from './StreamingManagerComponent'
 import WebGLContextLossHandler from './WebGLContextLossHandler'
+import AutoInstancing from './AutoInstancing' // S17 (P1-17): InstancedMesh automático em Play Mode
 import { useStore } from '../../store/useStore'
 import { DEFAULT_CAMERA_FAR } from '../../utils/navigationUtils'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
@@ -823,11 +824,13 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
                     ? JSON.parse(prefabObj.prefabData)
                     : prefabObj.prefabData
                   for (const child of prefabData) {
+                    // S17 fix (P1-14): passar props completas do filho (não só type/pos)
+                    const { instanceId: _omitId2, ...childProps2 } = child
                     useStore.getState().addConectToScene(child.type, [
                       x + (child.position?.[0] || 0),
                       child.position?.[1] || 0,
                       z + (child.position?.[2] || 0),
-                    ])
+                    ], childProps2)
                   }
                 } catch (e) {}
               }
@@ -1216,17 +1219,17 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
             : conect.prefabData
           for (const childConect of prefabData) {
             // Instanciar cada conect do prefab na posição relativa ao PrefabObject
-            const newConect = {
-              ...childConect,
-              instanceId: `prefab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-              position: [
-                (conect.position?.[0] || 0) + (childConect.position?.[0] || 0),
-                (conect.position?.[1] || 0) + (childConect.position?.[1] || 0),
-                (conect.position?.[2] || 0) + (childConect.position?.[2] || 0),
-              ],
-            }
+            // S17 fix (P1-14): passar TODAS as props do filho como overrides —
+            // antes só passava type+position e perdia rotação/escala/cor/scripts.
+            // instanceId é removido para cada instância ser única.
+            const { instanceId: _omitId, ...childProps } = childConect
+            const childPos = [
+              (conect.position?.[0] || 0) + (childConect.position?.[0] || 0),
+              (conect.position?.[1] || 0) + (childConect.position?.[1] || 0),
+              (conect.position?.[2] || 0) + (childConect.position?.[2] || 0),
+            ]
             // Adicionar à cena via store (para que ConectRenderer o renderize)
-            useStore.getState().addConectToScene(newConect.type, newConect.position)
+            useStore.getState().addConectToScene(childConect.type, childPos, childProps)
           }
           debugLog(`Prefab "${conect.name}" expandido (${prefabData.length} objetos)`, 'log', 'Prefab')
         } catch (e) {
@@ -1785,6 +1788,27 @@ export default function SceneLevel3D() {
   const activeScene = scenes.find((s) => s.id === activeSceneId)
   const isGameMode = scenePreviewOpen
 
+  // S17 (P1-17): calcular que StaticObjects serão convertidos em InstancedMesh
+  // pelo AutoInstancing (mesma lógica: ≥5 instâncias do mesmo sourceObjectId).
+  // Em Play Mode estes conects deixam de renderizar individualmente (o
+  // AutoInstancing desenha-os em 1 draw call por grupo) — a física individual
+  // mantém-se, pois o AutoInstancing é apenas visual.
+  const instancedConectIds = useMemo(() => {
+    if (!isGameMode || !activeScene?.conects) return new Set()
+    const counts = new Map()
+    for (const c of activeScene.conects) {
+      if (c.type !== 'StaticObject' || !c.sourceObjectId) continue
+      counts.set(c.sourceObjectId, (counts.get(c.sourceObjectId) || 0) + 1)
+    }
+    const ids = new Set()
+    for (const c of activeScene.conects) {
+      if (c.type === 'StaticObject' && c.sourceObjectId && (counts.get(c.sourceObjectId) || 0) >= 5) {
+        ids.add(c.instanceId)
+      }
+    }
+    return ids
+  }, [isGameMode, activeScene])
+
   useEffect(() => {
     if (selectedInstanceId && meshRefs.current.has(selectedInstanceId)) {
       setSelectedMesh(meshRefs.current.get(selectedInstanceId))
@@ -1973,9 +1997,20 @@ export default function SceneLevel3D() {
           })}
 
           {/* Conects */}
-          {(activeScene.conects || []).map((conect) => (
-            <ConectSelectorWrapper key={conect.instanceId} conect={conect} objects={objects} isSelected={!isGameMode && conect.instanceId === selectedInstanceId} onSelect={() => selectConectInstance(conect.instanceId)} setMeshRef={(node) => setConectMeshRef(conect.instanceId, node)} isGameMode={isGameMode} />
-          ))}
+          {/* S17 (P1-17): em Play Mode, StaticObjects instanciados (≥5 do mesmo
+              catálogo) são desenhados pelo AutoInstancing (1 draw call por grupo).
+              Os meshes individuais ficam INVISÍVEIS (não invisível=false no store —
+              clone local) para manter os meshRefs que a física e o Pathfinder usam. */}
+          {isGameMode && <AutoInstancing activeScene={activeScene} objects={objects} />}
+          {(activeScene.conects || []).map((conect) => {
+            // S17 (P1-17): clone com visible=false — mesh existe (refs + física)
+            // mas não gera draw call; o AutoInstancing desenha-o instanciado
+            const isInstanced = isGameMode && instancedConectIds.has(conect.instanceId)
+            const renderConect = isInstanced ? { ...conect, visible: false } : conect
+            return (
+              <ConectSelectorWrapper key={conect.instanceId} conect={renderConect} objects={objects} isSelected={!isGameMode && conect.instanceId === selectedInstanceId} onSelect={() => selectConectInstance(conect.instanceId)} setMeshRef={(node) => setConectMeshRef(conect.instanceId, node)} isGameMode={isGameMode} />
+            )
+          })}
 
           {/* GameCamera gizmo — só no editor */}
           {!isGameMode && !(activeScene.conects || []).some((c) => c.type === 'ViewObject') && (

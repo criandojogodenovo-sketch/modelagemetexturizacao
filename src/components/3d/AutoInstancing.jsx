@@ -55,21 +55,26 @@ export default function AutoInstancing({ activeScene, objects }) {
       const obj = objects.find((o) => o.id === sourceObjectId)
       if (!obj) return null
 
-      // Construir geometria (igual ao SceneObject)
+      // Construir geometria (iguais às PRIMITIVES de src/utils/primitives.js)
+      // S17 fix (P1-17): tipos corretos — antes verificava 'box' (inexistente;
+      // 'cube' caía no fallback 1×1×1) e plane/torus não eram suportados.
       let geometry
-      if (obj.type === 'box') {
-        const w = obj.args?.width || 1, h = obj.args?.height || 1, d = obj.args?.depth || 1
-        geometry = new THREE.BoxGeometry(w, h, d)
-      } else if (obj.type === 'cylinder') {
-        const rt = obj.args?.radiusTop ?? 0.5, rb = obj.args?.radiusBottom ?? 0.5
-        const h = obj.args?.height || 1, rs = obj.args?.radialSegments || 12
-        geometry = new THREE.CylinderGeometry(rt, rb, h, rs)
+      if (obj.type === 'cube') {
+        const s = obj.args?.size || 1
+        geometry = new THREE.BoxGeometry(s, s, s)
       } else if (obj.type === 'sphere') {
-        const r = obj.args?.radius || 0.5
-        geometry = new THREE.SphereGeometry(r, 12, 8)
+        const r = obj.args?.radius || 0.6, seg = obj.args?.segments || 32
+        geometry = new THREE.SphereGeometry(r, seg, Math.max(8, seg / 2))
+      } else if (obj.type === 'cylinder') {
+        const r = obj.args?.radius ?? 0.5, h = obj.args?.height || 1.2, rs = obj.args?.segments || 32
+        geometry = new THREE.CylinderGeometry(r, r, h, rs)
       } else if (obj.type === 'cone') {
-        const r = obj.args?.radius || 0.5, h = obj.args?.height || 1
-        geometry = new THREE.ConeGeometry(r, h, 8)
+        const r = obj.args?.radius || 0.6, h = obj.args?.height || 1.2
+        geometry = new THREE.ConeGeometry(r, h, obj.args?.segments || 32)
+      } else if (obj.type === 'plane') {
+        geometry = new THREE.PlaneGeometry(obj.args?.width || 1.5, obj.args?.height || 1.5)
+      } else if (obj.type === 'torus') {
+        geometry = new THREE.TorusGeometry(obj.args?.radius || 0.6, obj.args?.tube || 0.2, obj.args?.radialSegments || 16, obj.args?.tubularSegments || 64)
       } else {
         geometry = new THREE.BoxGeometry(1, 1, 1)
       }

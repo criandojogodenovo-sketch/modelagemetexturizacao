@@ -14,11 +14,11 @@ import { useStore } from '../../store/useStore'
 import { IconClose } from '../ui/Icons'
 
 const LAYERS = [
-  { id: 'world', label: 'Mundo', icon: '🌍', color: '#3fb950', desc: 'Terreno, casas, árvores, obstáculos' },
-  { id: 'gameplay', label: 'Gameplay', icon: '🎮', color: '#2f81f7', desc: 'NPCs, items, checkpoints, portais' },
-  { id: 'ui', label: 'UI', icon: '📱', color: '#d29922', desc: 'Botões, texto, painéis, HUD' },
-  { id: 'effects', label: 'Efeitos', icon: '✨', color: '#a855f7', desc: 'Partículas, trails, pós-processamento' },
-  { id: 'audio', label: 'Áudio', icon: '🔊', color: '#f85149', desc: 'Sons, música' },
+  { id: 'world', label: 'Mundo', icon: '🌍', color: '#3fb950', desc: 'Terreno, casas, árvores, obstáculos', hotkey: '1' },
+  { id: 'gameplay', label: 'Gameplay', icon: '🎮', color: '#2f81f7', desc: 'NPCs, items, checkpoints, portais', hotkey: '2' },
+  { id: 'ui', label: 'UI', icon: '📱', color: '#d29922', desc: 'Botões, texto, painéis, HUD', hotkey: '3' },
+  { id: 'effects', label: 'Efeitos', icon: '✨', color: '#a855f7', desc: 'Partículas, trails, pós-processamento', hotkey: '4' },
+  { id: 'audio', label: 'Áudio', icon: '🔊', color: '#f85149', desc: 'Sons, música', hotkey: '5' },
 ]
 
 export default function LayersPanel({ onClose }) {
@@ -98,7 +98,16 @@ export default function LayersPanel({ onClose }) {
 
                 {/* Info da layer */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, color: layer.color }}>{layer.label}</div>
+                  <div style={{ fontWeight: 600, color: layer.color }}>
+                    {layer.label}
+                    {/* S17: atalho de teclado da layer */}
+                    <span
+                      style={{ marginLeft: 6, fontSize: 9, opacity: 0.55, border: '1px solid currentColor', borderRadius: 3, padding: '0 4px' }}
+                      title={`Tecla ${layer.hotkey} alterna visibilidade`}
+                    >
+                      {layer.hotkey}
+                    </span>
+                  </div>
                   <div className="small muted" style={{ fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {layer.desc}
                   </div>

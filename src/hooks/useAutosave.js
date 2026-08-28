@@ -29,10 +29,16 @@ export function useAutosave() {
 
   // Detectar dirty (qualquer alteração no estado relevante)
   useEffect(() => {
+    // S17 fix (P2-19): durante o Play Mode NÃO se marca dirty — spawns/portais/
+    // prefabs expandidos pelo jogo mutam `scenes` e eram sinalizados como
+    // alterações do utilizador, sendo persistidos para IndexedDB em ≤5s
+    // (contaminação do estado do editor). O snapshot atualiza-se silenciosamente
+    // para que, ao SAIR do Play, as mutações do jogo também não marquem dirty.
+    const playing = useStore.getState().scenePreviewOpen
     const snapshot = JSON.stringify({ objects, scenes, activeSceneId, background, lights, grid })
     if (snapshot !== prevSnapshotRef.current) {
-      if (prevSnapshotRef.current !== '') {
-        // Houve mudança real
+      if (prevSnapshotRef.current !== '' && !playing) {
+        // Houve mudança real do utilizador (fora do Play Mode)
         markDirty()
       }
       prevSnapshotRef.current = snapshot
@@ -42,6 +48,9 @@ export function useAutosave() {
   // Autosave timer
   useEffect(() => {
     const interval = setInterval(async () => {
+      // S17 fix (P2-19): nunca guardar durante o Play Mode — o estado em jogo
+      // (spawns, portais, expansão de prefabs) não é estado de edição
+      if (useStore.getState().scenePreviewOpen) return
       const { autosave } = useStore.getState()
       if (!autosave.dirty || autosave.saving) return
 
@@ -56,6 +65,8 @@ export function useAutosave() {
             background: state.background,
             lights: state.lights,
             grid: state.grid,
+            projectName: state.projectName, // S17 (P2-20): round-trip completo
+            renderSettings: state.renderSettings,
             savedAt: Date.now(),
           }
           await saveProject('default', projectData)

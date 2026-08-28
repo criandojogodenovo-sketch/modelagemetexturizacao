@@ -1108,6 +1108,27 @@ export const useStore = create(
 
       selectUIElement: (elementId) => set({ selectedUIElementId: elementId }),
 
+      // S17 (P1-16): mover elemento na ordem de desenho (z-order). direction:
+      // 'front' (topo), 'back' (fundo), 'up' (+1), 'down' (-1)
+      moveUIElement: (elementId, direction) => {
+        get()._pushHistory()
+        set((s) => ({
+          uiScreens: s.uiScreens.map((sc) => {
+            const idx = sc.elements.findIndex((el) => el.id === elementId)
+            if (idx < 0) return sc
+            let arr = [...sc.elements]
+            const [el] = arr.splice(idx, 1)
+            let newIdx
+            if (direction === 'front') newIdx = arr.length
+            else if (direction === 'back') newIdx = 0
+            else if (direction === 'up') newIdx = Math.min(arr.length, idx + 1)
+            else newIdx = Math.max(0, idx - 1)
+            arr.splice(newIdx, 0, el)
+            return { ...sc, elements: arr }
+          }),
+        }))
+      },
+
       // Selecionar osso (para SkeletonGizmo destacar)
       selectBone: (boneId) => set({ selectedBoneId: boneId }),
 
@@ -1386,13 +1407,17 @@ export const useStore = create(
       toggleConectsWindow: () =>
         set((s) => ({ ui: { ...s.ui, conectsWindowOpen: !s.ui.conectsWindowOpen } })),
 
-      addConectToScene: (type, position = [0, 0.5, 0]) => {
+      addConectToScene: (type, position = [0, 0.5, 0], overrides = null) => {
         const { activeSceneId } = get()
         if (!activeSceneId) {
           get().toast('Crie uma cena primeiro', 'error')
           return null
         }
-        const conect = createConectInstance(type, position)
+        // S17 fix (P1-14): overrides opcionais — permitem instanciar conects com
+        // props completas (rotação, escala, cor, scripts…). Necessário para a
+        // expansão de PrefabObjects, que antes perdia TODAS as props dos filhos
+        // (só passava type+posição).
+        const conect = { ...createConectInstance(type, position), ...(overrides || {}) }
         get()._pushHistory()
         set((s) => ({
           scenes: s.scenes.map((sc) =>
@@ -1797,11 +1822,13 @@ export const useStore = create(
 
       // ---------- Projeto: guardar/carregar ----------
       exportProjectJSON: () => {
-        const { objects, background, grid, lights, scenes, activeSceneId, appMode, uiScreens, activeUIScreenId } = get()
+        const { objects, background, grid, lights, scenes, activeSceneId, appMode, uiScreens, activeUIScreenId, renderSettings, projectName } = get()
         return JSON.stringify(
           {
             version: 3,
             createdAt: new Date().toISOString(),
+            projectName, // S17 fix (P2-20): round-trip .flirengine perdia o nome
+            renderSettings, // S17 fix (P2-20): e os settings de render (qualidade, sombras, GI…)
             scene: { objects, background, grid, lights },
             scenes,
             activeSceneId,

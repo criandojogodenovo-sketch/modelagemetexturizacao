@@ -179,6 +179,17 @@ export default function App() {
       if (key === 'g') setTransformMode('translate')
       if (key === 'r') setTransformMode('rotate')
       if (key === 's') setTransformMode('scale')
+      // S17 (P2-24): atalhos 1-5 alternam a visibilidade das layers (estilo Godot)
+      // Só no modo Cena — 1=Mundo, 2=Gameplay, 3=UI, 4=Efeitos, 5=Áudio
+      if (['1', '2', '3', '4', '5'].includes(key) && appMode === 'scene') {
+        const layerKeys = ['world', 'gameplay', 'ui', 'effects', 'audio']
+        const layerName = layerKeys[Number(key) - 1]
+        const st = useStore.getState()
+        st.toggleLayerVisibility(layerName)
+        const layerLabels = { world: 'Mundo', gameplay: 'Gameplay', ui: 'UI', effects: 'Efeitos', audio: 'Áudio' }
+        const nowHidden = !st.hiddenLayers.includes(layerName)
+        st.toast(`Layer ${layerLabels[layerName]} ${nowHidden ? 'oculta' : 'visível'}`, 'info', 1200)
+      }
       if (key === 'delete' || key === 'backspace') {
         if (selectedId) { e.preventDefault(); deleteObject(selectedId) }
       }
@@ -186,7 +197,7 @@ export default function App() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [undo, redo, setTransformMode, deleteObject, duplicateObject, selectedId, deselect, closeDrawers, scenePreviewOpen, closeScenePreview])
+  }, [undo, redo, setTransformMode, deleteObject, duplicateObject, selectedId, deselect, closeDrawers, scenePreviewOpen, closeScenePreview, appMode])
 
   return (
     <div className={`app-shell ${scenePreviewOpen ? 'game-mode' : ''}`}>
