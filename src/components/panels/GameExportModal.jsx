@@ -43,6 +43,11 @@ export default function GameExportModal({ onClose }) {
       // Construir projectData completo
       const projectData = JSON.parse(exportProjectJSON())
       projectData.scene = { objects, background, grid, lights }
+      // S19 FIX (export): o runtime exportado procura as definições do catálogo
+      // em data.objects (top-level, P2-26) — sem isto as instâncias das cenas
+      // (scene.objects = {instanceId, objectId, ...}) nunca encontravam as
+      // definições e a cidade inteira ficava invisível no jogo exportado.
+      projectData.objects = objects
 
       setProgress(30)
       const res = await exportGame(projectData, { name: gameName, ...options })

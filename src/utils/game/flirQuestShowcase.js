@@ -451,11 +451,16 @@ conectsScene1.push({
 beginPlay
   log("Portal para a Floresta Sombria")
 end
-onEnter
+onEnterZone
   log("A entrar na Floresta Sombria...")
   changeScene("Floresta Sombria")
 end`,
 })
+
+// Nota S19: o evento chama-se onEnterZone (ENGINE_DOC §7.4 + eventMap do
+// flircode.js). O script original usava "onEnter", que não está registado em
+// KNOWN_EVENT_NAMES → o bloco era silenciosamente ignorado pelo parser e o
+// portal nunca disparava changeScene (no editor NEM no exportado).
 
 // ===== Conects Cena 2 (Floresta Sombria) =====
 const conectsScene2 = []

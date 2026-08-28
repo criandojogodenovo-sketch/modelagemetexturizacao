@@ -1172,8 +1172,18 @@ function SkyMesh({ conect, setMeshRef }) {
   })
 
   // Aplicar background à cena
+  // S19 fix (P2-25): cleanup correto em TODOS os branches —
+  //  · gradient fazia dispose da CanvasTexture ainda atribuída a scene.background
+  //    (warning WebGL/ecrã preto quando o SkyMesh desmontava)
+  //  · procedural/solid não limpavam scene.background
+  //  · hdri: load async sem cancelamento — se o componente desmontava a meio,
+  //    a textura era aplicada a uma cena "morta" e nunca libertada (leak)
   useEffect(() => {
     if (!scene) return
+    let disposed = false
+    let createdTex = null
+    let appliedEnv = false
+
     if (skyType === 'procedural' && proMaterial) {
       // Procedural usa esfera com shader — manter fallback azul céu caso a SkyMesh falhe
       // (anteriormente era null, o que causava ecrã PRETO se a esfera não renderizasse)
@@ -1190,22 +1200,38 @@ function SkyMesh({ conect, setMeshRef }) {
       ctx.fillRect(0, 0, 2, 256)
       const tex = new THREE.CanvasTexture(canvas)
       tex.colorSpace = THREE.SRGBColorSpace
+      createdTex = tex
       scene.background = tex
-      return () => { tex.dispose() }
     } else if (skyType === 'hdri' && conect.hdriUrl) {
       import('three/examples/jsm/loaders/RGBELoader.js').then(({ RGBELoader }) => {
         const loader = new RGBELoader()
         loader.load(conect.hdriUrl, (texture) => {
+          if (disposed) { texture.dispose(); return } // desmontou a meio do load
           texture.mapping = THREE.EquirectangularReflectionMapping
+          createdTex = texture
+          appliedEnv = true
           scene.background = texture
           scene.environment = texture
         })
       }).catch(() => {
-        scene.background = new THREE.Color(solidColor)
+        if (!disposed) scene.background = new THREE.Color(solidColor)
       })
     } else {
       // solid
       scene.background = new THREE.Color(solidColor)
+    }
+
+    return () => {
+      disposed = true
+      if (createdTex) {
+        // Desatribuir ANTES de dispose; só mexer no que ainda é nosso
+        // (outro SkyMesh pode ter substituído o background entretanto)
+        if (scene.background === createdTex) scene.background = null
+        if (appliedEnv && scene.environment === createdTex) scene.environment = null
+        createdTex.dispose()
+      } else if (scene.background && scene.background.isColor) {
+        scene.background = null
+      }
     }
   }, [scene, skyType, topColor, bottomColor, solidColor, conect.hdriUrl, proMaterial])
 

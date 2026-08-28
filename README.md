@@ -6,6 +6,62 @@ Engine web de modelagem, texturização, animação e edição de cenas 3D — f
 
 ---
 
+## 📦 Sessão 19 — Export Standalone Validado + Pendências P2/P3 Resolvidas
+
+### Export de Jogos (HTML standalone) — FUNCIONAL E VALIDADO
+
+O `GameExportModal` (Menu → Exportar Jogo) gera um HTML autónomo com o runtime completo embutido. O FlirQuest Showcase exportado passa **7/7 testes automatizados** (Playwright, `scripts/test-exported-game.mjs`):
+
+1. ✅ Load sem erros (splash esconde, HUD renderiza, zero erros de página/consola)
+2. ✅ NPCs patrulham (3/3 no cenário da cidade, via `patrolPoints` inline)
+3. ✅ Herói anda com W (movimento camera-relative; pés assentes no chão)
+4. ✅ Botão ↑ (PULAR) salta fisicamente (y 0 → 2.08)
+5. ✅ **Portal (TriggerObject) muda de cena por proximidade** — `onEnterZone` → `changeScene("Floresta Sombria")` → spawn na cena 2 com inimigos/boss/itens
+6. ✅ NPCs da cena 2 perseguem o jogador (chase AI + colisão física — empurram o player)
+7. ✅ Câmara roda com drag do rato
+
+Bonus: exports do Arena e Saga também validados (`s19-smoke-*`) com os **botões móveis TIRO/RELOAD/PULAR funcionais** (PULAR salta, TIRO dispara, RELOAD restaura munição — teste `scripts/test-arena-buttons.mjs`).
+
+### Bugs do export corrigidos (gameRuntime.js + GameExportModal.jsx + flirQuestShowcase.js)
+
+- **Catálogo vazio no export**: o modal não copiava o catálogo de objetos para `projectData.objects` (topo) — a cidade inteira (38 casas/árvores/postes) ficava INVISÍVEL no jogo exportado. Agora `projectData.objects = objects`.
+- **TriggerObject inexistente no runtime**: o portal não tinha mesh nem deteção — `onEnterZone` nunca disparava. Adicionados mesh semi-transparente + deteção AABB com `previousContacts` (réplica do physicsSystem do editor).
+- **`set.apply(thisArg, ...)` errado (10 ocorrências)**: `mesh.position.set.apply(mesh, ...)` passava o MESH como thisArg em vez de `mesh.position` — o `Euler.set` rebentava (`_onChangeCallback is not a function`) e TODAS as posições eram silenciosamente ignoradas.
+- **Personagens lançados ao ar no spawn**: colisor a atravessar o chão → impulso gigante do cannon-es (player chegava a y=8 e levava ~8s a aterrar). Clamp de spawn `y ≥ halfHeight + 0.02`.
+- **`fixedRotation` sem efeito**: definido após a construção sem `updateMassProperties()` — os boxes RODAVAM (NPCs deitados/afundados até y=0.35).
+- **Fricção "cola" personagens**: o solver de fricção do cannon-es zeroes a velocity horizontal de boxes upright com movimento por código (WASD/IA mortos). Corrigido com material dedicado `friction=0` para personagens (padrão da indústria para character controllers) — validado a 3, 30 e 60 fps.
+- **Câmara lenta em dispositivos lentos**: `world.step(dt, delta, 3)` limitava a simulação a 0.05s/frame — a ~4fps o jogo avançava a 20% do tempo real. maxSubSteps 3 → 10.
+- **Botões móveis sem efeito**: PULAR/TIRO/RELOAD disparavam eventos que nenhum script tratava → nada acontecia. Agora com fallback nativo (salto físico / `gc.shoot()` / `gc.reload()`) quando nenhum script trata o evento.
+- **Waypoints do PathObject**: eram tratados como coordenadas absolutas mas o PathMesh renderiza-as como filhos de um group posicionado → offset quando o path não está na origem (também corrigido no editor).
+- **Script do portal**: usava `onEnter` (evento inexistente) em vez de `onEnterZone` — o parser ignorava o bloco silenciosamente.
+- **NPC patrolPoints inline no export**: port do fix S18 do editor (o runtime exportado só lia PathObject).
+
+### Pendências resolvidas
+
+**P2-21** — `updateConect` só patchava a cena ATIVA; conects de outras cenas eram ignorados (quebrava `setUIValue` em portais). Agora procura em todas as cenas.
+
+**P2-25** — SkyMesh: o branch gradient fazia `dispose()` da CanvasTexture ainda atribuída a `scene.background`; procedural/solid sem cleanup; hdri com race async (textura aplicada a cena "morta" = leak). Cleanup correto em todos os branches.
+
+**P3-30** — `lockedLayers` existia no store + painel mas nunca era enforced. Agora `updateConect`/`removeConectFromScene` bloqueiam edição de layers bloqueadas (`isConectLayerLocked` central, com toast e bypass em Play Mode). Validado no browser: rename bloqueado com toast, desbloqueio restaura edição.
+
+**P3-31** — patrol waypoints relativos ao PathObject (soma `path.position`) — editor + export.
+
+**P3-32** — vários JoystickObjects escreviam no mesmo `window._flirJoystick`; agora só o joystick ativo (último tocado) escreve; `onEnd` de outros é ignorado.
+
+**P3-33** — CSS morto removido (`.ui-editor`, `.ui-editor.open`, `.ui-editor-body` — o UIEditor renderiza `ui-editor-full/left/center/right`).
+
+**P3-34** — checkbox FlirGI finalmente FUNCIONAL: `FlirGIController` montado em Scene3D e SceneLevel3D aplica/remove as luzes GI (`flirGI.js` deixa de ser código morto). Validado visualmente (cena mais iluminada com o toggle ON).
+
+**P3-35** — `.env` removido do tracking git (`git rm --cached`; já coberto pelo .gitignore).
+
+**P3-27** — 10 ficheiros mortos removidos: `waterShader.js`, `flirSkyShader.js`, `parallaxOcclusionMapping.js`, `buildingGenerator.js`, `shaderGraphToGLSL.js`, `flirAdaptiveMesh.js`, `instancedRenderer.js`, `forestGenerator.js`, `physicsSystem.rapier.js`, `InstancedObjects.jsx`. (P3-28/29 já tinham sido resolvidos na S17.)
+
+### Regressão — 3 demos sem erros
+
+Build de produção limpo. No editor (browser): Showcase/Arena/Saga carregam e entram em Play Mode sem erros de consola; herói anda, cidade visível, NPCs visíveis. Screenshots `s19-01..15` + `s19-exp-*` + `s19-smoke-*`.
+
+---
+
 ## 🎨 Sessão 14 — Layers, Snapping, InstancedMesh + Warnings Corrigidos
 
 ### C1: Sistema de Layers (estilo Godot) — COMPLETADO

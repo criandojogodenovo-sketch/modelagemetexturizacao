@@ -30,6 +30,19 @@ import {
   resetCamera as resetCameraUtil,
   updateTargetToSelection,
 } from '../../utils/navigationUtils'
+import { applyFlirGI } from '../../utils/flirGI'
+
+// S19 fix (P3-34): FlirGI — o checkbox do SettingsPanel escrevia renderSettings.flirGI
+// mas NADA o consumia (setting quebrado). Agora aplica/remove as luzes GI na cena.
+function FlirGIController({ enabled }) {
+  const { scene } = useThree()
+  useEffect(() => {
+    if (!scene || !enabled) return
+    const gi = applyFlirGI(scene)
+    return () => gi.dispose()
+  }, [scene, enabled])
+  return null
+}
 
 // ----- Componente interno: aplica o fundo da cena -----
 function SceneBackground({ background }) {
@@ -261,6 +274,7 @@ export default function Scene3D() {
     >
       <Suspense fallback={null}>
         <SceneBackground background={background} />
+        <FlirGIController enabled={!!renderSettings?.flirGI} />
 
         {/* Performance Core 3.2 — ShadowOptimizer no Editor (distance culling) */}
         <ShadowOptimizer meshRefs={meshRefs} enabled={true} />

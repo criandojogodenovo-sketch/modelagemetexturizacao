@@ -2499,33 +2499,8 @@ label {
 }
 
 /* ===== UIEditor ===== */
-.ui-editor {
-  position: fixed;
-  top: var(--topbar-h);
-  left: 0;
-  bottom: 0;
-  width: 400px;
-  max-width: 90vw;
-  background: var(--bg-panel);
-  border-right: 1px solid var(--border);
-  z-index: 40;
-  display: flex;
-  flex-direction: column;
-  transform: translateX(-100%);
-  transition: transform 0.22s ease;
-  box-shadow: var(--shadow-panel);
-}
-
-.ui-editor.open {
-  transform: translateX(0);
-}
-
-.ui-editor-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 10px;
-}
-
+/* S19 (P3-33): .ui-editor / .ui-editor.open / .ui-editor-body removidos —
+   classes mortas (o UIEditor.jsx renderiza ui-editor-full/left/center/right) */
 .ui-editor-toolbar {
   display: flex;
   gap: 6px;
@@ -2604,12 +2579,7 @@ label {
   padding: 10px;
 }
 
-@media (max-width: 600px) {
-  .ui-editor {
-    width: 100%;
-    max-width: 100%;
-  }
-}
+/* S19 (P3-33): @media .ui-editor morto removido */
 
 /* ===== ShaderEditor ===== */
 .shader-editor {
@@ -4780,7 +4750,6 @@ label {
 .anim-studio.open,
 .terrain-editor.open,
 .shader-editor.open,
-.ui-editor.open,
 .project-browser.open,
 .debug-console.open,
 .multiplayer-panel.open,

@@ -29,6 +29,7 @@ import AutoInstancing from './AutoInstancing' // S17 (P1-17): InstancedMesh auto
 import { useStore } from '../../store/useStore'
 import { DEFAULT_CAMERA_FAR } from '../../utils/navigationUtils'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
+import { applyFlirGI } from '../../utils/flirGI'
 import { getCameraState, applyCameraInput, applyCameraKeyInput, smoothRotation } from '../../utils/cameraController'
 import { createFlirScriptRuntime, validateGraph } from '../../utils/flirscript/executor'
 import { createFlirCodeRuntime } from '../../utils/flirscript/flircode'
@@ -113,6 +114,18 @@ function FogApplier({ conects }) {
       scene.fog = new THREE.Fog(fogConect.color || '#a0a0a0', fogConect.near || 5, fogConect.far || 50)
     }
   }, [fogConect?.fogType, fogConect?.color, fogConect?.near, fogConect?.far, fogConect?.density, scene])
+  return null
+}
+
+// S19 fix (P3-34): FlirGI ligado ao renderSettings — o checkbox do SettingsPanel
+// escrevia renderSettings.flirGI mas nada o consumia (setting quebrado).
+function FlirGIController({ enabled }) {
+  const { scene } = useThree()
+  useEffect(() => {
+    if (!scene || !enabled) return
+    const gi = applyFlirGI(scene)
+    return () => gi.dispose()
+  }, [scene, enabled])
   return null
 }
 
@@ -1180,7 +1193,14 @@ function GameMode({ activeScene, objects, meshRefs, conectMeshRefs, isGameMode, 
           },
           getPathPoints: (pathId) => {
             const path = (setupScene.conects || []).find((c) => c.instanceId === pathId)
-            return path?.points || null
+            if (!path?.points || path.points.length === 0) return null
+            // S19 fix (P3-31): os waypoints são LOCAIS ao PathObject (o PathMesh
+            // renderiza-os como filhos de um group posicionado em conect.position)
+            // — somar a posição do path para obter coordenadas de mundo. Antes
+            // eram tratados como absolutos: com o PathObject fora da origem, o NPC
+            // patrulhava no sítio errado (offset = -posição do path).
+            const off = path.position || [0, 0, 0]
+            return path.points.map((p) => [p[0] + off[0], p[1] + off[1], p[2] + off[2]])
           },
           // BUG6-FIX: usar moveNpc em vez de movePersonal — semântica mais clara
           // (moveNpc aceita apenas NpcObject; movePersonal também aceita ambos
@@ -1926,6 +1946,9 @@ export default function SceneLevel3D() {
       >
         <Suspense fallback={null}>
           <SceneBackgroundSolid background={background} />
+          {/* S19 fix (P3-34): FlirGI ligado ao renderSettings (antes o checkbox não
+              fazia nada — nada consumia renderSettings.flirGI) */}
+          <FlirGIController enabled={!!renderSettings?.flirGI} />
           <FogApplier conects={activeScene?.conects} />
           <PerformanceTracker />
 

@@ -1433,6 +1433,11 @@ export const useStore = create(
       },
 
       removeConectFromScene: (instanceId) => {
+        // S19 fix (P3-30): não remover conects de layers bloqueadas
+        if (get().isConectLayerLocked(instanceId)) {
+          get()._warnLayerLocked()
+          return
+        }
         const { activeSceneId } = get()
         get()._pushHistory()
         set((s) => ({
@@ -1448,11 +1453,47 @@ export const useStore = create(
 
       selectConect: (instanceId) => set({ selectedConectId: instanceId }),
 
+      // S19 fix (P3-30): verificação central de layer bloqueada — o cadeado das
+      // layers existia no store + LayersPanel mas nunca era enforced (edição e
+      // remoção de conects de layers bloqueadas não eram bloqueadas). Durante o
+      // Play Mode o lock NÃO se aplica (scripts do jogo continuam a funcionar).
+      isConectLayerLocked: (instanceId) => {
+        const { lockedLayers, scenePreviewOpen } = get()
+        if (scenePreviewOpen || lockedLayers.length === 0) return false
+        let target = null
+        for (const sc of get().scenes) {
+          target = (sc.conects || []).find((c) => c.instanceId === instanceId)
+          if (target) break
+        }
+        if (!target) return false
+        return lockedLayers.includes(target.layer || 'world')
+      },
+
+      _warnLayerLocked: (() => {
+        // Throttle: arrastar um gizmo dispara updateConect por frame — sem isto
+        // o toast spammava (cada frame bloqueado = 1 toast)
+        let lastWarn = 0
+        return () => {
+          const now = Date.now()
+          if (now - lastWarn < 2000) return
+          lastWarn = now
+          get().toast('Layer bloqueada — destrava no painel de Layers para editar', 'warning')
+        }
+      })(),
+
       updateConect: (instanceId, patch) => {
-        const { activeSceneId } = get()
+        // S19 fix (P3-30): layers bloqueadas não são editáveis
+        if (get().isConectLayerLocked(instanceId)) {
+          get()._warnLayerLocked()
+          return
+        }
+        // S19 fix (P2-21): procurar em TODAS as cenas — antes só a cena ATIVA era
+        // patchada; um updateConect para um conect de outra cena era silenciosamente
+        // ignorado (quebrava setUIValue e scripts que alteram conects de cenas
+        // não ativas, ex.: durante portais/mudanças de cena).
         set((s) => ({
           scenes: s.scenes.map((sc) =>
-            sc.id === activeSceneId
+            (sc.conects || []).some((c) => c.instanceId === instanceId)
               ? {
                   ...sc,
                   conects: (sc.conects || []).map((c) =>

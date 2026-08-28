@@ -1,4 +1,42 @@
 ---
+Task ID: S19
+Agent: main (GLM)
+Task: Sessão 19 — Export do FlirQuest Showcase para HTML standalone + validação completa fora do editor + pendências P2-21/P2-25 e P3-27..35
+
+Work Log:
+- Export via fluxo REAL do GameExportModal (browser: Showcase → Menu → Exportar Jogo → blob interceptado) — scripts/export-showcase.mjs automatiza o fluxo; HTML de ~490KB com runtime embutido
+- DIAGNÓSTICO 1 — catálogo vazio no export: GameExportModal não copiava o catálogo para projectData.objects (topo, onde o runtime procura desde P2-26) → cidade INVISÍVEL no exportado. FIX: projectData.objects = objects
+- DIAGNÓSTICO 2 — TriggerObject NÃO EXISTIA no runtime exportado: sem mesh, sem física, sem deteção → onEnterZone nunca disparava (portal morto). FIX: mesh semi-transparente + registo em `triggers` + deteção AABB com previousContacts no animate() (réplica do physicsSystem do editor)
+- DIAGNÓSTICO 3 — `mesh.position.set.apply(mesh, ...)` com thisArg ERRADO (10 ocorrências): Euler.set rebentava (`_onChangeCallback is not a function`) e TODAS as posições eram silenciosamente ignoradas (Vector3.set escrevia x/y/z no mesh!). FIX: thisArgs corretos (mesh.position/mesh.rotation/mesh.scale)
+- DIAGNÓSTICO 4 — personagens lançados ao ar no spawn (player até y=8, ~8s de voo): clamp de spawn y ≥ halfHeight+0.02 (penetração profunda → impulso gigante do cannon-es)
+- DIAGNÓSTICO 5 — fixedRotation definido APÓS a construção sem updateMassProperties() → boxes RODAVAM (NPCs deitados, afundados até y=0.35 — reproduzido em isolado com quaternion dump: rot=(0.66,-0.24,0.24)). FIX: body.updateMassProperties()
+- DIAGNÓSTICO 6 (o mais subtil) — fricção do cannon-es "COLA" boxes upright com velocity horizontal setada por código: velocity → 0 em cada substep (WASD/IA mortos com box direito; validado em 7 variantes isoladas — só friction=0 move). FIX: material dedicado flir-character com friction=0 vs chão (padrão da indústria para character controllers); controlo horizontal via velocity por frame + linearDamping. NOTA: o EDITOR tem o mesmo bug latente (friction 0.4-0.8) mas os NPCs movem porque TOMBAM (rotação não travada) —documentado para S20
+- FIX extra: world.step maxSubSteps 3→10 (a ~4fps o exportado avançava a 20% do tempo real = câmara lenta); offset visual _yOffset nos humanoides (origem nos pés vs colisor centrado — pés flutuavam a meio-colisor)
+- FIX extra: botões de sistema PULAR/TIRO/RELOAD com fallback nativo quando nenhum script FlirCode trata o evento (salto físico / gc.shoot() / gc.reload()) — antes NÃO faziam nada (evento perdido)
+- FIX extra: script do portal usava `onEnter` (evento INEXISTENTE — não está em KNOWN_EVENT_NAMES nem no eventMap) → `onEnterZone`; P3-31 portado ao export (waypoints do PathObject somam path.position — também corrigido no editor via getPathPoints)
+- DEBUG API: _debugState() no gameContext (read-only: player/NPCs/bodies/câmara/cena) — permite diagnosticar jogos exportados
+- VALIDAÇÃO EXPORT (scripts/test-exported-game.mjs, 7/7 PASS): load sem erros, NPCs patrulham 3/3, herói anda com W (3.27u), botão ↑ salta (y→2.08), PORTAL muda de cena por proximidade (portal z=-20, teleporta para spawn da Floresta Sombria), inimigos da cena 2 fazem chase com colisão física (empurram o player, param ao alcance de ataque dist<1.2), câmara roda com drag — ZERO page errors/console errors
+- VALIDAÇÃO Arena/Saga exports (scripts/smoke-export.mjs + test-arena-buttons.mjs): botões TIRO/RELOAD/PULAR funcionais (PULAR salta y→2.32, TIRO → "shoot: sem munição!", RELOAD → "munição restaurada para 30")
+- P2-21 FIX: updateConect procura em TODAS as cenas (antes só a ativa — setUIValue em portais quebrado)
+- P2-25 FIX: SkyMesh cleanup em todos os branches (gradient: dispose ANTES de desatribuir; procedural/solid: reset scene.background; hdri: flag `disposed` cancela load async tardio = no leak)
+- P3-30 FIX+VALIDADO: lockedLayers enforced — isConectLayerLocked central + _warnLayerLocked com throttle 2s; updateConect/removeConectFromScene bloqueados; bypass em Play Mode. Teste browser: lock Mundo → rename CityGround bloqueado com toast → unlock → rename funciona
+- P3-31 FIX: getPathPoints (editor) e updateNPCAI (export) somam path.position aos waypoints
+- P3-32 FIX: só o joystick ATIVO (último tocado) escreve em window._flirJoystick; onEnd de outro joystick ignorado (activeJoystickRef no GameUIOverlay)
+- P3-33 FIX: CSS morto .ui-editor/.ui-editor.open/.ui-editor-body removido (3 blocos + ref no grupo .open + media query)
+- P3-34 FIX+VALIDADO: FlirGIController montado em Scene3D + SceneLevel3D consome renderSettings.flirGI (checkbox antes quebrado); VLM confirma cena mais iluminada com toggle ON; flirGI.js sai da lista de código morto
+- P3-35 FIX: git rm --cached .env (.gitignore já cobria)
+- P3-27 FIX: 10 ficheiros mortos removidos (waterShader, flirSkyShader, parallaxOcclusionMapping, buildingGenerator, shaderGraphToGLSL, flirAdaptiveMesh, instancedRenderer, forestGenerator, physicsSystem.rapier, InstancedObjects.jsx); P3-28/29 já resolvidos na S17 (verificado: updatePersonalState chamado + bodyIdToInstance O(1))
+- REGRESSÃO: build produção limpo; 3 demos no editor (Showcase/Arena/Saga) carregam + Play Mode sem erros de consola (herói anda, cidade visível, NPCs visíveis — VLM confirmou)
+- Screenshots: s19-01..15 (editor), s19-exp-01..03 + smoke (exports)
+- Scripts novos: export-showcase.mjs (export automatizado), test-exported-game.mjs (7 testes), smoke-export.mjs, test-arena-buttons.mjs
+
+Stage Summary:
+- Export standalone TOTALMENTE funcional: 6 famílias de bugs corrigidas no runtime exportado (catálogo, TriggerObject, set.apply, spawn launch, fixedRotation+friction glue, botões móveis) — Showcase 7/7 PASS, Arena/Saga smoke PASS
+- Todas as pendências P2-21/P2-25 e P3-27..35 resolvidas (P3-34 deixou de ser setting quebrado e o flirGI.js deixou de ser código morto)
+- 10 ficheiros mortos removidos (-~3000 linhas); .env fora do tracking
+- Conhecimento: bug de fricção do cannon-es em character controllers documentado (existe latente no editor — NPCs movem porque tombam; S20 pode aplicar o mesmo fix friction=0 no editor)
+- Limitações conhecidas do export: ItemObject/CheckpointObject sem mesh/física no runtime exportado (invisíveis); colisores dos objetos do catálogo ausentes no export (cidade atravessável); sintaxe `begincode update` dos demos Arena/Saga não é suportada pelo parser (scripts inertes — IA nativa cobre)
+---
 Task ID: S18
 Agent: main (GLM)
 Task: Sessão 18 — 2 novos bugs graves descobertos e corrigidos (cidade Showcase invisível, NPCs congelados) + validação browser do estado pós-S17

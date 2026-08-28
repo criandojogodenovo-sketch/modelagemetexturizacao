@@ -97,7 +97,14 @@ export default function GameUIOverlay() {
   }
 
   // Joystick move handler — atualiza o joystickRef global
-  const handleJoystickMove = (x, z) => {
+  // S19 fix (P3-32): vários JoystickObjects escreviam todos no MESMO
+  // window._flirJoystick — arrastar dois joysticks (ou soltar um deles)
+  // sobrescrevia/limpava o estado do outro. Agora só o joystick ATIVO
+  // (o último a ser tocado) escreve no global; o onEnd de outro joystick
+  // é ignorado — apenas o dono pode limpar.
+  const activeJoystickRef = useRef(null)
+  const handleJoystickMove = (joystickId, x, z) => {
+    activeJoystickRef.current = joystickId
     if (window._flirJoystick) {
       window._flirJoystick.x = x
       window._flirJoystick.z = z
@@ -105,7 +112,9 @@ export default function GameUIOverlay() {
     }
   }
 
-  const handleJoystickEnd = () => {
+  const handleJoystickEnd = (joystickId) => {
+    if (activeJoystickRef.current !== joystickId) return // não é o dono
+    activeJoystickRef.current = null
     if (window._flirJoystick) {
       window._flirJoystick.x = 0
       window._flirJoystick.z = 0
@@ -260,8 +269,8 @@ export default function GameUIOverlay() {
           size={js.size || 120}
           color={js.color || '#2f81f7'}
           deadzone={js.deadzone ?? 0.1}
-          onMove={handleJoystickMove}
-          onEnd={handleJoystickEnd}
+          onMove={(x, z) => handleJoystickMove(js.instanceId, x, z)}
+          onEnd={() => handleJoystickEnd(js.instanceId)}
         />
       ))}
 

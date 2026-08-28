@@ -543,7 +543,7 @@ function startGame() {
   var camera = (cam.cameraType || cam.type) === 'orthographic'
     ? new THREE.OrthographicCamera(-5, 5, 5, -5, cam.near || 0.1, cam.far || 2000)
     : new THREE.PerspectiveCamera(cam.fov || 60, window.innerWidth / window.innerHeight, cam.near || 0.1, cam.far || 2000)
-  camera.position.set.apply(camera, cam.position || [5, 4, 6])
+  camera.position.set.apply(camera.position, cam.position || [5, 4, 6])
   if (activeView && activeView.rotation) {
     camera.rotation.set(activeView.rotation[0], activeView.rotation[1], activeView.rotation[2], 'YXZ')
   } else {
@@ -554,8 +554,18 @@ function startGame() {
   var world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) })
   world.broadphase = new CANNON.SAPBroadphase(world)
   world.allowSleep = true
+  // S19 FIX (character controller): material dedicado com friction=0 para
+  // personagens. O solver de fricção do cannon-es "cola" um box upright com
+  // velocity horizontal setada por código (o movimento WASD/IA morria: velocity
+  // → 0 em cada substep). Controlo horizontal é feito por velocity por frame
+  // + linearDamping (padrão em character controllers).
+  var charPhysMat = new CANNON.Material('flir-character')
+  var groundPhysMat = new CANNON.Material('flir-ground')
+  world.addContactMaterial(new CANNON.ContactMaterial(charPhysMat, groundPhysMat, { friction: 0, restitution: 0 }))
+  world.addContactMaterial(new CANNON.ContactMaterial(charPhysMat, charPhysMat, { friction: 0.1, restitution: 0 }))
   var bodies = {}
   var meshMap = {}
+  var triggers = {}     // S19: instanceId → { size, position, previousContacts } — TriggerObject
 
   // S17: estado de animação/IA por NPC + player
   var animStates = {}   // instanceId → { t, clock, lastPos:{x,z} }
@@ -738,6 +748,7 @@ function startGame() {
         if (meshMap[k] && meshMap[k].material) meshMap[k].material.dispose?.()
       }
       meshMap = {}
+      triggers = {}
       for (var k2 in bodies) {
         if (bodies[k2]) world.removeBody(bodies[k2])
       }
@@ -811,6 +822,29 @@ function startGame() {
     },
     chasePlayer: function (id) { if (id) gc.globalVars['_chase_' + id] = true },
     stopChase: function (id) { if (id) gc.globalVars['_chase_' + id] = false },
+    // S19: introspeção de debug (read-only) — permite validar/diagnosticar o jogo
+    // exportado (posição do player, NPCs, câmara, cena ativa) sem expor o estado interno.
+    _debugState: function () {
+      var st = { scene: scene ? scene.id : null, npcs: {}, camera: { yaw: camState.yaw, pitch: camState.pitch } }
+      if (player && meshMap[player.instanceId]) {
+        var pm = meshMap[player.instanceId]
+        st.player = [+pm.position.x.toFixed(3), +pm.position.y.toFixed(3), +pm.position.z.toFixed(3)]
+      }
+      for (var id in npcAIs) {
+        if (meshMap[id]) {
+          var nm = meshMap[id]
+          st.npcs[id] = [+nm.position.x.toFixed(3), +nm.position.y.toFixed(3), +nm.position.z.toFixed(3)]
+        }
+      }
+      st.bodies = {}
+      for (var bid in bodies) {
+        st.bodies[bid] = {
+          y: +bodies[bid].position.y.toFixed(3), vy: +bodies[bid].velocity.y.toFixed(3),
+          vx: +bodies[bid].velocity.x.toFixed(3), vz: +bodies[bid].velocity.z.toFixed(3),
+        }
+      }
+      return st
+    },
   }
   window._flirGameContext = gc
 
@@ -841,7 +875,7 @@ function startGame() {
           // ao caminho changeScene — antes a cena inicial usava um cubo)
           mesh = buildHumanoid(conect.color || '#c0392b', '#f4d4b8', false)
           if (conect.scale) mesh.scale.set(conect.scale[0] || 1, conect.scale[1] || 1, conect.scale[2] || 1)
-          mesh.position.set.apply(mesh, conect.position || [0, 0.5, 0])
+          mesh.position.set.apply(mesh.position, conect.position || [0, 0.5, 0])
           scene3d.add(mesh)
           meshMap[conect.instanceId] = mesh
           mesh._name = conect.name; mesh._conect = conect
@@ -850,7 +884,7 @@ function startGame() {
         } else if (conect.type === 'PersonalObject') {
           // S17: player humanoide (verde, com estrela) — igual ao PlayerHumanoidMesh
           mesh = buildHumanoid('#3fb950', '#f4d4b8', true)
-          mesh.position.set.apply(mesh, conect.position || [0, 0.5, 0])
+          mesh.position.set.apply(mesh.position, conect.position || [0, 0.5, 0])
           scene3d.add(mesh)
           meshMap[conect.instanceId] = mesh
           mesh._name = conect.name; mesh._conect = conect
@@ -859,7 +893,7 @@ function startGame() {
           var color = conect.type === 'StaticObject' ? 0x6e7681 : 0x888888
           var geo = new THREE.BoxGeometry(1, 1, 1)
           mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: color, roughness: 0.6 }))
-          mesh.position.set.apply(mesh, conect.position || [0, 0.5, 0])
+          mesh.position.set.apply(mesh.position, conect.position || [0, 0.5, 0])
           mesh.castShadow = true; mesh.receiveShadow = true
           scene3d.add(mesh)
           meshMap[conect.instanceId] = mesh
@@ -875,14 +909,30 @@ function startGame() {
           mass: (conect.type === 'StaticObject' || conect.type === 'StopObject') ? 0 : (conect.mass || 1),
           shape: shape,
           position: new CANNON.Vec3(conect.position[0], conect.position[1], conect.position[2]),
+          material: isCharacter ? charPhysMat : undefined,
         })
         if (conect.type === 'StaticObject') { body.type = CANNON.Body.STATIC; body.mass = 0 }
         if (conect.type === 'StopObject') { body.type = CANNON.Body.KINEMATIC; body.mass = 0 }
         body.fixedRotation = isCharacter ? true : (conect.fixedRotation || false)
+        // S19 FIX: fixedRotation definido APÓS a construção não atualiza a inércia
+        // — sem updateMassProperties() o box RODAVA (tombava com a fricção do chão;
+        // os NPCs do Showcase apareciam deitados e afundavam até y=0.35).
+        if (isCharacter) body.updateMassProperties()
+        // S19 FIX: clamp de spawn para personagens — um spawn com o colisor a
+        // atravessar o chão (ex.: y=0.05 com meio-colisor 0.8) gera penetração
+        // profunda; o cannon-es resolve com um impulso gigante e lança o corpo
+        // ao ar (o player do Showcase chegava a y=8 e levava ~8s a aterrar).
+        if (isCharacter) {
+          var halfH = csz[1] / 2
+          if (body.position.y < halfH + 0.02) body.position.y = halfH + 0.02
+        }
         body.allowSleep = isCharacter ? false : true
         body.linearDamping = isCharacter ? 0.2 : 0.01
         body.angularDamping = isCharacter ? 0.9 : 0.01
         body._conect = conect
+        // S19: offset visual — a origem do humanoide é nos PÉS; o colisor é uma
+        // box centrada no body. Sem isto os pés flutuam a meio-colisor do chão.
+        if (isCharacter && mesh) mesh._yOffset = -(csz[1] / 2)
         world.addBody(body)
         bodies[conect.instanceId] = body
         body.addEventListener('collide', (function (cid) {
@@ -906,7 +956,7 @@ function startGame() {
         terrainGeo.rotateX(-Math.PI / 2)
         terrainGeo.computeVertexNormals()
         var terrainMesh = new THREE.Mesh(terrainGeo, new THREE.MeshStandardMaterial({ color: conect.color || 0x4a7c3a, roughness: 0.85 }))
-        terrainMesh.position.set.apply(terrainMesh, conect.position || [0, 0, 0])
+        terrainMesh.position.set.apply(terrainMesh.position, conect.position || [0, 0, 0])
         terrainMesh.receiveShadow = true
         scene3d.add(terrainMesh)
         meshMap[conect.instanceId] = terrainMesh
@@ -916,6 +966,7 @@ function startGame() {
           mass: 0,
           shape: new CANNON.Plane(),
           position: new CANNON.Vec3(conect.position?.[0] || 0, conect.position?.[1] || 0, conect.position?.[2] || 0),
+          material: groundPhysMat,
         })
         planeBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2)
         world.addBody(planeBody)
@@ -929,7 +980,7 @@ function startGame() {
         if (conect.lightType === 'directional') light = new THREE.DirectionalLight(conect.color || 0xffffff, conect.intensity || 1)
         else if (conect.lightType === 'spot') light = new THREE.SpotLight(conect.color || 0xffffff, conect.intensity || 1)
         else light = new THREE.PointLight(conect.color || 0xffffff, conect.intensity || 1, conect.distance || 10)
-        light.position.set.apply(light, conect.position || [0, 5, 0])
+        light.position.set.apply(light.position, conect.position || [0, 5, 0])
         light.castShadow = conect.castShadow !== false
         scene3d.add(light)
       } else if (conect.type === 'SkyObject' && conect.skyType === 'gradient') {
@@ -944,6 +995,20 @@ function startGame() {
         else scene3d.fog = new THREE.Fog(conect.color || 0xa0a0a0, conect.near || 5, conect.far || 50)
       } else if (conect.type === 'SoundObject' && conect.autoplay && conect.url) {
         try { var audio = new Audio(conect.url); audio.volume = conect.volume || 1; audio.loop = conect.loop || false; audio.play() } catch (e) { }
+      } else if (conect.type === 'TriggerObject') {
+        // S19 FIX (A2): TriggerObject — antes não tinha NENHUMA renderização nem
+        // deteção no runtime exportado → onEnterZone nunca disparava (o portal do
+        // Showcase ficava invisível e morto). Mesh semi-transparente + registo
+        // para deteção AABB no loop animate() (igual ao physicsSystem do editor).
+        var tSize = conect.size || [2, 3, 2]
+        var tGeo = new THREE.BoxGeometry(tSize[0], tSize[1], tSize[2])
+        var tMat = new THREE.MeshBasicMaterial({ color: conect.color || '#8b5cf6', transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+        mesh = new THREE.Mesh(tGeo, tMat)
+        mesh.position.set.apply(mesh.position, conect.position || [0, 1, 0])
+        scene3d.add(mesh)
+        meshMap[conect.instanceId] = mesh
+        mesh._name = conect.name; mesh._conect = conect
+        triggers[conect.instanceId] = { size: tSize, position: conect.position || [0, 1, 0], previousContacts: {} }
       }
 
       // FlirCode para conects — S17 fix (P0-02): rtOpts por-runtime
@@ -971,9 +1036,9 @@ function startGame() {
     var m = obj.material || {}
     var mat = new THREE.MeshStandardMaterial({ color: m.color || '#888', roughness: m.roughness || 0.7, metalness: m.metalness || 0 })
     var mesh = new THREE.Mesh(geo, mat)
-    mesh.position.set.apply(mesh, pos || [0, 0.5, 0])
-    if (rot) mesh.rotation.set.apply(mesh, rot)
-    if (scl) mesh.scale.set.apply(mesh, scl)
+    mesh.position.set.apply(mesh.position, pos || [0, 0.5, 0])
+    if (rot) mesh.rotation.set.apply(mesh.rotation, rot)
+    if (scl) mesh.scale.set.apply(mesh.scale, scl)
     mesh.castShadow = true; mesh.receiveShadow = true
     scene3d.add(mesh)
     return mesh
@@ -1103,7 +1168,27 @@ function startGame() {
         if (el.type === 'Button') dom.onclick = function () {
           // Sistema: Links — navegação automática
           if (el.linkType && el.linkType !== 'none' && gc.linkTo) { gc.linkTo(el.linkType, el.linkTarget); return }
-          gc.triggerUIEvent(el.eventName || 'onClick', { element: el })
+          var evName = el.eventName || 'onClick'
+          gc.triggerUIEvent(evName, { element: el })
+          // S19: botões de sistema — se NENHUM script FlirCode trata o evento,
+          // aplicar a ação nativa (PULAR→salto, TIRO→disparo, RELOAD→recarregar).
+          // Antes estes botões (demos Arena/Saga/Showcase) não faziam nada: o
+          // evento disparava para runtimes sem função onJump/onShoot/onReload.
+          var handledByScript = false
+          for (var rk in runtimes) {
+            if (runtimes[rk].functions && runtimes[rk].functions[evName]) { handledByScript = true; break }
+          }
+          if (!handledByScript) {
+            var pConect = (scene.conects || []).find(function (c) { return c.type === 'PersonalObject' })
+            if (evName === 'onJump' && pConect && pConect.canJump && bodies[pConect.instanceId]) {
+              bodies[pConect.instanceId].velocity.y = pConect.jumpForce || 8
+              dbg('Salto (botão UI)', 'log')
+            } else if (evName === 'onShoot' && gc.shoot) {
+              gc.shoot()
+            } else if (evName === 'onReload' && gc.reload) {
+              gc.reload()
+            }
+          }
         }
         // Post-Audit 4.0 — A3/S1: construção segura via DOM API (sem innerHTML)
         if (el.type === 'Checkbox') {
@@ -1187,8 +1272,20 @@ function startGame() {
         body.velocity.x = (-dx / fd) * speed
         body.velocity.z = (-dz / fd) * speed
       } else if (behavior === 'patrol') {
+        // S19 FIX (A3): port do fix S18 do editor — aceitar waypoints INLINE
+        // (conect.patrolPoints = [[x,y,z],...]) além de PathObject via
+        // patrolPath. Os NPCs do Showcase definem patrolPoints diretamente;
+        // antes o exportado só lia o PathObject → patrulha errada (fallback ±3).
+        // S19 FIX (P3-31): os pontos do PathObject são LOCAIS ao path (o PathMesh
+        // do editor renderiza-os como filhos de um group posicionado) — somar a
+        // posição do path para obter coordenadas de mundo.
         var path = (scene.conects || []).find(function (c) { return c.instanceId === conect.patrolPath })
-        var pts = path && path.points
+        var pts = null
+        if (path && path.points && path.points.length > 0) {
+          var poff = path.position || [0, 0, 0]
+          pts = path.points.map(function (p) { return [p[0] + poff[0], p[1] + poff[1], p[2] + poff[2]] })
+        }
+        if (!pts || pts.length === 0) pts = conect.patrolPoints
         if (!pts || pts.length === 0) {
           // Sem path: patrulha pequena à volta da posição inicial
           pts = [[conect.position[0] - 3, 0, conect.position[2]], [conect.position[0] + 3, 0, conect.position[2]]]
@@ -1216,12 +1313,16 @@ function startGame() {
     lastTime = now
 
     // Physics
-    world.step(1 / 60, delta, 3)
+    // S19: maxSubSteps 10 (antes 3) — em dispositivos lentos (software WebGL,
+    // ~4fps) a simulação avançava só 0.2s por segundo real (câmara lenta). Com 10
+    // substeps a física mantém-se próxima do tempo real.
+    world.step(1 / 60, delta, 10)
     for (var id in bodies) {
       var b = bodies[id]
       var m = meshMap[id]
       if (m) {
         m.position.copy(b.position)
+        if (m._yOffset) m.position.y += m._yOffset
         // S17 (P0-05 equivalente): terreno nunca sincroniza rotação (geometria baked)
         if (!b._isTerrain) m.quaternion.copy(b.quaternion)
       }
@@ -1234,6 +1335,31 @@ function startGame() {
 
     // S17: NPC AI
     updateNPCAI(delta)
+
+    // S19 FIX (A2): TriggerObject — deteção AABB com previousContacts (replica
+    // o physicsSystem do editor). Dispara onEnterZone/onExitZone no runtime
+    // FlirCode do trigger → changeScene("...") do portal funciona no exportado.
+    for (var tid in triggers) {
+      var trg = triggers[tid]
+      var tcontacts = {}
+      for (var bid in bodies) {
+        if (bid === tid) continue
+        var bp = bodies[bid].position
+        if (Math.abs(bp.x - trg.position[0]) < trg.size[0] / 2 &&
+            Math.abs(bp.y - trg.position[1]) < trg.size[1] / 2 &&
+            Math.abs(bp.z - trg.position[2]) < trg.size[2] / 2) tcontacts[bid] = true
+      }
+      for (var ncid in tcontacts) {
+        if (!trg.previousContacts[ncid] && runtimes[tid]) {
+          dbg('Trigger ' + tid + ': enter (' + ncid + ')', 'log')
+          runtimes[tid].triggerEvent('onEnterZone', { other: ncid })
+        }
+      }
+      for (var pcid in trg.previousContacts) {
+        if (!tcontacts[pcid] && runtimes[tid]) runtimes[tid].triggerEvent('onExitZone', { other: pcid })
+      }
+      trg.previousContacts = tcontacts
+    }
 
     // PersonalObject movement — camera-relative (estilo Godot, igual ao editor)
     var playerConect = (scene.conects || []).find(function (c) { return c.type === 'PersonalObject' })
