@@ -4873,3 +4873,8 @@ Novos: `src/utils/animation/animationLayers.js`, `springBones.js`, `motionValues
 4. zustand persist + localStorage partilhado entre browser.newPage() do mesmo contexto (contexts separados isolam; páginas do contexto default NÃO)
 5. JRE headless ≠ JDK: "Toolchain does not provide JAVA_COMPILER" → instalar JDK completo (Temurin via adoptium API)
 6. Sandbox com 2 cores/4GB: heurísticas de deteção mobile por hardware classificam-no mal — deteção por plataforma (UA/touch) para PRESETS, hardware para RUNTIME (AdaptiveQuality)
+
+### Estado do push (S21)
+
+- `78475b4` (feat: código S21 completo — nós procedurais + presets + android/ + testes + APK) → **pushed para origin/main**
+- `422739a` (ci: build-apk.yml) → **commit local, push pendente**: o PAT do remote não tem scope `workflow` (GitHub recusa criar/atualizar ficheiros em .github/workflows/* sem esse scope). Soluções: atualizar o token com o scope `workflow` e `git push`, OU colar o conteúdo do ficheiro na web UI do GitHub (Actions → set up a workflow yourself). O pipeline do workflow está validado localmente (assembleDebug BUILD SUCCESSFUL).
