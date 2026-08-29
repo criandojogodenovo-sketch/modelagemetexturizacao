@@ -22,6 +22,7 @@ import { SSRHiZPass } from '../../utils/rendering/ssrHiZ'
 import { VolumetricFogPass } from '../../utils/rendering/volumetricFog'
 import { FSRPass } from '../../utils/rendering/fsrUpscale'
 import { blitMaterial, createCopyMaterial, createSceneRT } from '../../utils/rendering/fullscreenQuad'
+import { getRealismPreset } from '../../utils/rendering/realismPresets'
 
 export default function RealismController() {
   const { gl, scene, camera } = useThree()
@@ -127,16 +128,21 @@ export default function RealismController() {
     let colorSource = p.sceneRT
 
     // 2. SSR (Hi-Z + temporal) + composite
+    // S21: presets por dispositivo (desktop: 48 steps/50 dist · mobile: 12 steps/25 dist)
+    const preset = getRealismPreset()
     if (p.ssr && ssrEnabled) {
       const params = ssrConect ? {
         intensity: ssrConect.intensity ?? 0.8,
-        maxDistance: ssrConect.maxDistance ?? 50,
+        maxDistance: ssrConect.maxDistance ?? preset.ssr.maxDistance,
         roughnessFade: ssrConect.roughnessFade ?? 0.5,
         thickness: ssrConect.thickness ?? 0.5,
         blend: ssrConect.blend ?? 0.9,
+        // maxSteps do conect >0 (manual) · 0/auto → preset do dispositivo
+        maxSteps: (ssrConect.maxSteps > 0) ? ssrConect.maxSteps : preset.ssr.maxSteps,
       } : {
         intensity: renderSettings?.ssrIntensity ?? 0.8,
-        maxDistance: 50, roughnessFade: 0.5, thickness: 0.5, blend: 0.9,
+        maxDistance: preset.ssr.maxDistance, roughnessFade: 0.5, thickness: 0.5, blend: 0.9,
+        maxSteps: preset.ssr.maxSteps,
       }
       const ssrRT = p.ssr.trace(scene, camera, p.sceneRT, params, dt)
       if (ssrRT) {

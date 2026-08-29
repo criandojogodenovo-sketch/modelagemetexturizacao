@@ -6,6 +6,52 @@ Engine web de modelagem, texturização, animação e edição de cenas 3D — f
 
 ---
 
+## 📱 Sessão 21 — CI de APK no GitHub + Nós Procedurais + Presets de Realismo Mobile
+
+**17/17 testes browser** (`scripts/test-s21.mjs`) + **17/17 testes unitários do compilador** (`test-s21-nodes.mjs`) + **APK gerado e validado localmente** + build limpo.
+
+### 1. CI: APK Android no GitHub Actions (sem Android Studio)
+
+- **`.github/workflows/build-apk.yml`**: em cada push para `main` (ou manual via `workflow_dispatch`) — checkout → Node 20 → `npm install` → `npm run build` → `npx cap sync android` → JDK 21 temurin (com cache gradle) → `./gradlew assembleDebug` → **artifact `flir-engine-apk`** (o APK fica disponível para download na página Actions do repo).
+- **Projeto Android nativo commitado** (`android/`): gerado com `npx cap add android` (Capacitor 8.5, AGP 8.13, Gradle 8.14.3, compileSdk 36, minSdk 24). Os assets web (`assets/public`) ficam fora do git — o `cap sync` regenera-os no CI.
+- **APK validado localmente** neste ambiente (SDK cmdline-tools + Temurin JDK 21 instalados no sandbox): `BUILD SUCCESSFUL in 1m48s` → `app-debug.apk` (5.3MB, `com.flir.engine` v1.0) verificado com `aapt dump badging`. O CI do GitHub usa exatamente os mesmos passos → risco de falha mínimo.
+- APK pronto desta sessão: `download/flir-engine-debug.apk`.
+
+### 2. Nós procedurais no Node Editor (estilo Blender/Unreal)
+
+Três novos nós (secção *procedural*, header roxo) registados no `nodeGraphCompiler.js` — GLSL no shader + **espelho CPU idêntico** para o bake:
+
+| Nó | Inputs | Outputs | GLSL |
+|---|---|---|---|
+| **Voronoi** | uv (vec2?), scale, randomness | `distance` (F1), `distance2` (F2), `color` (hash da célula) | `flirVoronoi()` — células clássicas com jitter 3×3, retorna vec2(F1,F2); `flirVoronoiCell()` para cor |
+| **Wave** | coord (float?), scale, distortion | `value` [-1,1] | `flirWave()` — perfis **seno / triângulo / dente de serra** (param select) |
+| **Noise (fbm)** | uv?, scale | `value` [0,1] | `flirFbm()` agora com **lacunarity** e **persistence** configuráveis + normalização [0,1] |
+
+Fluxo validado no teste T1: adicionar os 3 nós via menu → ligar por drag (`Voronoi.distance→ColorRamp`, `Wave→Roughness`, `Noise→Metalness`) → **Aplicar GLSL** (shader compila sem erros) → **Bake** (avaliador CPU espelhado). Exemplo: `[Voronoi] → [Color Ramp] → [Principled BSDF] → [Material Output]`.
+
+### 3. Presets de realismo por dispositivo (`realismPresets.js`)
+
+Deteção de plataforma (`detectIsMobile`: UA móvel OU touch+ecrã pequeno; a *potência* do dispositivo continua a cargo do `AdaptiveQuality` em runtime) alterna os defaults:
+
+| Parâmetro | Desktop | Mobile |
+|---|---|---|
+| DDGI probes | 48 (4×3×4) @ 64px, 2/frame | **18 (3×2×3) @ 32px, 1/frame**, update 0.35s→0.8s |
+| SSR maxSteps | 48 | **12** (novo uniform `uMaxSteps` no shader Hi-Z) |
+| SSR maxDistance | 50 | **25** |
+| FSR | off, 0.77, nitidez 0.87 | **ON por defeito, 0.6, nitidez 0.7** (+50-100% FPS) |
+
+- O utilizador pode sempre sobrepor (SettingsPanel / SSRObject com novo param **"Passos Hi-Z (0=auto)"**); projetos guardados preservam as suas escolhas — `loadProjectJSON` agora faz **merge** dos renderSettings (antes substituía e apagava chaves não definidas pelo projeto, ex.: demos sem `fsr`).
+
+### Bugs reais encontrados e corrigidos durante a validação
+
+1. **NodeEditor: drag-connect nunca funcionava** — o handler `onUp` lia `connecting` do estado React via closure STALE (valor do render anterior = null) → `TypeError` silencioso; agora os dados da ligação são capturados em const local. Encontrado porque o teste T1 verificou que as edges não eram criadas.
+2. **NodeEditor: grafo default não cabia no canvas** (810px num canvas de ~280px, nós invisíveis/recortados fora do ecrã) → **auto-fit ao abrir** (zoom+pan calculados dos bounds) + novos nós fazem **spawn dentro do view atual** + `scrollIntoView`.
+3. **Type-check de ligações permissivo** (aceitava vecN→float) gerava GLSL inválido (`float v = flirUV()`) → check exato por tipo.
+4. **Alvo de drop 10×10px** minúsculo → `data-socket` agora na linha inteira do input (22px).
+5. **`loadProjectJSON` substituía renderSettings inteiros** → chaves ausentes no projeto apagavam defaults do dispositivo (FSR mobile desaparecia ao carregar demo).
+
+---
+
 ## 🚀 Sessão 20 — Realismo "Ultragigantesco" + Node Editor + Animação Complexa + APK
 
 **17/17 testes automatizados PASS** (`scripts/test-s20.mjs`) + regressão dos 3 demos OK + build limpo.

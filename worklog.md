@@ -4816,3 +4816,60 @@ Novos: `src/utils/animation/animationLayers.js`, `springBones.js`, `motionValues
 4. GLSL ES 1.00: sem conversão implícita int→float em overloads (max/clamp) e sem construtores de array
 5. Euler XYZ pode representar uma rotação Y pura como (π, y', π) — testes de "upright" devem usar quaternion.x/z, nunca Euler.x
 6. R3F: useFrame com prioridade 1 assume o render loop — condicionar a montagem do componente à feature estar ativa
+
+===
+
+## Sessão 21 — CI APK no GitHub + Nós Procedurais + Presets de Realismo Mobile (Task ID: S21)
+
+**Data**: 2026-08-29 · **Agente**: main (GLM) · **Resultado**: 17/17 testes browser + 17/17 unitários + APK gerado e validado localmente + build limpo + CI criado
+
+### 1. CI de APK (GitHub Actions)
+
+- `.github/workflows/build-apk.yml`: push em main / workflow_dispatch → Node 20 → npm install → npm run build → npx cap sync android → JDK 21 temurin (cache gradle) → ./gradlew assembleDebug --no-daemon → artifact `flir-engine-apk` (if-no-files-found: error)
+- `@capacitor/cli` + `@capacitor/android` 8.5.0 em devDependencies; projeto `android/` gerado com `npx cap add android` e commitado (AGP 8.13, Gradle 8.14.3, compileSdk 36, minSdk 24; assets/public fora do git via .gitignore do Capacitor — cap sync regenera no CI)
+- **Validação LOCAL completa** (desvio do plano original): SDK cmdline-tools + platform 36 + build-tools 36 instalados no sandbox (dl.google.com acessível) + Temurin JDK 21 (o JRE do sistema não tinha javac — erro "Toolchain does not provide JAVA_COMPILER"); `./gradlew assembleDebug` → BUILD SUCCESSFUL in 1m48s → app-debug.apk 5.3MB (com.flir.engine v1.0) verificado com aapt dump badging → copiado para download/flir-engine-debug.apk. O CI usa os MESMOS passos → risco mínimo.
+- JDK do workflow: 21 (não 17 como no esboço do utilizador) — Capacitor 8 documenta JDK 21; validado localmente com Temurin 21.
+
+### 2. Nós procedurais (nodeGraphCompiler.js)
+
+- **Voronoi**: `flirVoronoi(uv, scale, randomness)` → vec2(F1,F2) (células 3×3 com jitter via flirHash2) + `flirVoronoiCell()` → cor hash da célula; outputs distance/distance2/color; params scale+randomness
+- **Wave**: `flirWave(coord, scale, distortion, type)` → [-1,1]; perfis seno/triângulo(asin(sin))/dente-de-serra; param select novo no NodeEditor; default coord = flirUV().x (padrão Bands do Blender)
+- **Noise (fbm)**: `flirFbm(p, oct, lacunarity, persistence)` agora com lacunarity/persistence configuráveis + normalização [0,1] (CPU+GLSL idênticos)
+- Espelho CPU (voronoi2/wave1/fbm com lacunarity) para bake/preview — validado com testes unitários Node (17/17: NODE_DEFS, GLSL gerado contém funções, valores plausíveis F1/F2/ramp/clamp)
+- NodeEditor: novos params `select` (dropdown com options) renderizados no inline editor
+
+### 3. Presets de realismo (src/utils/rendering/realismPresets.js — NOVO)
+
+- `detectIsMobile()`: UA móvel OU (maxTouchPoints>1 E min(screen)≤900 — iPadOS que se reporta como Macintosh). NÃO usa cores/memória (deliberado: potência é gerida em runtime pelo AdaptiveQuality; desktop fraco mantém preset desktop porque FSR 0.6 num ecrã grande fica feio)
+- Desktop: DDGI 48 probes@64px 2/frame 0.35s · SSR 48 steps/50 dist · FSR off 0.77/0.87
+- Mobile: DDGI **18 probes@32px 1/frame 0.8s** · SSR **12 steps/25 dist** · FSR **ON 0.6/0.7**
+- SSR: novo uniform `uMaxSteps` no shader Hi-Z (`if (step >= uMaxSteps) break` no loop de travessia) + clamp defensivo 4..48 em trace(); SSRObject ganha param "Passos Hi-Z (0=auto)" — 0 usa o preset do dispositivo
+- useStore: renderSettings iniciais de FSR vêm de `getRealismRenderDefaults()`; SettingsPanel ganha opção "Mobile (0.60x)" no select de escala
+- FlrGIController (Scene3D + SceneLevel3D): createDDGI agora usa o preset (ambas as cenas 3D)
+
+### 4. Bugs encontrados e corrigidos durante a validação (o teste apanhou-os)
+
+1. **NodeEditor drag-connect NUNCA funcionou** (S20 latente): `onUp` lia `connecting` (estado React) via closure stale → null na 1ª ligação → TypeError silencioso; edges não eram criadas. FIX: capturar dados em const local `conn` dentro de startConnect. Detetado porque o teste T1 contou as edges (3 em vez de 5).
+2. **Grafo default não cabia no canvas**: 810px de grafo num canvas de ~280px (painel direito) → nós fora do ecrã (x=1517 num viewport de 1440). FIX: auto-fit ao abrir (zoom = min(canvasW/graphW, canvasH/graphH, 1) + centrar) + scrollIntoView do canvas.
+3. **addNode spawnava fora do view** (60+len*40). FIX: spawn no fundo-centro do view atual com anti-sobreposição.
+4. **Type-check permissivo** (float↔vecN em qualquer direção) gerava GLSL inválido. FIX: check exato `input.type === conn.type`.
+5. **Alvo de drop 10×10px**: FIX: data-socket na linha inteira do input (22px).
+6. **loadProjectJSON substituía renderSettings** (chaves ausentes no projeto apagavam defaults do dispositivo — FSR mobile desaparecia ao carregar demos). FIX: merge `{...get().renderSettings, ...(data.renderSettings||{})}`.
+7. **Deteção mobile por cores/mem**: o sandbox (2 cores/4GB) classificava desktop como mobile. FIX: UA+touch (ver §3).
+
+### 5. Validação
+
+- `scripts/test-s21.mjs` — **17/17 PASS**: T1 nós procedurais (menu+drag+edges+GLSL sem erros+bake), T2 presets (desktop FSR off · mobile iPhone emulado FSR on 0.6 · sem erros WebGL), T3 regressão Play Mode (NPCs 3/3 patrulham de pé, player anda 3.3u com W), T4 SSR(uMaxSteps)+DDGI sem erros de shader
+- `node scripts/test-s21-nodes.mjs` — 17/17 unitários do compilador (fora do browser)
+- `npm run build` limpo (2.0s)
+- APK: BUILD SUCCESSFUL local, artifact em download/flir-engine-debug.apk
+- Screenshots: download/screenshots/s21-{t1-node-editor-procedural, t1-aplicado, t2-mobile-fsr-preset, t3-play-mode, t4-realismo-ssr-ddgi}.png
+
+### Conhecimento-chave desta sessão
+
+1. Playwright + bash sandbox: processos background (vite/gradle) são MORTOS entre invocações do tool — correr servidor+testes NA MESMA invocação, ou foreground com timeout
+2. Closure stale em handlers nativos (window.addEventListener) que leem estado React — capturar dados em const local ANTES de registar o listener
+3. getBoundingClientRect reporta posições não-clippadas (elementos com overflow:hidden) — elementFromPoint devolve null fora do viewport → drops silenciosos
+4. zustand persist + localStorage partilhado entre browser.newPage() do mesmo contexto (contexts separados isolam; páginas do contexto default NÃO)
+5. JRE headless ≠ JDK: "Toolchain does not provide JAVA_COMPILER" → instalar JDK completo (Temurin via adoptium API)
+6. Sandbox com 2 cores/4GB: heurísticas de deteção mobile por hardware classificam-no mal — deteção por plataforma (UA/touch) para PRESETS, hardware para RUNTIME (AdaptiveQuality)

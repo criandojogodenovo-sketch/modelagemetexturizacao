@@ -213,6 +213,7 @@ export default function SettingsPanel({ onClose }) {
                 <Row label="Escala de render">
                   <select value={renderSettings.fsrScale ?? 0.77} onChange={(e) => setRenderSettings({ fsrScale: Number(e.target.value) })}>
                     <option value={0.5}>Performance (0.50x)</option>
+                    <option value={0.6}>Mobile (0.60x)</option>
                     <option value={0.67}>Balanced (0.67x)</option>
                     <option value={0.77}>Quality (0.77x)</option>
                     <option value={0.9}>Ultra Quality (0.90x)</option>

@@ -71,6 +71,7 @@ uniform float uMaxDistance;
 uniform float uRoughnessFade;
 uniform float uThickness;      // em unidades NDC
 uniform float uBlend;
+uniform int   uMaxSteps;       // iterações máx. da travessia Hi-Z (S21 preset mobile/desktop)
 
 float sampleHiZ(vec2 uv, float level) {
   int lv = int(clamp(level, 0.0, 7.0));
@@ -138,6 +139,7 @@ void main() {
   vec2 hitUV = vec2(0.0);
   float prevUVx = sUV.x;
   for (int step = 0; step < 48; step++) {
+    if (step >= uMaxSteps) break;
     vec2 cellCount = max(floor(uResolution / pow(2.0, level + 1.0)), vec2(1.0));
     vec2 cellId = floor(rayUV * cellCount);
     vec2 tExit = cellExit(rayUV, dir, cellId, cellCount);
@@ -249,6 +251,7 @@ export class SSRHiZPass {
         uPrevViewProj: { value: new THREE.Matrix4() },
         uIntensity: { value: 0.8 }, uMaxDistance: { value: 50 },
         uRoughnessFade: { value: 0.5 }, uThickness: { value: 0.02 }, uBlend: { value: 0.9 },
+        uMaxSteps: { value: 48 },
       },
       depthTest: false, depthWrite: false,
     })
@@ -355,8 +358,11 @@ export class SSRHiZPass {
     if (this._disposed) return null
     const p = {
       intensity: 0.8, maxDistance: 50, roughnessFade: 0.5, thickness: 0.5, blend: 0.9,
+      maxSteps: 48,
       ...params,
     }
+    // S21: clamp defensivo — uMaxSteps domina o loop (máx. hardcoded 48)
+    p.maxSteps = Math.max(4, Math.min(48, Math.round(p.maxSteps || 48)))
     this._renderReflectivity(scene, camera)
     this._buildHiZ(sceneRT.depthTexture)
     const dst = this.ssrRT[this.ping]
@@ -387,6 +393,7 @@ export class SSRHiZPass {
     u.uRoughnessFade.value = p.roughnessFade
     u.uThickness.value = Math.max(0.002, p.thickness * 0.04)
     u.uBlend.value = p.blend
+    u.uMaxSteps.value = p.maxSteps // S21: preset desktop 48 / mobile 12
     blitMaterial(this.renderer, this.ssrMat, dst)
     this._prevViewProj.copy(viewProj)
     this._prevValid = true

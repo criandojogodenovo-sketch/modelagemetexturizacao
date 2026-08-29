@@ -92,10 +92,53 @@ export const NODE_DEFS = {
     headerColor: '#8957e5',
     inputs: [{ name: 'uv', type: 'vec2', optional: true }, { name: 'scale', type: 'float', optional: true }],
     outputs: [{ name: 'value', type: 'float' }],
-    defaults: { scale: 4.0, octaves: 4 },
+    defaults: { scale: 4.0, octaves: 4, lacunarity: 2.03, persistence: 0.5 },
     params: [
       { key: 'scale', label: 'Escala', type: 'range', min: 0.5, max: 32, step: 0.5 },
       { key: 'octaves', label: 'Octaves (fbm)', type: 'range', min: 1, max: 6, step: 1 },
+      { key: 'lacunarity', label: 'Lacunaridade', type: 'range', min: 1.5, max: 4, step: 0.01 },
+      { key: 'persistence', label: 'Persistência', type: 'range', min: 0.2, max: 0.9, step: 0.01 },
+    ],
+  },
+  voronoi: {
+    label: 'Voronoi',
+    category: 'procedural',
+    headerColor: '#8957e5',
+    inputs: [
+      { name: 'uv', type: 'vec2', optional: true },
+      { name: 'scale', type: 'float', optional: true },
+      { name: 'randomness', type: 'float', optional: true },
+    ],
+    outputs: [
+      { name: 'distance', type: 'float' },
+      { name: 'distance2', type: 'float' },
+      { name: 'color', type: 'vec3' },
+    ],
+    defaults: { scale: 5.0, randomness: 1.0 },
+    params: [
+      { key: 'scale', label: 'Escala', type: 'range', min: 0.5, max: 32, step: 0.5 },
+      { key: 'randomness', label: 'Aleatoriedade', type: 'range', min: 0, max: 1, step: 0.01 },
+    ],
+  },
+  wave: {
+    label: 'Wave',
+    category: 'procedural',
+    headerColor: '#8957e5',
+    inputs: [
+      { name: 'coord', type: 'float', optional: true },
+      { name: 'scale', type: 'float', optional: true },
+      { name: 'distortion', type: 'float', optional: true },
+    ],
+    outputs: [{ name: 'value', type: 'float' }],
+    defaults: { scale: 8.0, distortion: 0.0, waveType: 'sine' },
+    params: [
+      { key: 'scale', label: 'Escala', type: 'range', min: 0.5, max: 32, step: 0.5 },
+      { key: 'distortion', label: 'Distorção', type: 'range', min: 0, max: 12, step: 0.1 },
+      { key: 'waveType', label: 'Perfil', type: 'select', options: [
+        { value: 'sine', label: 'Seno' },
+        { value: 'triangle', label: 'Triângulo' },
+        { value: 'saw', label: 'Dente de serra' },
+      ] },
     ],
   },
   colorRamp: {
@@ -283,7 +326,37 @@ export function compileNodeGraph(graph) {
         const uvExpr = uvSrc ? emit(uvSrc.node, uvSrc.socket) : 'flirUV()'
         const scaleExpr = scaleSrc ? emit(scaleSrc.node, scaleSrc.socket) : ff(+p.scale || 4)
         const v = fresh()
-        lines.push(`  float ${v} = flirFbm(${uvExpr} * ${scaleExpr}, ${Math.round(+p.octaves || 4)});`)
+        lines.push(`  float ${v} = flirFbm(${uvExpr} * ${scaleExpr}, ${Math.round(+p.octaves || 4)}, ${ff(+p.lacunarity || 2.03)}, ${ff(+p.persistence ?? 0.5)});`)
+        cache.set(key, v)
+        return v
+      }
+      case 'voronoi': {
+        const uvSrc = inputSource(graph, idx, node.id, 'uv')
+        const scaleSrc = inputSource(graph, idx, node.id, 'scale')
+        const randSrc = inputSource(graph, idx, node.id, 'randomness')
+        const uvExpr = uvSrc ? emit(uvSrc.node, uvSrc.socket) : 'flirUV()'
+        const scaleExpr = scaleSrc ? emit(scaleSrc.node, scaleSrc.socket) : ff(+p.scale || 5)
+        const randExpr = randSrc ? emit(randSrc.node, randSrc.socket) : ff(+p.randomness ?? 1)
+        const dists = fresh()
+        lines.push(`  vec2 ${dists} = flirVoronoi(${uvExpr}, ${scaleExpr}, ${randExpr});`)
+        const cellCol = fresh()
+        lines.push(`  vec3 ${cellCol} = flirVoronoiCell(${uvExpr}, ${scaleExpr}, ${randExpr});`)
+        cache.set(`${node.id}:distance`, `${dists}.x`)
+        cache.set(`${node.id}:distance2`, `${dists}.y`)
+        cache.set(`${node.id}:color`, cellCol)
+        return cache.get(key) || `${dists}.x`
+      }
+      case 'wave': {
+        const coordSrc = inputSource(graph, idx, node.id, 'coord')
+        const scaleSrc = inputSource(graph, idx, node.id, 'scale')
+        const distSrc = inputSource(graph, idx, node.id, 'distortion')
+        // default: componente U do UV (padrão Blender "Bands")
+        const coordExpr = coordSrc ? emit(coordSrc.node, coordSrc.socket) : 'flirUV().x'
+        const scaleExpr = scaleSrc ? emit(scaleSrc.node, scaleSrc.socket) : ff(+p.scale || 8)
+        const distExpr = distSrc ? emit(distSrc.node, distSrc.socket) : ff(+p.distortion || 0)
+        const typeIdx = p.waveType === 'triangle' ? 1 : (p.waveType === 'saw' ? 2 : 0)
+        const v = fresh()
+        lines.push(`  float ${v} = flirWave(${coordExpr}, ${scaleExpr}, ${distExpr}, ${typeIdx});`)
         cache.set(key, v)
         return v
       }
@@ -436,21 +509,70 @@ vec4 flirSampleMap(vec2 uvv) {
   return vec4(vec3(0.75 + c * 0.2), 1.0);
 }
 float flirHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+vec2 flirHash2(vec2 p) {
+  return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
+}
 float flirNoise(vec2 p) {
   vec2 i = floor(p), f = fract(p);
   vec2 u = f * f * (3.0 - 2.0 * f);
   return mix(mix(flirHash(i), flirHash(i + vec2(1.0, 0.0)), u.x),
              mix(flirHash(i + vec2(0.0, 1.0)), flirHash(i + vec2(1.0, 1.0)), u.x), u.y);
 }
-float flirFbm(vec2 p, int oct) {
-  float v = 0.0, a = 0.5;
+// fbm com lacunarity/persistence configuráveis (S21) — normalizado [0,1]
+float flirFbm(vec2 p, int oct, float lacunarity, float persistence) {
+  float v = 0.0, a = 0.5, norm = 0.0;
   for (int i = 0; i < 6; i++) {
     if (i >= oct) break;
     v += a * flirNoise(p);
-    p = p * 2.03 + vec2(11.7, 5.3);
-    a *= 0.5;
+    norm += a;
+    p = p * lacunarity + vec2(11.7, 5.3);
+    a *= persistence;
   }
-  return v;
+  return norm > 0.0001 ? v / norm : v;
+}
+// Voronoi clássica com jitter (S21) — retorna vec2(F1, F2)
+vec2 flirVoronoi(vec2 uv, float scale, float randomness) {
+  vec2 p = uv * scale;
+  vec2 n = floor(p);
+  vec2 f = fract(p);
+  float f1 = 8.0;
+  float f2 = 8.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 g = vec2(float(i), float(j));
+      vec2 o = flirHash2(n + g);
+      vec2 r = g + o * randomness - f;
+      float d = dot(r, r);
+      if (d < f1) { f2 = f1; f1 = d; }
+      else if (d < f2) { f2 = d; }
+    }
+  }
+  return vec2(sqrt(f1), sqrt(f2));
+}
+// cor (hash) da célula mais próxima (S21)
+vec3 flirVoronoiCell(vec2 uv, float scale, float randomness) {
+  vec2 p = uv * scale;
+  vec2 n = floor(p);
+  vec2 f = fract(p);
+  vec2 bestG = vec2(0.0);
+  float bestD = 8.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 g = vec2(float(i), float(j));
+      vec2 o = flirHash2(n + g);
+      vec2 r = g + o * randomness - f;
+      float d = dot(r, r);
+      if (d < bestD) { bestD = d; bestG = g; }
+    }
+  }
+  return vec3(flirHash2(n + bestG), 0.0);
+}
+// Wave (S21) — type: 0=seno, 1=triângulo, 2=dente de serra; retorna [-1,1]
+float flirWave(float coord, float scale, float distortion, int type) {
+  float x = coord * scale + distortion;
+  if (type == 1) return asin(clamp(sin(x), -1.0, 1.0)) * 0.6366197;
+  if (type == 2) return fract(x * 0.15915494) * 2.0 - 1.0;
+  return sin(x);
 }
 float flirSmoothstep01(float x) { return x * x * (3.0 - 2.0 * x); }
 vec3 flirRamp(float t, float poss[8], vec3 cols[8], int n) {
@@ -544,10 +666,47 @@ function noise2(x, y) {
   const c = hash2(ix, iy + 1), d = hash2(ix + 1, iy + 1)
   return (a * (1 - ux) + b * ux) * (1 - uy) + (c * (1 - ux) + d * ux) * uy
 }
-function fbm(x, y, oct) {
-  let v = 0, a = 0.5, px = x, py = y
-  for (let i = 0; i < oct; i++) { v += a * noise2(px, py); px = px * 2.03 + 11.7; py = py * 2.03 + 5.3; a *= 0.5 }
-  return v
+function fbm(x, y, oct, lacunarity = 2.03, persistence = 0.5) {
+  let v = 0, a = 0.5, norm = 0, px = x, py = y
+  for (let i = 0; i < oct; i++) {
+    v += a * noise2(px, py)
+    norm += a
+    px = px * lacunarity + 11.7
+    py = py * lacunarity + 5.3
+    a *= persistence
+  }
+  return norm > 0.0001 ? v / norm : v
+}
+function hash22(x, y) {
+  const s1 = Math.sin(x * 127.1 + y * 311.7) * 43758.5453
+  const s2 = Math.sin(x * 269.5 + y * 183.3) * 43758.5453
+  return [s1 - Math.floor(s1), s2 - Math.floor(s2)]
+}
+/** Voronoi CPU — espelha flirVoronoi/flirVoronoiCell (GLSL) */
+function voronoi2(u, v, scale, randomness) {
+  const px = u * scale, py = v * scale
+  const nx = Math.floor(px), ny = Math.floor(py)
+  const fx = px - nx, fy = py - ny
+  let f1 = 8, f2 = 8, bgx = 0, bgy = 0
+  for (let j = -1; j <= 1; j++) {
+    for (let i = -1; i <= 1; i++) {
+      const o = hash22(nx + i, ny + j)
+      const rx = i + o[0] * randomness - fx
+      const ry = j + o[1] * randomness - fy
+      const d = rx * rx + ry * ry
+      if (d < f1) { f2 = f1; f1 = d; bgx = i; bgy = j }
+      else if (d < f2) f2 = d
+    }
+  }
+  const cell = hash22(nx + bgx, ny + bgy)
+  return { f1: Math.sqrt(f1), f2: Math.sqrt(f2), cell: [cell[0], cell[1], 0] }
+}
+/** Wave CPU — espelha flirWave (GLSL); typeIdx 0=seno 1=triângulo 2=serra */
+function wave1(coord, scale, distortion, waveType) {
+  const x = coord * scale + distortion
+  if (waveType === 'triangle') return Math.asin(Math.max(-1, Math.min(1, Math.sin(x)))) * 0.6366197
+  if (waveType === 'saw') { const f = x * 0.15915494; return (f - Math.floor(f)) * 2 - 1 }
+  return Math.sin(x)
 }
 function rampColor(t, stops) {
   if (!stops || stops.length === 0) return [0, 0, 0]
@@ -592,8 +751,41 @@ export function evaluateGraphCPU(graph, u, v, sampleMapFn) {
       }
       case 'noise': {
         const uvSrc = inputSource(graph, idx, node.id, 'uv')
-        const [uu, vv] = uvSrc ? evalSocket(uvSrc.node, uvSrc.socket) : [u, v]
-        result = fbm(uu * (+p.scale || 4), vv * (+p.scale || 4), Math.round(+p.octaves || 4))
+        const scaleSrc = inputSource(graph, idx, node.id, 'scale')
+        const uvv = uvSrc ? evalSocket(uvSrc.node, uvSrc.socket) : [u, v]
+        const uu = Array.isArray(uvv) ? uvv[0] : u
+        const vv2 = Array.isArray(uvv) ? (uvv[1] ?? uvv[0]) : v
+        const sc = scaleSrc ? evalSocket(scaleSrc.node, scaleSrc.socket) : (+p.scale || 4)
+        const scf = Array.isArray(sc) ? sc[0] : sc
+        result = fbm(uu * scf, vv2 * scf, Math.round(+p.octaves || 4), +p.lacunarity || 2.03, +p.persistence ?? 0.5)
+        break
+      }
+      case 'voronoi': {
+        const uvSrc = inputSource(graph, idx, node.id, 'uv')
+        const scaleSrc = inputSource(graph, idx, node.id, 'scale')
+        const randSrc = inputSource(graph, idx, node.id, 'randomness')
+        const uvv = uvSrc ? evalSocket(uvSrc.node, uvSrc.socket) : [u, v]
+        const uu = Array.isArray(uvv) ? uvv[0] : u
+        const vv2 = Array.isArray(uvv) ? (uvv[1] ?? uvv[0]) : v
+        const sc = scaleSrc ? evalSocket(scaleSrc.node, scaleSrc.socket) : (+p.scale || 5)
+        const scf = Array.isArray(sc) ? sc[0] : sc
+        const rnd = randSrc ? evalSocket(randSrc.node, randSrc.socket) : (+p.randomness ?? 1)
+        const rndf = Math.max(0, Math.min(1, Array.isArray(rnd) ? rnd[0] : rnd))
+        const r = voronoi2(uu, vv2, scf, rndf)
+        result = socket === 'distance2' ? r.f2 : socket === 'color' ? r.cell : r.f1
+        break
+      }
+      case 'wave': {
+        const coordSrc = inputSource(graph, idx, node.id, 'coord')
+        const scaleSrc = inputSource(graph, idx, node.id, 'scale')
+        const distSrc = inputSource(graph, idx, node.id, 'distortion')
+        const cIn = coordSrc ? evalSocket(coordSrc.node, coordSrc.socket) : u
+        const cf = Array.isArray(cIn) ? cIn[0] : cIn
+        const sc = scaleSrc ? evalSocket(scaleSrc.node, scaleSrc.socket) : (+p.scale || 8)
+        const scf = Array.isArray(sc) ? sc[0] : sc
+        const dIn = distSrc ? evalSocket(distSrc.node, distSrc.socket) : (+p.distortion || 0)
+        const df = Array.isArray(dIn) ? dIn[0] : dIn
+        result = wave1(cf, scf, df, p.waveType || 'sine')
         break
       }
       case 'mapRange': {

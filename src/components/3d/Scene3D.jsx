@@ -32,6 +32,7 @@ import {
 } from '../../utils/navigationUtils'
 import { applyFlirGI } from '../../utils/flirGI'
 import { createDDGI } from '../../utils/rendering/flirDDGI'
+import { getRealismPreset } from '../../utils/rendering/realismPresets'
 import RealismController from './RealismController'
 
 // S19 fix (P3-34): FlirGI — o checkbox do SettingsPanel escrevia renderSettings.flirGI
@@ -44,10 +45,14 @@ function FlirGIController({ enabled, ddgi, intensity }) {
     if (!scene || !enabled) return undefined
     if (ddgi) {
       // S20/B1: DDGI — grelha de probes + PMREM + fallback
+      // S21: preset por dispositivo (desktop 48 probes@64 · mobile 18 probes@32)
+      const preset = getRealismPreset()
       const gi = createDDGI(scene, gl, {
-        gridDivisions: [4, 3, 4],
-        probeResolution: 64,
-        probesPerFrame: 2,
+        gridDivisions: preset.ddgi.gridDivisions,
+        probeResolution: preset.ddgi.probeResolution,
+        probesPerFrame: preset.ddgi.probesPerFrame,
+        updateInterval: preset.ddgi.updateInterval,
+        assignInterval: preset.ddgi.assignInterval,
       })
       ddgiRef.current = gi
       return () => { gi.dispose(); ddgiRef.current = null }

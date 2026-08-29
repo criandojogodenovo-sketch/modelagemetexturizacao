@@ -130,6 +130,32 @@ export default function NodeEditor({ obj }) {
   }
   const nodes = localNodes || (graph ? graph.nodes : [])
 
+  // ---------- auto-fit (S21): enquadrar o grafo ao abrir ----------
+  // O grafo default (Texture→Ramp→BSDF→Output ≈ 810px) não cabia no canvas
+  // do painel direito (~280px) — os nós ficavam recortados fora do ecrã.
+  // Ao abrir (ou recriar) um grafo, ajusta zoom+pan para enquadrar tudo.
+  const autoFitRef = useRef(false)
+  useEffect(() => {
+    if (!graph) { autoFitRef.current = false; return }
+    if (autoFitRef.current || !containerRef.current) return
+    autoFitRef.current = true
+    // trazer o canvas para a área visível do painel scrollável (instantâneo
+    // para geometria determinística — smooth deixaria o rect a meio do scroll)
+    containerRef.current.scrollIntoView({ block: 'center', behavior: 'auto' })
+    const rect = containerRef.current.getBoundingClientRect()
+    if (rect.width < 40 || !graph.nodes.length) return
+    const minX = Math.min(...graph.nodes.map((n) => n.x))
+    const minY = Math.min(...graph.nodes.map((n) => n.y))
+    const maxX = Math.max(...graph.nodes.map((n) => n.x + 280))
+    const maxY = Math.max(...graph.nodes.map((n) => n.y + 180))
+    const zoom = Math.max(0.2, Math.min(1, (rect.width - 24) / (maxX - minX), (rect.height - 24) / (maxY - minY)))
+    setView({
+      zoom,
+      x: rect.width / 2 - (minX + (maxX - minX) / 2) * zoom,
+      y: rect.height / 2 - (minY + (maxY - minY) / 2) * zoom,
+    })
+  }, [graph])
+
   // ---------- pan / zoom ----------
   const onBackgroundMouseDown = (e) => {
     setSelected(null)
@@ -163,10 +189,15 @@ export default function NodeEditor({ obj }) {
   const startConnect = (e, node, socketName, socketType, isOutput) => {
     e.stopPropagation()
     const rect = containerRef.current.getBoundingClientRect()
-    setConnecting({
+    // S21 fix: capturar os dados da ligação em const local — o handler onUp
+    // via `connecting` do estado React estava STALE (closure do render
+    // anterior) e a 1ª ligação rebentava com TypeError (connecting.fromNode
+    // de null) — edges nunca eram criados via drag.
+    const conn = {
       fromNode: node.id, fromSocket: socketName, type: socketType, isOutput,
       mouse: { x: (e.clientX - rect.left - view.x) / view.zoom, y: (e.clientY - rect.top - view.y) / view.zoom },
-    })
+    }
+    setConnecting(conn)
     const onUp = (ev) => {
       window.removeEventListener('mouseup', onUp)
       setConnecting(null)
@@ -177,12 +208,14 @@ export default function NodeEditor({ obj }) {
         const [toNode, toSocket] = socketEl.dataset.socket.split('::')
         const toDef = NODE_DEFS[nodes.find((n) => n.id === toNode)?.type]
         const input = toDef?.inputs?.find((i) => i.name === toSocket)
-        if (input && (input.type === connecting?.type || connecting?.type === 'float' || input.type === 'float')) {
+        // S21 fix: type check EXATO — o check antigo permitia vecN→float e
+        // gerava GLSL inválido (ex.: float v = flirUV()). Só liga tipos iguais.
+        if (input && input.type === conn.type) {
           // Substituir edge existente no mesmo input
           const edges = graph.edges.filter((e2) => !(e2.to.node === toNode && e2.to.socket === toSocket))
-          let from = { node: connecting.fromNode, socket: connecting.fromSocket }
+          let from = { node: conn.fromNode, socket: conn.fromSocket }
           let to = { node: toNode, socket: toSocket }
-          if (!connecting.isOutput) { const t = from; from = to; to = t }
+          if (!conn.isOutput) { const t = from; from = to; to = t }
           _pushHistory()
           saveGraph({ ...graph, edges: [...edges, { from, to }] })
           toast('Nós ligados', 'success')
@@ -225,9 +258,22 @@ export default function NodeEditor({ obj }) {
     if (!graph) return
     const def = NODE_DEFS[type]
     _pushHistory()
+    // S21: spawn DENTRO do view atual (fundo-centro do canvas visível) —
+    // antes caía em (60+len*40) que ficava frequentemente fora do ecrã
+    let x = 60, y = 60 + graph.nodes.length * 40
+    const r = containerRef.current?.getBoundingClientRect()
+    if (r && r.width > 40) {
+      x = Math.round(((r.width * 0.5) - view.x) / view.zoom / SNAP) * SNAP
+      y = Math.round(((r.height - 80) - view.y) / view.zoom / SNAP) * SNAP
+      // evitar sobreposição exata com nós existentes
+      let guard = 0
+      while (graph.nodes.some((n) => Math.abs(n.x - x) < 60 && Math.abs(n.y - y) < 60) && guard++ < 20) {
+        y += SNAP * 3
+      }
+    }
     saveGraph({
       ...graph,
-      nodes: [...graph.nodes, { id: nid(), type, x: 60 + (graph.nodes.length % 5) * 40, y: 60 + Math.floor(graph.nodes.length / 5) * 60, params: { ...def.defaults } }],
+      nodes: [...graph.nodes, { id: nid(), type, x, y, params: { ...def.defaults } }],
     })
   }
   const applyLive = () => {
@@ -398,7 +444,9 @@ export default function NodeEditor({ obj }) {
                   {def.inputs.map((input) => {
                     const connected = graph.edges.some((e2) => e2.to.node === node.id && e2.to.socket === input.name)
                     return (
-                      <div key={input.name} style={{ display: 'flex', alignItems: 'center', height: 22, paddingLeft: 0 }}>
+                      // S21: data-socket na LINHA inteira — o alvo de drop passa
+                      // de 10×10px para a linha de 22px (muito mais utilizável)
+                      <div key={input.name} data-socket={`${node.id}::${input.name}`} style={{ display: 'flex', alignItems: 'center', height: 22, paddingLeft: 0 }}>
                         <div
                           data-socket={`${node.id}::${input.name}`}
                           title={`${input.name} (${input.type})`}
@@ -426,6 +474,14 @@ export default function NodeEditor({ obj }) {
                       ) : prm.type === 'checkbox' ? (
                         <input type="checkbox" checked={!!node.params?.[prm.key]}
                           onChange={(e) => setParam(node.id, prm.key, e.target.checked)} />
+                      ) : prm.type === 'select' ? (
+                        <select value={node.params?.[prm.key] ?? prm.options?.[0]?.value ?? ''}
+                          onChange={(e) => setParam(node.id, prm.key, e.target.value)}
+                          style={{ flex: 1, minWidth: 0, height: 18, fontSize: 10 }}>
+                          {(prm.options || []).map((opt) => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                          ))}
+                        </select>
                       ) : (
                         <input type={prm.type === 'range' ? 'range' : 'number'}
                           min={prm.min} max={prm.max} step={prm.step}

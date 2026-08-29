@@ -1155,6 +1155,7 @@ export const CONECT_TAXONOMY = [
       roughnessFade: 0.5,
       thickness: 0.5,
       blend: 0.9,
+      maxSteps: 0,
     },
     properties: [
       prop('intensity', 'Intensidade', 'number', 0.8, { min: 0, max: 2, step: 0.05 }),
@@ -1162,6 +1163,7 @@ export const CONECT_TAXONOMY = [
       prop('roughnessFade', 'Fade por rugosidade', 'number', 0.5, { min: 0, max: 1, step: 0.05 }),
       prop('thickness', 'Espessura do ray', 'number', 0.5, { min: 0.01, max: 5, step: 0.05 }),
       prop('blend', 'Blend com cena', 'number', 0.9, { min: 0, max: 1, step: 0.05 }),
+      prop('maxSteps', 'Passos Hi-Z (0=auto)', 'number', 0, { min: 0, max: 48, step: 4 }),
     ],
   },
   {

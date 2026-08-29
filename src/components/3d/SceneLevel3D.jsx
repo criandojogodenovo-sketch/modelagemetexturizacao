@@ -31,6 +31,7 @@ import { DEFAULT_CAMERA_FAR } from '../../utils/navigationUtils'
 import { createPhysicsSystem } from '../../utils/conects/physicsSystem'
 import { applyFlirGI } from '../../utils/flirGI'
 import { createDDGI } from '../../utils/rendering/flirDDGI'
+import { getRealismPreset } from '../../utils/rendering/realismPresets'
 import RealismController from './RealismController'
 import { bindAnimationRuntime, disposeAnimationRuntime, updateAnimationRuntime } from '../../utils/animation/animationRuntime'
 import { getCameraState, applyCameraInput, applyCameraKeyInput, smoothRotation } from '../../utils/cameraController'
@@ -129,10 +130,14 @@ function FlirGIController({ enabled, ddgi, intensity }) {
   useEffect(() => {
     if (!scene || !enabled) return undefined
     if (ddgi) {
+      // S21: preset por dispositivo (desktop 48 probes@64 · mobile 18 probes@32)
+      const preset = getRealismPreset()
       const gi = createDDGI(scene, gl, {
-        gridDivisions: [4, 3, 4],
-        probeResolution: 64,
-        probesPerFrame: 2,
+        gridDivisions: preset.ddgi.gridDivisions,
+        probeResolution: preset.ddgi.probeResolution,
+        probesPerFrame: preset.ddgi.probesPerFrame,
+        updateInterval: preset.ddgi.updateInterval,
+        assignInterval: preset.ddgi.assignInterval,
       })
       ddgiRef.current = gi
       return () => { gi.dispose(); ddgiRef.current = null }

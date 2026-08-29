@@ -1,0 +1,87 @@
+[
+  {
+    "name": "T1 Node Editor abre com canvas",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "T1 menu contém Voronoi",
+    "pass": true,
+    "detail": "18 opções"
+  },
+  {
+    "name": "T1 menu contém Wave",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "T1 menu contém Noise",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "T1 nós Voronoi/Wave/Noise adicionados via UI",
+    "pass": true,
+    "detail": "Texture,Color Ramp,Principled BSDF,Material Output,Voronoi,Wave,Noise"
+  },
+  {
+    "name": "T1 ligações criadas por drag (3 edges)",
+    "pass": true,
+    "detail": "true/true/true"
+  },
+  {
+    "name": "T1 grafo tem ≥5 edges (3 default + 3 novas − substituição)",
+    "pass": true,
+    "detail": "5 edges"
+  },
+  {
+    "name": "T1 GLSL compila sem erros de shader (Voronoi+Wave+Noise)",
+    "pass": true,
+    "detail": "0 erros"
+  },
+  {
+    "name": "T1 bake CPU (espelho JS) sem crash",
+    "pass": true,
+    "detail": "0 page errors"
+  },
+  {
+    "name": "T2 desktop: FSR desligado por defeito",
+    "pass": true,
+    "detail": "checked=false"
+  },
+  {
+    "name": "T2 mobile (iPhone UA): FSR ligado por defeito",
+    "pass": true,
+    "detail": "checked=true"
+  },
+  {
+    "name": "T2 mobile: escala FSR 0.6 por defeito",
+    "pass": true,
+    "detail": "scale=0.6"
+  },
+  {
+    "name": "T2 mobile: sem erros WebGL com FSR ativo",
+    "pass": true,
+    "detail": "0 erros"
+  },
+  {
+    "name": "T3 NPCs patrulham (regressão S20)",
+    "pass": true,
+    "detail": "3/3 moveram"
+  },
+  {
+    "name": "T3 NPCs de pé (sem tombar)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "T3 player anda com W (regressão)",
+    "pass": true,
+    "detail": "deslocou 3.27u"
+  },
+  {
+    "name": "T4 SSR (uMaxSteps) + DDGI sem erros de shader",
+    "pass": true,
+    "detail": "0 erros"
+  }
+]

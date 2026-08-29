@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Flir Engine</string>
+    <string name="title_activity_main">Flir Engine</string>
+    <string name="package_name">com.flir.engine</string>
+    <string name="custom_url_scheme">com.flir.engine</string>
+</resources>

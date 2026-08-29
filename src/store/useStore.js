@@ -38,10 +38,18 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import * as THREE from 'three'
 import { createSceneObject, defaultMaterial, PRIMITIVES } from '../utils/primitives'
 import { findMaterial } from '../utils/materialLibrary'
+// S21: defaults de realismo por dispositivo (mobile: FSR on 0.6 · desktop: FSR off 0.77)
+import { getRealismRenderDefaults } from '../utils/rendering/realismPresets'
 import * as meshOps from '../utils/meshOperations'
 import { createConectInstance, findConectDefinition } from '../utils/conects/taxonomy'
 
 const STORAGE_KEY = 'me3d.project.v1'
+
+// S21 — defaults de realismo por dispositivo: em mobile o FSR inicia LIGADO
+// (scale 0.6, sharpness 0.7); em desktop mantém-se desligado (0.77/0.87).
+// O utilizador pode sempre sobrepor no SettingsPanel — projetos guardados
+// preservam as suas próprias renderSettings (persist vence o default).
+const REALISM_DEFAULTS = getRealismRenderDefaults()
 
 const MAX_HISTORY = 60
 
@@ -94,9 +102,9 @@ const initialScene = {
     fogGodRays: true,
     fogColor: '#a0c4ff',
     fogPenumbra: 0.35,
-    fsr: false,               // AMD FSR upscaling
-    fsrScale: 0.77,           // 0.5 | 0.67 | 0.77 | 0.9
-    fsrSharpness: 0.87,       // 0..2
+    fsr: REALISM_DEFAULTS.fsr,        // AMD FSR upscaling (mobile: true · desktop: false)
+    fsrScale: REALISM_DEFAULTS.fsrScale,    // 0.6 mobile · 0.77 desktop
+    fsrSharpness: REALISM_DEFAULTS.fsrSharpness, // 0.7 mobile · 0.87 desktop
     flirAdaptiveMesh: false,
     shadowOptimizations: true,
     shadowDistance: 20,
@@ -1977,7 +1985,11 @@ export const useStore = create(
             uiScreens: data.uiScreens || [],
             activeUIScreenId: data.uiScreens?.[0]?.id || null,
             // Render settings + project name (se vierem do projeto)
-            renderSettings: data.renderSettings || get().renderSettings,
+            // S21 fix: MERGE em vez de substituição — projetos que não definem
+            // uma chave (ex.: demos sem 'fsr') apagavam os defaults por
+            // dispositivo (mobile FSR on). Chaves explícitas do projeto
+            // continuam a vencer (intenção do utilizador preservada).
+            renderSettings: { ...get().renderSettings, ...(data.renderSettings || {}) },
             projectName: data.projectName || get().projectName,
             // History — limpar (não desfazer para o projeto anterior)
             past: [],
