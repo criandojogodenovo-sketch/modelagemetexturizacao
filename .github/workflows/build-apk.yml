@@ -1,0 +1,148 @@
+name: Build APK
+
+# Cloud Build do APK.
+#
+# Acionado por:
+#  - repository_dispatch (event_type: build-apk) — disparado pelo site (Vercel)
+#    via /api/build-apk. O projeto do utilizador foi guardado pela função
+#    serverless em builds/<buildId>.json no branch `apk-projects` (o
+#    client_payload tem um limite HARD de ~64KB e projetos reais têm
+#    centenas de KB, logo o projeto viaja fora do payload).
+#  - workflow_dispatch — execução manual pelo GitHub UI (APK do editor,
+#    sem projeto embebido).
+on:
+  repository_dispatch:
+    types: [build-apk]
+  workflow_dispatch:
+
+permissions:
+  contents: write # necessário para ler o branch apk-projects e criar o Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Projeto do utilizador: obtido do branch apk-projects e escrito em
+      # public/embedded-project.json — o Vite copia-o para dist/, o cap sync
+      # empacota-o no APK, e a app carrega-o no arranque
+      # (src/hooks/useEmbeddedProject.js) entrando direto em Play Mode.
+      # Em workflow_dispatch (manual) não há client_payload → APK do editor.
+      - name: Write embedded project
+        if: ${{ github.event_name == 'repository_dispatch' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_ID: ${{ github.event.client_payload.buildId }}
+        run: |
+          mkdir -p public
+          gh api "repos/${{ github.repository }}/contents/builds/${BUILD_ID}.json?ref=apk-projects" \
+            --jq .content | base64 -d > public/embedded-project.json
+          echo "Projeto embebido: $(wc -c < public/embedded-project.json) bytes (build ${BUILD_ID})"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      # Capacitor 8 + AGP 8.13: JDK 21 (temurin) — requisito documentado do
+      # Capacitor 8; JDK 17 é o mínimo do AGP mas 21 é a versão suportada.
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Build APK
+        run: cd android && ./gradlew assembleDebug --no-daemon
+
+      # Tag do release: apk-<buildId> quando disparado pelo site (o buildId
+      # viaja no client_payload e é o mesmo que o browser usa no polling),
+      # senão apk-run-<run_id> para execuções manuais.
+      - name: Compute release tag
+        id: tag
+        run: echo "tag=apk-${{ github.event.client_payload.buildId || github.run_id }}" >> "$GITHUB_OUTPUT"
+
+      # Artifact fica disponível na UI do Actions (debug/backup).
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flir-engine-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      # O APK é publicado como asset de Release (repo público → URL pública,
+      # sem autenticação). A função /api/build-apk/download apenas redireciona
+      # (302) para esta URL — contorna o limite HARD de 4.5MB do corpo de
+      # resposta das Vercel Functions (o APK debug tem ~5.3MB, e o proxy
+      # zip→extrair→re-enviar falharia com 413).
+      - name: Publish APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # Se o release já existir (re-run do job), remove-o primeiro
+          gh release view "$TAG" && gh release delete "$TAG" --yes --cleanup-tag || true
+          gh release create "$TAG" \
+            android/app/build/outputs/apk/debug/app-debug.apk \
+            --title "APK $TAG" \
+            --notes "APK gerado pelo Cloud Build (debug). Projeto embebido: ${{ github.event_name == 'repository_dispatch' && 'sim' || 'não (editor)' }}." \
+            --prerelease
+
+      # Higiene 1: apagar o ficheiro do projeto do branch apk-projects
+      # (o APK já o tem embebido; o branch não deve acumular projetos).
+      # Corre sempre — mesmo se o build falhar.
+      - name: Cleanup project file
+        if: ${{ always() && github.event_name == 'repository_dispatch' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_ID: ${{ github.event.client_payload.buildId }}
+        run: |
+          SHA=$(gh api "repos/${{ github.repository }}/contents/builds/${BUILD_ID}.json?ref=apk-projects" --jq .sha 2>/dev/null || true)
+          if [ -n "$SHA" ]; then
+            gh api -X DELETE "repos/${{ github.repository }}/contents/builds/${BUILD_ID}.json" \
+              -f message="cleanup: remove project ${BUILD_ID} [auto]" \
+              -f sha="$SHA" -f branch=apk-projects || true
+            echo "Projeto ${BUILD_ID} apagado do branch apk-projects"
+          fi
+          # Varrer builds/ órfãos com mais de 1 dia (epoch no nome do ficheiro)
+          LIMIT=$(( $(date -u +%s) - 86400 ))
+          gh api "repos/${{ github.repository }}/contents/builds?ref=apk-projects" --jq '.[].name' 2>/dev/null | while read -r f; do
+            EPOCH=$(echo "$f" | cut -d'-' -f1)
+            if [[ "$EPOCH" =~ ^[0-9]+$ ]] && [ "$EPOCH" -lt "$LIMIT" ]; then
+              FSHA=$(gh api "repos/${{ github.repository }}/contents/builds/${f}?ref=apk-projects" --jq .sha 2>/dev/null || true)
+              if [ -n "$FSHA" ]; then
+                gh api -X DELETE "repos/${{ github.repository }}/contents/builds/${f}" \
+                  -f message="cleanup: stale ${f} [auto]" \
+                  -f sha="$FSHA" -f branch=apk-projects || true
+                echo "Stale removido: $f"
+              fi
+            fi
+          done
+
+      # Higiene 2: releases apk-* com mais de 7 dias são removidos para o
+      # repo não acumular APKs antigos (não pode falhar o build).
+      - name: Cleanup old APK releases
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LIMIT=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          gh release list --json tagName,createdAt --limit 100 \
+            | jq -r ".[] | select(.tagName | startswith(\"apk-\")) | select(.createdAt < \"$LIMIT\") | .tagName" \
+            | while read -r t; do
+                echo "A remover release antigo: $t"
+                gh release delete "$t" --yes --cleanup-tag || true
+              done
