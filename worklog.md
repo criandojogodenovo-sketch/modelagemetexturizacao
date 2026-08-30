@@ -4934,3 +4934,10 @@ APK: useEmbeddedProject.js carrega o projeto no arranque → hideHome → Play M
 3. **Testar o fluxo real** após (1)+(2): clicar "Gerar APK" no site publicado e validar o APK instalado
 4. Projetos >4MB: evoluir para Vercel Blob/KV (upload direto, passar só o ID)
 5. `status.js` usa `per_page=20` — com >20 repository_dispatch/hora pode perder runs (aumentar per_page ou filtrar por data na API)
+
+### Estado final do push (S22)
+
+- `5800ce0` (feat: cloud APK build — api/* + UI + hooks + testes + docs) → **pushed para origin/main** ✓
+- `6ea5ca7` (ci: workflow build-apk.yml reescrito) → **commit local, push bloqueado**: o PAT não tem scope `workflow` (o commit 2a3171c antigo foi rebaseado para fora do histórico — continha o YAML corrompido)
+- **Para ativar o Cloud Build**: (a) editar o token no GitHub (Settings → Developer settings → Tokens) adicionando o scope `workflow` e correr `git push`, OU (b) criar o ficheiro manualmente na web UI (Actions → "set up a workflow yourself" → colar o conteúdo de `.github/workflows/build-apk.yml` — cópia também em `download/build-apk.yml`)
+- Depois: configurar na Vercel GITHUB_TOKEN/GITHUB_OWNER/GITHUB_REPO e testar "Gerar APK" no site publicado
