@@ -6,6 +6,67 @@ Engine web de modelagem, texturização, animação e edição de cenas 3D — f
 
 ---
 
+## ☁️ Sessão 22 — Cloud Build de APK no Site (Gerar APK sem PC)
+
+O utilizador do site (deploy Vercel) clica em **"Gerar APK"** no modal de exportação e recebe
+o APK do seu jogo compilado na nuvem — **sem PC, sem Android Studio**. Fluxo:
+
+```
+Browser ──POST {project}──▶ /api/build-apk (Vercel serverless)
+                              │ 1. guarda o projeto em builds/<buildId>.json
+                              │    no branch dedicado apk-projects (Contents API)
+                              │ 2. repository_dispatch { buildId }  ← payload mínimo
+                              ▼
+                    GitHub Actions (.github/workflows/build-apk.yml)
+                    gh api → public/embedded-project.json
+                    npm build → cap sync → gradlew assembleDebug
+                    → publica APK num Release (tag apk-<buildId>)
+                    → apaga o ficheiro do projeto do branch
+                              │
+Browser ◀──polling 5s──────── /api/build-apk/status?buildId=...
+Browser ◀──302 redirect────── /api/build-apk/download?buildId=... → asset público do Release
+```
+
+No APK, o jogo do utilizador fica embebido: `src/hooks/useEmbeddedProject.js` carrega o
+`embedded-project.json` no arranque e entra direto em Play Mode.
+
+### Ficheiros
+- `api/build-apk.js` — guarda o projeto no branch `apk-projects` + dispara o workflow
+- `api/build-apk/status.js` — estado do build (associação buildId→run por timestamp, sem KV)
+- `api/build-apk/download.js` — 302 para o asset público do Release
+- `.github/workflows/build-apk.yml` — CI: obtém o projeto do branch, compila o APK,
+  publica-o num Release público e faz limpeza (ficheiro do projeto + releases >7 dias)
+- `src/hooks/useEmbeddedProject.js` — carrega o projeto embebido no arranque do APK
+
+### Variáveis de ambiente na Vercel (obrigatórias)
+| Variável | Valor | Notas |
+|---|---|---|
+| `GITHUB_TOKEN` | token com scope `repo` (e `workflow` para o push inicial do YAML) | guardar como **segredo** |
+| `GITHUB_OWNER` | `criandojogodenovo-sketch` | |
+| `GITHUB_REPO` | `modelagemetexturizacao` | |
+
+### Decisões técnicas importantes (tudo testado empiricamente)
+- **Projeto fora do payload:** o `client_payload` do repository_dispatch tem um limite
+  **HARD ~64KB** (testado: 64KB→204, 100KB→422 "client_payload is too large"). O projeto
+  Showcase tem **421KB** → o projeto é commitado no branch dedicado `apk-projects`
+  (Contents API, testado com 421KB → 201) e o payload leva apenas o `buildId`.
+- **Download por redirect (não proxy):** as Vercel Functions têm um limite **hard de 4.5MB**
+  no corpo da resposta e o APK debug tem ~5.3MB — o padrão "descarregar zip do artifact →
+  extrair com adm-zip → re-enviar" falha com 413. Solução: o workflow publica o APK como
+  asset de Release (repo público → URL pública sem auth) e a função apenas redireciona (302).
+  **Zero dependências novas** (adm-zip/jszip não foram necessárias).
+- **Limite de 4MB por projeto:** imposto pelo limite do request body das Vercel Functions
+  (4.5MB). Evolução futura para projetos maiores: Vercel Blob/KV.
+- **buildId sem estado:** `"<epoch>-<hex>"` — o /status encontra o run certo por timestamp,
+  sem precisar de armazenamento partilhado entre invocações serverless.
+- **Privacidade:** repo público → o ficheiro do projeto no branch é visível apenas durante
+  o build (apagado no fim, mesmo se o build falhar). O APK (Release) é público de qualquer
+  forma.
+- **Rate limit:** máx. 3 builds por IP / 10 min (em memória, por instância) para proteger
+  os minutos de Actions.
+
+---
+
 ## 📱 Sessão 21 — CI de APK no GitHub + Nós Procedurais + Presets de Realismo Mobile
 
 **17/17 testes browser** (`scripts/test-s21.mjs`) + **17/17 testes unitários do compilador** (`test-s21-nodes.mjs`) + **APK gerado e validado localmente** + build limpo.

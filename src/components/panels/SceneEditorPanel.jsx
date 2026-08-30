@@ -341,7 +341,17 @@ function SceneListItem({ scene, isActive, onSelect, onDuplicate, onDelete, onRen
 
 // Editor da câmara de jogo
 function GameCameraEditor({ scene, onUpdate }) {
-  const cam = scene.gameCamera
+  // S22 fix: projetos legados/parciais podem vir sem gameCamera — fallback
+  // com o shape canónico (evita crash "Cannot read properties of undefined")
+  const cam = scene.gameCamera || {
+    type: 'perspective',
+    position: [5, 4, 6],
+    rotation: [0, 0, 0],
+    fov: 50,
+    near: 0.1,
+    far: 2000,
+    orthoSize: 5,
+  }
   return (
     <div className="panel-section">
       <h4>Câmara de Jogo</h4>

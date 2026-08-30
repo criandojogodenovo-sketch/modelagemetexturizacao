@@ -28,3 +28,7 @@ skills/
 .netlify
 .env
 .env.local
+
+# Projeto embebido no APK — gerado pelo Cloud Build (GitHub Actions),
+# nunca commitado (cada build de APK escreve o projeto do utilizador)
+public/embedded-project.json

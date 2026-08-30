@@ -4,6 +4,14 @@
     "api/marketplace/**/*.js": {
       "memory": 256,
       "maxDuration": 10
+    },
+    "api/build-apk.js": {
+      "memory": 256,
+      "maxDuration": 30
+    },
+    "api/build-apk/*.js": {
+      "memory": 256,
+      "maxDuration": 30
     }
   },
   "rewrites": [
@@ -14,6 +22,9 @@
     { "source": "/api/marketplace/games", "destination": "/api/marketplace/games" },
     { "source": "/api/marketplace/games/(.*)", "destination": "/api/marketplace/games" },
     { "source": "/api/marketplace/templates", "destination": "/api/marketplace/templates" },
-    { "source": "/api/marketplace/templates/(.*)", "destination": "/api/marketplace/templates" }
+    { "source": "/api/marketplace/templates/(.*)", "destination": "/api/marketplace/templates" },
+    { "source": "/api/build-apk", "destination": "/api/build-apk" },
+    { "source": "/api/build-apk/status", "destination": "/api/build-apk/status" },
+    { "source": "/api/build-apk/download", "destination": "/api/build-apk/download" }
   ]
 }

@@ -64,6 +64,7 @@ import ErrorBoundary from './components/ui/ErrorBoundary'
 import { useStore } from './store/useStore'
 import { useIndexedDBSync } from './hooks/useIndexedDBSync'
 import { useAutosave } from './hooks/useAutosave'
+import { useEmbeddedProject } from './hooks/useEmbeddedProject'
 
 export default function App() {
   const ui = useStore((s) => s.ui)
@@ -133,6 +134,9 @@ export default function App() {
   useIndexedDBSync()
   // Autosave inteligente (ItsMagic-style) — dirty flag + save a cada 5s
   useAutosave()
+  // Projeto embebido no APK (Cloud Build) — carrega o jogo do utilizador
+  // no arranque e entra em Play Mode. No site/dev o ficheiro não existe.
+  useEmbeddedProject()
 
   // Loop de animação
   useEffect(() => {

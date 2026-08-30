@@ -4878,3 +4878,59 @@ Novos: `src/utils/animation/animationLayers.js`, `springBones.js`, `motionValues
 
 - `78475b4` (feat: código S21 completo — nós procedurais + presets + android/ + testes + APK) → **pushed para origin/main**
 - `422739a` (ci: build-apk.yml) → **commit local, push pendente**: o PAT do remote não tem scope `workflow` (GitHub recusa criar/atualizar ficheiros em .github/workflows/* sem esse scope). Soluções: atualizar o token com o scope `workflow` e `git push`, OU colar o conteúdo do ficheiro na web UI do GitHub (Actions → set up a workflow yourself). O pipeline do workflow está validado localmente (assembleDebug BUILD SUCCESSFUL).
+
+---
+
+## Sessão 22 — Cloud Build de APK no Site (Vercel serverless + GitHub Actions)
+
+**Objetivo**: utilizador do site (Vercel) clica "Gerar APK" e recebe o APK do SEU jogo compilado na nuvem — sem PC nem Android Studio.
+
+### Arquitetura implementada (após testes empíricos que invalidaram o desenho inicial)
+
+```
+Browser ─POST {project}─▶ /api/build-apk (Vercel) ─▶ branch apk-projects: builds/<buildId>.json (Contents API)
+                                                        └▶ repository_dispatch { buildId } (payload mínimo)
+       ◀─polling 5s──── /api/build-apk/status?buildId ─ GitHub Actions runs API (match por timestamp)
+       ◀─302──────────── /api/build-apk/download?buildId ─ Release público apk-<buildId>
+Workflow: gh api projeto → public/embedded-project.json → build → cap sync → assembleDebug → Release → cleanup (ficheiro + releases >7d)
+APK: useEmbeddedProject.js carrega o projeto no arranque → hideHome → Play Mode direto
+```
+
+### Ficheiros novos/alterados
+- `.github/workflows/build-apk.yml` — reescrito: repository_dispatch + workflow_dispatch, projeto do branch, JDK 21, Release público, 2 steps de cleanup (ficheiro do projeto `if: always()` + releases apk-* >7 dias); **corrige o YAML corrompido do commit 2a3171c** (`branches: ain]`)
+- `api/build-apk.js` — valida projeto (≤4MB), rate limit 3/IP/10min em memória, garante branch `apk-projects`, PUT contents, dispatch só com buildId; apaga o ficheiro se o dispatch falhar
+- `api/build-apk/status.js` — run certo = mais antigo `repository_dispatch` criado após epoch do buildId (margem 90s), devolve runId/htmlUrl/downloadUrl; 'unknown' após 15 min
+- `api/build-apk/download.js` — verifica Release apk-<buildId> e 302 para o asset público
+- `src/hooks/useEmbeddedProject.js` + hook no App.jsx — fetch './embedded-project.json' (cache no-store) → loadProjectJSON → hideHome → openScenePreview (só se tem cenas); sem cleanup flag (fetch = macrotask, hidratação persist = microtask → ordem garantida)
+- `src/components/panels/GameExportModal.jsx` — secção "📱 Gerar APK (Cloud Build)": idle/building/ready/error, elapsed + barra progresso estimada (cap 95%), polling 5s com timeout 15 min, link run do GitHub, download `<a download>`, "Tentar novamente", guard de 4MB client-side
+- `src/components/panels/SceneEditorPanel.jsx` — **bug fix**: GameCameraEditor crashava com `scene.gameCamera` undefined (projetos legados/parciais) → fallback canónico
+- `vercel.json` — functions (256MB/30s) + rewrites para os 3 endpoints
+- `.gitignore` — `public/embedded-project.json` (gerado por build, nunca commitado)
+- `README.md` — secção S22 com fluxo, env vars e decisões técnicas
+
+### Descobertas empíricas (testadas com o token, documentadas)
+1. **client_payload ~64KB HARD**: 64KB→204, 100KB→422 "client_payload is too large". Showcase = **421KB** (gzip só 178KB — dados de alta entropia) → projeto TEM de viajar fora do payload
+2. **Gist**: token sem scope gist → 404. **Contents API com 421KB → 201** ✓ (branch apk-projects, testado + apagado)
+3. **Vercel Function response limit 4.5MB HARD** (docs ago/2026): APK debug = 5.3MB → proxy zip→adm-zip→re-envio falha 413 → **Release público + 302 redirect** (zero deps, adm-zip desnecessária)
+4. Repo é **público** → assets de Release descarregáveis sem auth
+
+### Validação
+- `npm run build` limpo
+- `scripts/test-s22.mjs` — **30/30 PASS**: handlers importam (Node), workflow YAML validado (python yaml + asserts), fluxo UI completo COM API MOCKADA (route interception: POST captura projeto com scenes=2/objects=46 do Showcase real, polling queued→in_progress→completed, download dispara com filename flir-engine.apk), estado de erro 500 com retry, **projeto embebido end-to-end** (public/embedded-project.json → sem HomePage, Play Mode overlay, cena ativa correta), regressão Play Mode (entra/sai com Esc)
+- `scripts/test-s21.mjs` regressão — **17/17 PASS** (nós procedurais, presets mobile, NPCs, SSR/DDGI)
+- Fluxo REAL (Vercel + Actions) não testável neste sandbox (sem deploy Vercel; workflow ainda não está no origin) — honestamente documentado
+
+### Conhecimento-chave desta sessão
+1. Playwright `isVisible({timeout})` **ignora o timeout** — usar `waitFor()` para asserções que dependem de tempo
+2. `getByText('APK pronto')` colidia com o toast "APK pronto a descarregar!" (strict mode) — textos de UI e toasts devem ser distinguíveis
+3. Cenário sem `gameCamera` crasha o SceneEditorPanel (TypeError em `cam.type`) — qualquer loader externo (embedded/APK) deve assumir projetos parciais; componentes defensivos com shape canónico
+4. Bash tool: processos órfãos (chromium) herdam os pipes da tool → timeouts "fantasma". Redirecionar output dos scripts para ficheiros e pkill no fim da MESMA invocação
+5. `cd X && cmd &` — o `&` parte a cadeia; comandos seguintes correm no CWD original. Usar paths absolutos
+6. Testar limites de API empiricamente antes de desenhar arquitetura: poupou uma implementação de proxy que falharia em produção (413)
+
+### Pendências / próximas sessões
+1. **Ativar o workflow no GitHub**: o push de `.github/workflows/*` requer token com scope `workflow` (o atual não tem — ver S21). Sem isto, o dispatch devolve 422 (workflow inexistente). Alternativa: colar o YAML na web UI do GitHub
+2. **Configurar env vars na Vercel**: GITHUB_TOKEN (segredo), GITHUB_OWNER=criandojogodenovo-sketch, GITHUB_REPO=modelagemetexturizacao
+3. **Testar o fluxo real** após (1)+(2): clicar "Gerar APK" no site publicado e validar o APK instalado
+4. Projetos >4MB: evoluir para Vercel Blob/KV (upload direto, passar só o ID)
+5. `status.js` usa `per_page=20` — com >20 repository_dispatch/hora pode perder runs (aumentar per_page ou filtrar por data na API)

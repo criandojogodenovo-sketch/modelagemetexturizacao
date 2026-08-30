@@ -1,0 +1,158 @@
+{
+  "session": 22,
+  "date": "2026-08-30T12:25:41.824Z",
+  "total": 30,
+  "pass": 30,
+  "results": [
+    {
+      "name": "API ../api/build-apk.js importa e exporta handler",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "API ../api/build-apk/status.js importa e exporta handler",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "API ../api/build-apk/download.js importa e exporta handler",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Workflow tem repository_dispatch (build-apk)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Workflow tem workflow_dispatch",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Workflow escreve projeto embebido",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Workflow publica APK em Release",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Workflow usa JDK 21 (Capacitor 8)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Workflow faz upload de artifact",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T3: Botão \"Gerar APK\" visível no modal",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T3: Estado \"A gerar APK...\" durante o build",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T3: Barra de progresso presente",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T3: Estado \"APK pronto\" após polling",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T3: Link \"Descarregar APK\" presente",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T3: POST enviou o projeto (cenas > 0)",
+      "pass": true,
+      "detail": "scenes=2"
+    },
+    {
+      "name": "T3: POST inclui catálogo de objetos (P2-26)",
+      "pass": true,
+      "detail": "objects=46"
+    },
+    {
+      "name": "T3: Download do APK disparado",
+      "pass": true,
+      "detail": "9962 bytes"
+    },
+    {
+      "name": "T3: Ficheiro sugerido flir-engine.apk",
+      "pass": true,
+      "detail": "flir-engine.apk"
+    },
+    {
+      "name": "T3: Sem page errors",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T4: Mensagem de erro da API exibida",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T4: Botão \"Tentar novamente\" presente",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T4: Sem page errors",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T5: Projeto embebido carregado (console log)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T5: HomePage saltada (sem botão Showcase)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T5: Play Mode automático (overlay visível)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T5: Cena ativa é a do projeto embebido",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T5: Sem page errors",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T6: Play Mode abre (overlay)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T6: Escape fecha o Play Mode",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "T6: Sem page errors",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}
